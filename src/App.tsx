@@ -105,6 +105,7 @@ import {
   addTaskToMarkdown,
   assignTaskIdToTask,
   autoAssignAllMissingTaskIds,
+  deleteSectionFromMarkdown,
   deleteTaskFromMarkdown,
   findDependentTasks,
   moveTaskToGroupInMarkdown,
@@ -604,13 +605,30 @@ export default function App() {
     const handleBatchAssignEvent = () => {
       handleAutoAssignAllTaskIds();
     };
+    const handleDeleteSectionEvent = (e: any) => {
+      const { groupTitle, shapeId } = e.detail || {};
+      if (groupTitle) {
+        setMarkdownInput((currentMd) => deleteSectionFromMarkdown(currentMd, groupTitle));
+        if (editor && shapeId) {
+          try {
+            editor.deleteShapes([shapeId]);
+            triggerDebouncedVisualSave(editor);
+          } catch {
+            // ignore if shape already gone
+          }
+        }
+        pushToast(i18n._(msg`Sección "${groupTitle}" eliminada`), 'info');
+      }
+    };
 
     window.addEventListener('antask:assign-task-id', handleAssignEvent);
     window.addEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
+    window.addEventListener('antask:delete-section', handleDeleteSectionEvent);
 
     return () => {
       window.removeEventListener('antask:assign-task-id', handleAssignEvent);
       window.removeEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
+      window.removeEventListener('antask:delete-section', handleDeleteSectionEvent);
     };
   }, [handleAssignSingleTaskId, handleAutoAssignAllTaskIds]);
 
@@ -2382,6 +2400,14 @@ export default function App() {
                     deleteTaskFromMarkdown(currentMd, taskId, taskTitle)
                   );
                   taskRemoved = true;
+                } else if (removedItem?.type === 'task-group') {
+                  const groupTitle = removedItem.props?.title;
+                  if (groupTitle) {
+                    setMarkdownInput((currentMd) =>
+                      deleteSectionFromMarkdown(currentMd, groupTitle)
+                    );
+                    taskRemoved = true;
+                  }
                 }
                 if (removedItem?.type === 'note' || removedItem?.type === 'text') {
                   hasNoteOrTextChange = true;

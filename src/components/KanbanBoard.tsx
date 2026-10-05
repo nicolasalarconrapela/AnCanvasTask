@@ -926,15 +926,34 @@ export function KanbanBoard({
                       </span>
                     </div>
 
-                    <button
-                      id={`btn-kanban-add-task-sec-${secId}`}
-                      type="button"
-                      onClick={() => onOpenNewTaskModalWithGroup?.(sec)}
-                      className="btn-m3-icon w-6 h-6 cursor-pointer hover:text-[var(--primary)]"
-                      title={i18n._(msg`Añadir tarea a ${sec}`)}
-                    >
-                      <span className="material-symbols-outlined text-[16px]">add</span>
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {sec.toLowerCase() !== 'general' && (
+                        <button
+                          id={`btn-kanban-delete-section-${secId}`}
+                          type="button"
+                          onClick={() => {
+                            window.dispatchEvent(
+                              new CustomEvent('antask:delete-section', {
+                                detail: { groupTitle: sec },
+                              })
+                            );
+                          }}
+                          className="btn-m3-icon w-6 h-6 cursor-pointer hover:text-rose-400 text-[var(--on-surface-variant)]"
+                          title={i18n._(msg`Eliminar sección`)}
+                        >
+                          <span className="material-symbols-outlined text-[15px]">delete</span>
+                        </button>
+                      )}
+                      <button
+                        id={`btn-kanban-add-task-sec-${secId}`}
+                        type="button"
+                        onClick={() => onOpenNewTaskModalWithGroup?.(sec)}
+                        className="btn-m3-icon w-6 h-6 cursor-pointer hover:text-[var(--primary)]"
+                        title={i18n._(msg`Añadir tarea a ${sec}`)}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">add</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Tasks List */}

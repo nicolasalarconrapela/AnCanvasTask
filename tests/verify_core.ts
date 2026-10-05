@@ -6,6 +6,7 @@ import {
   scanTaskBlocks,
   updateTaskInMarkdown,
   addTaskToMarkdown,
+  deleteSectionFromMarkdown,
   deleteTaskFromMarkdown,
   autoAssignAllMissingTaskIds,
   validateMarkdownDocument,
@@ -88,7 +89,13 @@ const deletedMd = deleteTaskFromMarkdown(addedMd, 'fe_test');
 const withDeletedTasks = parseTasksMarkdown(deletedMd).flatMap((g) => g.tasks);
 assert.strictEqual(withDeletedTasks.length, 3, 'Debe haber 3 tareas tras eliminar fe_test');
 assert(!withDeletedTasks.some((t) => t.taskId === 'fe_test'), 'fe_test no debe existir');
-console.log('   ✓ Adición y borrado no destructivo verificado.');
+
+// Test deleteSectionFromMarkdown
+const deletedSectionMd = deleteSectionFromMarkdown(deletedMd, 'Frontend');
+const reParsedAfterSectionDelete = parseTasksMarkdown(deletedSectionMd);
+assert.strictEqual(reParsedAfterSectionDelete.length, 1, 'Debe quedar 1 solo grupo (Backend)');
+assert.strictEqual(reParsedAfterSectionDelete[0].title, 'Backend', 'El grupo restante debe ser Backend');
+console.log('   ✓ Adición y borrado no destructivo de tareas y secciones verificado.');
 
 // 4. Sanitization and Missing IDs assignment
 console.log('4. Verificando saneado y asignación automática de IDs...');

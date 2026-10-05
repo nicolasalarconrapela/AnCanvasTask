@@ -1259,12 +1259,12 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
         pointerEvents: 'none',
       }}
     >
-      <div id={`task-group-container-${shape.id}`} className="w-full h-full rounded-md bg-[var(--surface-container)]/30 border border-[var(--outline)] p-3 flex flex-col justify-start select-none transition-colors">
+      <div id={`task-group-container-${shape.id}`} className="w-full h-full rounded-md bg-[var(--surface-container)]/30 border border-[var(--outline)] p-3 flex flex-col justify-start select-none transition-colors group">
         {/* Header */}
         <div id={`task-group-header-${shape.id}`} className="flex items-center justify-between border-b border-[var(--outline)] pb-2">
           <div id={`task-group-title-group-${shape.id}`} className="flex items-center gap-1.5">
             <span className="text-[var(--on-surface-variant)] font-mono text-xs font-semibold">##</span>
-            <h2 className="text-xs font-semibold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[200px]">
+            <h2 className="text-xs font-semibold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[180px]">
               {title}
             </h2>
             <span className="suction-indicator items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-[var(--primary)] bg-[var(--primary)]/10 border border-[var(--primary)]/30">
@@ -1272,13 +1272,31 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
               {i18n._(msg`Ventosa`)}
             </span>
           </div>
-          {count > 0 && (
-            <span className="text-[11px] font-mono text-[var(--on-surface-variant)] tabular-nums">
-              {completedCount > 0
-                ? i18n._(msg`${completedCount}/${count} completadas`)
-                : formatTaskCount(count)}
-            </span>
-          )}
+          <div id={`task-group-actions-${shape.id}`} className="flex items-center gap-1.5 pointer-events-auto">
+            {count > 0 && (
+              <span className="text-[11px] font-mono text-[var(--on-surface-variant)] tabular-nums">
+                {completedCount > 0
+                  ? i18n._(msg`${completedCount}/${count} completadas`)
+                  : formatTaskCount(count)}
+              </span>
+            )}
+            <button
+              id={`btn-task-group-delete-${shape.id}`}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                window.dispatchEvent(
+                  new CustomEvent('antask:delete-section', {
+                    detail: { groupTitle: title, shapeId: shape.id },
+                  })
+                );
+              }}
+              className="p-1 rounded text-[var(--on-surface-variant)] hover:text-rose-400 hover:bg-[var(--surface-container-highest)] transition-colors cursor-pointer flex items-center justify-center opacity-70 hover:opacity-100"
+              title={i18n._(msg`Eliminar sección`)}
+            >
+              <span className="material-symbols-outlined text-[14px]">delete</span>
+            </button>
+          </div>
         </div>
       </div>
     </HTMLContainer>

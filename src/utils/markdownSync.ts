@@ -800,6 +800,43 @@ export function deleteTaskFromMarkdown(
 }
 
 /**
+ * Deletes an entire section (group heading and its content/tasks) from Markdown.
+ */
+export function deleteSectionFromMarkdown(
+  markdown: string,
+  groupTitle: string
+): string {
+  if (!markdown || !groupTitle) return markdown;
+
+  const lines = markdown.split(/\r?\n/);
+  const { groupHeadings } = scanTaskBlocks(markdown);
+
+  const cleanGroup = groupTitle.trim().toLowerCase();
+  const targetHeading = groupHeadings.find(
+    (gh) => gh.title.trim().toLowerCase() === cleanGroup
+  );
+
+  if (!targetHeading) {
+    return markdown;
+  }
+
+  const startLine = targetHeading.lineIndex;
+  let endLine = lines.length;
+
+  for (let i = startLine + 1; i < lines.length; i++) {
+    if (lines[i].trim().startsWith('## ')) {
+      endLine = i;
+      break;
+    }
+  }
+
+  lines.splice(startLine, endLine - startLine);
+
+  const result = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return result ? `${result}\n` : '';
+}
+
+/**
  * Moves a task block from its current section to a target section in Markdown,
  * preserving all existing attributes and unknown metadata lines.
  */
