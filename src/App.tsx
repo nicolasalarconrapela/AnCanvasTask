@@ -654,7 +654,7 @@ export default function App() {
   // New task form state
   const [newTaskTitle, setNewTaskTitle] = useState<string>('');
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('P1');
-  const [newTaskGroup, setNewTaskGroup] = useState<string>('Autenticación');
+  const [newTaskGroup, setNewTaskGroup] = useState<string>('General');
   const [customGroupInput, setCustomGroupInput] = useState<string>('');
   const [isCustomGroup, setIsCustomGroup] = useState<boolean>(false);
 
@@ -1764,9 +1764,40 @@ export default function App() {
 
   const existingSections = useMemo(() => {
     const { groupHeadings } = scanTaskBlocks(markdownInput);
-    const titles = groupHeadings.map((g) => g.title);
-    return titles.length > 0 ? titles : ['General'];
+    const titles = groupHeadings
+      .map((g) => g.title.trim())
+      .filter((t) => t && t.toLowerCase() !== 'notas' && t.toLowerCase() !== 'notes');
+    return Array.from(new Set(titles));
   }, [markdownInput]);
+
+  const handleOpenNewTaskModal = useCallback(
+    (defaultGroup?: string) => {
+      setNewTaskTitle('');
+      setNewTaskPriority('P1');
+      if (defaultGroup && defaultGroup.trim()) {
+        const trimmed = defaultGroup.trim();
+        if (existingSections.includes(trimmed)) {
+          setNewTaskGroup(trimmed);
+          setIsCustomGroup(false);
+          setCustomGroupInput('');
+        } else {
+          setCustomGroupInput(trimmed);
+          setIsCustomGroup(true);
+        }
+      } else {
+        if (existingSections.length > 0) {
+          setNewTaskGroup(existingSections[0]);
+          setIsCustomGroup(false);
+          setCustomGroupInput('');
+        } else {
+          setCustomGroupInput('');
+          setIsCustomGroup(true);
+        }
+      }
+      setIsNewTaskModalOpen(true);
+    },
+    [existingSections]
+  );
 
   // Listen for delete requests from task cards
   useEffect(() => {
@@ -2580,8 +2611,8 @@ export default function App() {
     if (!newTaskTitle.trim()) return;
 
     const groupTitle = isCustomGroup
-      ? customGroupInput.trim() || 'General'
-      : newTaskGroup.trim();
+      ? (customGroupInput.trim() || 'General')
+      : (newTaskGroup.trim() || (existingSections.length > 0 ? existingSections[0] : 'General'));
 
     const { updatedMarkdown, taskId } = addTaskToMarkdown(markdownInput, {
       title: newTaskTitle.trim(),
@@ -3195,7 +3226,7 @@ export default function App() {
         icon: 'add_circle',
         category: 'action',
         perform: () => {
-          setIsNewTaskModalOpen(true);
+          handleOpenNewTaskModal();
         },
       },
       {
@@ -4511,10 +4542,7 @@ export default function App() {
                               id="btn-empty-create-task"
                               type="button"
                               onClick={() => {
-                                if (existingSections.length > 0 && !isCustomGroup) {
-                                  setNewTaskGroup(existingSections[0]);
-                                }
-                                setIsNewTaskModalOpen(true);
+                                handleOpenNewTaskModal();
                               }}
                               className="btn-m3-primary px-3.5 py-1.5 text-xs cursor-pointer shadow-sm"
                             >
@@ -4653,10 +4681,7 @@ export default function App() {
                       }}
                       selectedTaskId={selectedTaskShapeId}
                       onOpenNewTaskModalWithGroup={(groupOrStatus) => {
-                        if (existingSections.includes(groupOrStatus)) {
-                          setNewTaskGroup(groupOrStatus);
-                        }
-                        setIsNewTaskModalOpen(true);
+                        handleOpenNewTaskModal(groupOrStatus);
                       }}
                       searchQuery={searchQuery}
                       activeFilter={activeFilter}
@@ -4809,10 +4834,7 @@ export default function App() {
             id="btn-fab-new-task"
             type="button"
             onClick={() => {
-              if (existingSections.length > 0 && !isCustomGroup) {
-                setNewTaskGroup(existingSections[0]);
-              }
-              setIsNewTaskModalOpen(true);
+              handleOpenNewTaskModal();
             }}
             className={`absolute bottom-16 sm:bottom-6 right-6 z-30 w-10 h-10 rounded-md bg-[var(--primary)] text-[var(--on-primary)] shadow-md flex items-center justify-center cursor-pointer hover:brightness-110 active:brightness-95 transition-all select-none ${
               isSplitViewOpen && isMobileScreen ? 'hidden' : ''
@@ -4890,10 +4912,7 @@ export default function App() {
             if (activeView === 'studio') {
               setIsSanityModalOpen(true);
             } else {
-              if (existingSections.length > 0 && !isCustomGroup) {
-                setNewTaskGroup(existingSections[0]);
-              }
-              setIsNewTaskModalOpen(true);
+              handleOpenNewTaskModal();
             }
           }}
           className="btn-m3-primary py-1 px-1 rounded-md flex flex-col items-center justify-center text-[10px] cursor-pointer shadow-xs overflow-hidden active:scale-95"
@@ -5185,7 +5204,7 @@ export default function App() {
                   <span>{i18n._(msg`Ajustes de Sanity Cloud`)}</span>
                 </div>
                 <span className="text-[10px] font-mono text-emerald-400">
-                  {sanityConfig.projectId || i18n._(msg`No conectado`)}
+                  {getSanityConfig().projectId || i18n._(msg`No conectado`)}
                 </span>
               </button>
 
@@ -5486,40 +5505,93 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Section / Group */}
-              <div id="div-app-71" className="flex flex-col gap-1">
+              {/* Section / Group Selection & Creation */}
+              <div id="div-app-71" className="flex flex-col gap-1.5">
                 <div id="div-app-72" className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-[var(--on-surface)]">{i18n._(msg`Sección`)}</label>
-                  <button
-                    id="btn-new-task-toggle-custom-group"
-                    type="button"
-                    onClick={() => setIsCustomGroup(!isCustomGroup)}
-                    className="text-[11px] text-[var(--primary)] hover:underline cursor-pointer"
-                  >
-                    {isCustomGroup ? i18n._(msg`Elegir existente`) : i18n._(msg`+ Nueva sección`)}
-                  </button>
+                  <label className="text-xs font-medium text-[var(--on-surface)] flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">folder</span>
+                    <span>{i18n._(msg`Sección / Grupo`)}</span>
+                  </label>
+                  {existingSections.length > 0 && (
+                    <div className="inline-flex rounded-md p-0.5 bg-[var(--surface-container-high)] border border-[var(--outline)]">
+                      <button
+                        id="btn-new-task-mode-existing"
+                        type="button"
+                        onClick={() => setIsCustomGroup(false)}
+                        className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                          !isCustomGroup
+                            ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                            : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                        }`}
+                      >
+                        {i18n._(msg`Existente`)}
+                      </button>
+                      <button
+                        id="btn-new-task-mode-custom"
+                        type="button"
+                        onClick={() => setIsCustomGroup(true)}
+                        className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                          isCustomGroup
+                            ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                            : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                        }`}
+                      >
+                        {i18n._(msg`+ Nueva sección`)}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                {isCustomGroup ? (
-                  <input
-                    type="text"
-                    value={customGroupInput}
-                    onChange={(e) => setCustomGroupInput(e.target.value)}
-                    placeholder={i18n._(msg`ej. Notificaciones`)}
-                    className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none"
-                  />
+                {!isCustomGroup && existingSections.length > 0 ? (
+                  <div className="flex flex-col gap-1">
+                    <div className="relative">
+                      <select
+                        id="select-new-task-group"
+                        value={newTaskGroup}
+                        onChange={(e) => {
+                          if (e.target.value === '__CREATE_NEW_SECTION__') {
+                            setIsCustomGroup(true);
+                            setCustomGroupInput('');
+                          } else {
+                            setNewTaskGroup(e.target.value);
+                          }
+                        }}
+                        className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none cursor-pointer appearance-none pr-8"
+                      >
+                        {existingSections.map((sec) => (
+                          <option key={sec} value={sec}>
+                            📁 {sec}
+                          </option>
+                        ))}
+                        <option value="__CREATE_NEW_SECTION__" className="text-[var(--primary)] font-medium">
+                          ➕ {i18n._(msg`Crear nueva sección...`)}
+                        </option>
+                      </select>
+                      <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-[16px] text-[var(--on-surface-variant)] pointer-events-none">
+                        expand_more
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-[var(--on-surface-variant)]">
+                      {i18n._(msg`Se añadirá bajo el encabezado ## existente en el documento.`)}
+                    </span>
+                  </div>
                 ) : (
-                  <select
-                    value={newTaskGroup}
-                    onChange={(e) => setNewTaskGroup(e.target.value)}
-                    className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none cursor-pointer"
-                  >
-                    {existingSections.map((sec) => (
-                      <option key={sec} value={sec}>
-                        {sec}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex flex-col gap-1">
+                    <input
+                      id="input-new-task-custom-group"
+                      type="text"
+                      autoFocus={isCustomGroup}
+                      value={customGroupInput}
+                      onChange={(e) => setCustomGroupInput(e.target.value)}
+                      placeholder={i18n._(msg`ej. Backend, Frontend, Autenticación, Pagos...`)}
+                      className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none"
+                    />
+                    <span className="text-[11px] text-[var(--on-surface-variant)]">
+                      {existingSections.length === 0
+                        ? i18n._(msg`Aún no hay secciones en el documento. Se creará una nueva sección en el archivo y en el lienzo.`)
+                        : i18n._(msg`Se creará una nueva sección ## en el archivo y un nuevo contenedor en el lienzo.`)}
+                    </span>
+                  </div>
                 )}
               </div>
 

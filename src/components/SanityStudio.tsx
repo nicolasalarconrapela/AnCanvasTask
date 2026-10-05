@@ -65,6 +65,9 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
   const [newTaskTitleInput, setNewTaskTitleInput] = useState<string>('');
   const [newTaskPriorityInput, setNewTaskPriorityInput] = useState<'P0' | 'P1' | 'P2' | 'P3'>('P1');
   const [newTaskWorkspaceId, setNewTaskWorkspaceId] = useState<string>('');
+  const [newTaskSectionInput, setNewTaskSectionInput] = useState<string>('General');
+  const [isCustomTaskSectionInput, setIsCustomTaskSectionInput] = useState<boolean>(false);
+  const [customTaskSectionInput, setCustomTaskSectionInput] = useState<string>('');
   const [workspaceFilter, setWorkspaceFilter] = useState<string>('all');
 
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState<boolean>(false);
@@ -336,12 +339,25 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
         (w) => w.workspaceId === newTaskWorkspaceId || w._id === newTaskWorkspaceId
       );
 
+      const availableSecs = Array.from(
+        new Set(
+          documents
+            .filter((d) => d._type === 'task' && d.groupTitle && typeof d.groupTitle === 'string')
+            .map((d) => (d.groupTitle as string).trim())
+            .filter(Boolean)
+        )
+      );
+
+      const finalGroupTitle = isCustomTaskSectionInput
+        ? (customTaskSectionInput.trim() || 'General')
+        : (newTaskSectionInput.trim() || (availableSecs[0] || 'General'));
+
       const res = await writeTestingTaskToSanity(config, {
         title: newTaskTitleInput.trim(),
         taskId: 'task-' + Date.now().toString(36),
         priority: newTaskPriorityInput,
         status: 'todo',
-        groupTitle: 'General',
+        groupTitle: finalGroupTitle,
         workspaceId: selectedWs ? (selectedWs.workspaceId || selectedWs._id.replace(/^workspace-/, '')) : undefined,
         workspace: selectedWs ? { _type: 'reference', _ref: selectedWs._id } : undefined,
       });
@@ -1841,6 +1857,88 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
                   ))}
                 </div>
               </div>
+
+              {/* Section / Group Selector */}
+              {(() => {
+                const availableSecs = Array.from(
+                  new Set(
+                    documents
+                      .filter((d) => d._type === 'task' && d.groupTitle && typeof d.groupTitle === 'string')
+                      .map((d) => (d.groupTitle as string).trim())
+                      .filter(Boolean)
+                  )
+                );
+
+                return (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-[var(--on-surface)] flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">folder</span>
+                        <span>Sección / Grupo</span>
+                      </label>
+                      {availableSecs.length > 0 && (
+                        <div className="inline-flex rounded-md p-0.5 bg-[var(--surface-container-high)] border border-[var(--outline)]">
+                          <button
+                            type="button"
+                            onClick={() => setIsCustomTaskSectionInput(false)}
+                            className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                              !isCustomTaskSectionInput
+                                ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                                : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                            }`}
+                          >
+                            Existente
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsCustomTaskSectionInput(true)}
+                            className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                              isCustomTaskSectionInput
+                                ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                                : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                            }`}
+                          >
+                            + Nueva
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {!isCustomTaskSectionInput && availableSecs.length > 0 ? (
+                      <select
+                        value={newTaskSectionInput}
+                        onChange={(e) => {
+                          if (e.target.value === '__CREATE_NEW_SECTION__') {
+                            setIsCustomTaskSectionInput(true);
+                            setCustomTaskSectionInput('');
+                          } else {
+                            setNewTaskSectionInput(e.target.value);
+                          }
+                        }}
+                        className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs text-[var(--on-surface)] focus:outline-none cursor-pointer"
+                      >
+                        {availableSecs.map((sec) => (
+                          <option key={sec} value={sec}>
+                            📁 {sec}
+                          </option>
+                        ))}
+                        <option value="__CREATE_NEW_SECTION__" className="text-[var(--primary)] font-medium">
+                          ➕ + Crear nueva sección...
+                        </option>
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        autoFocus={isCustomTaskSectionInput}
+                        value={customTaskSectionInput}
+                        onChange={(e) => setCustomTaskSectionInput(e.target.value)}
+                        placeholder="ej. Backend, Pagos, Autenticación..."
+                        className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs text-[var(--on-surface)] focus:outline-none"
+                      />
+                    )}
+                  </div>
+                );
+              })()}
 
               <div id="div-sanitystudio-119" className="pt-2 flex items-center justify-end gap-2 border-t border-[var(--outline)]">
                 <button
