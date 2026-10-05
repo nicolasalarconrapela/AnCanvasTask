@@ -1822,42 +1822,6 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
                 </select>
               </div>
 
-              <div id="div-sanitystudio-116" className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-[var(--on-surface)]">
-                  Título de la tarea
-                </label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  value={newTaskTitleInput}
-                  onChange={(e) => setNewTaskTitleInput(e.target.value)}
-                  placeholder="ej. Implementar OAuth..."
-                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs text-[var(--on-surface)] focus:outline-none"
-                />
-              </div>
-
-              <div id="div-sanitystudio-117" className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-[var(--on-surface)]">Prioridad</label>
-                <div id="div-sanitystudio-118" className="grid grid-cols-4 gap-1.5">
-                  {(['P0', 'P1', 'P2', 'P3'] as const).map((p) => (
-                    <button
-                      key={p}
-                      id={`btn-sanity-studio-new-task-priority-${p}`}
-                      type="button"
-                      onClick={() => setNewTaskPriorityInput(p)}
-                      className={`py-1 rounded font-mono text-xs border text-center cursor-pointer ${
-                        newTaskPriorityInput === p
-                          ? 'bg-[var(--primary)] text-[var(--on-primary)] font-bold border-[var(--primary)]'
-                          : 'bg-[var(--surface)] text-[var(--on-surface-variant)] border-[var(--outline)]'
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Section / Group Selector */}
               {(() => {
                 const availableSecs = Array.from(
@@ -1939,6 +1903,42 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
                   </div>
                 );
               })()}
+
+              <div id="div-sanitystudio-116" className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-[var(--on-surface)]">
+                  Título de la tarea
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus={!isCustomTaskSectionInput}
+                  value={newTaskTitleInput}
+                  onChange={(e) => setNewTaskTitleInput(e.target.value)}
+                  placeholder="ej. Implementar OAuth..."
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+
+              <div id="div-sanitystudio-117" className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-[var(--on-surface)]">Prioridad</label>
+                <div id="div-sanitystudio-118" className="grid grid-cols-4 gap-1.5">
+                  {(['P0', 'P1', 'P2', 'P3'] as const).map((p) => (
+                    <button
+                      key={p}
+                      id={`btn-sanity-studio-new-task-priority-${p}`}
+                      type="button"
+                      onClick={() => setNewTaskPriorityInput(p)}
+                      className={`py-1 rounded font-mono text-xs border text-center cursor-pointer ${
+                        newTaskPriorityInput === p
+                          ? 'bg-[var(--primary)] text-[var(--on-primary)] font-bold border-[var(--primary)]'
+                          : 'bg-[var(--surface)] text-[var(--on-surface-variant)] border-[var(--outline)]'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div id="div-sanitystudio-119" className="pt-2 flex items-center justify-end gap-2 border-t border-[var(--outline)]">
                 <button

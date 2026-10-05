@@ -5468,43 +5468,6 @@ export default function App() {
             </div>
 
             <form onSubmit={handleCreateTask} className="p-4 flex flex-col gap-3.5">
-              <div id="div-app-68" className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-[var(--on-surface)]">{i18n._(msg`Título`)}</label>
-                <input
-                  type="text"
-                  autoFocus
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                  placeholder={i18n._(msg`ej. Crear recuperación de contraseña`)}
-                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none"
-                />
-              </div>
-
-              {/* Priority Selection */}
-              <div id="div-app-69" className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-[var(--on-surface)]">{i18n._(msg`Prioridad`)}</label>
-                <div id="div-app-70" className="grid grid-cols-4 gap-2">
-                  {(['P0', 'P1', 'P2', 'P3'] as TaskPriority[]).map((p) => {
-                    const isSelected = newTaskPriority === p;
-                    return (
-                      <button
-                        id={`btn-new-task-priority-${p}`}
-                        key={p}
-                        type="button"
-                        onClick={() => setNewTaskPriority(p)}
-                        className={`py-1.5 px-2 text-xs font-mono font-medium rounded border text-center transition-colors cursor-pointer ${
-                          isSelected
-                            ? 'bg-[var(--primary)] text-[var(--on-primary)] border-[var(--primary)]'
-                            : 'bg-[var(--surface)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:bg-[var(--surface-container-high)]'
-                        }`}
-                      >
-                        {p}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
               {/* Section / Group Selection & Creation */}
               <div id="div-app-71" className="flex flex-col gap-1.5">
                 <div id="div-app-72" className="flex items-center justify-between">
@@ -5593,6 +5556,43 @@ export default function App() {
                     </span>
                   </div>
                 )}
+              </div>
+
+              <div id="div-app-68" className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--on-surface)]">{i18n._(msg`Título`)}</label>
+                <input
+                  type="text"
+                  autoFocus={!isCustomGroup}
+                  value={newTaskTitle}
+                  onChange={(e) => setNewTaskTitle(e.target.value)}
+                  placeholder={i18n._(msg`ej. Crear recuperación de contraseña`)}
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+
+              {/* Priority Selection */}
+              <div id="div-app-69" className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--on-surface)]">{i18n._(msg`Prioridad`)}</label>
+                <div id="div-app-70" className="grid grid-cols-4 gap-2">
+                  {(['P0', 'P1', 'P2', 'P3'] as TaskPriority[]).map((p) => {
+                    const isSelected = newTaskPriority === p;
+                    return (
+                      <button
+                        id={`btn-new-task-priority-${p}`}
+                        key={p}
+                        type="button"
+                        onClick={() => setNewTaskPriority(p)}
+                        className={`py-1.5 px-2 text-xs font-mono font-medium rounded border text-center transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'bg-[var(--primary)] text-[var(--on-primary)] border-[var(--primary)]'
+                            : 'bg-[var(--surface)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:bg-[var(--surface-container-high)]'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div id="div-app-73" className="pt-2.5 flex items-center justify-end gap-2 border-t border-[var(--outline)]">
