@@ -484,6 +484,7 @@ export default function App() {
   // Operations and Loading state (DESIGN.md Section 1 & 3)
   const [isAutoOrganizing, setIsAutoOrganizing] = useState<boolean>(false);
   const [isLoadingDocument, setIsLoadingDocument] = useState<boolean>(false);
+  const [isCanvasEmptyDismissed, setIsCanvasEmptyDismissed] = useState<boolean>(false);
   const [isOnline, setIsOnline] = useState<boolean>(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
@@ -1143,6 +1144,7 @@ export default function App() {
       setCurrentFileName(activeDocument.path);
       setMarkdownInput(activeDocument.content);
       setLastSavedMarkdown(activeDocument.lastSavedContent);
+      setIsCanvasEmptyDismissed(false);
 
       // Reconcile document-specific filters (sections, tags) with the newly selected TASK.md
       const { groupHeadings, taskBlocks } = scanTaskBlocks(activeDocument.content || '');
@@ -4657,9 +4659,19 @@ export default function App() {
                     )}
 
                     {/* Canvas Empty State Overlay */}
-                    {allParsedTasks.length === 0 && (
+                    {allParsedTasks.length === 0 && !isCanvasEmptyDismissed && (
                       <div id="div-app-26" className="absolute inset-0 pointer-events-none flex items-center justify-center p-6 z-10">
-                        <div id="div-app-27" className="pointer-events-auto bg-[var(--surface-container)] border border-[var(--outline)] rounded-lg p-6 max-w-md text-center shadow-lg flex flex-col items-center">
+                        <div id="div-app-27" className="pointer-events-auto bg-[var(--surface-container)] border border-[var(--outline)] rounded-lg p-6 max-w-md text-center shadow-lg flex flex-col items-center relative animate-fade-in">
+                          <button
+                            id="btn-dismiss-empty-canvas"
+                            type="button"
+                            onClick={() => setIsCanvasEmptyDismissed(true)}
+                            className="absolute top-2.5 right-2.5 w-6 h-6 rounded flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] cursor-pointer transition-colors"
+                            title={i18n._(msg`Cerrar`)}
+                            aria-label={i18n._(msg`Cerrar`)}
+                          >
+                            <span className="material-symbols-outlined text-[16px]">close</span>
+                          </button>
                           <div id="div-app-28" className="w-10 h-10 rounded bg-[var(--primary-container)]/30 border border-[var(--primary)]/30 flex items-center justify-center text-[var(--primary)] mb-3">
                             <span className="material-symbols-outlined text-[22px]">grid_view</span>
                           </div>
