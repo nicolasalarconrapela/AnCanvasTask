@@ -118,7 +118,7 @@ export const SanityStudioEmbed: React.FC<SanityStudioEmbedProps> = ({
           <div id="div-sanitystudioembed-7" className="flex flex-col min-w-0">
             <div id="div-sanitystudioembed-8" className="flex items-center gap-1.5">
               <span className="font-semibold text-xs text-neutral-100 truncate">
-                {_(msg`Sanity Studio Nativo Embebido`)}
+                {_(msg`Sanity Studio CMS (Herramienta Opcional)`)}
               </span>
               <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-rose-950 border border-rose-800 text-rose-300">
                 v6.17
@@ -189,6 +189,24 @@ export const SanityStudioEmbed: React.FC<SanityStudioEmbedProps> = ({
             </button>
           )}
         </div>
+      </div>
+
+      {/* Informative notice regarding Studio login vs background token sync */}
+      <div id="div-sanitystudioembed-notice" className="px-3.5 py-1.5 bg-neutral-900/90 border-b border-neutral-800 text-[11px] text-neutral-400 flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <span className="truncate">
+            {_(msg`Sanity Studio es opcional (requiere login en sanity.io). Tu app principal sincroniza en segundo plano mediante tu API Token sin necesidad de login.`)}
+          </span>
+        </div>
+        <button
+          id="btn-sanity-studio-open-token-config"
+          type="button"
+          onClick={onOpenSanityConfig}
+          className="text-sky-400 hover:underline shrink-0 text-[11px] cursor-pointer"
+        >
+          {_(msg`Ajustes de Token`)}
+        </button>
       </div>
 
       {/* Embedded Sanity Studio Engine */}

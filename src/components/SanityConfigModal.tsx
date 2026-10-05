@@ -433,12 +433,31 @@ export const schemaTypes = [taskSchema, canvasVisualStateSchema];`,
           {/* TAB 1: CONFIGURATION & CONNECTION */}
           {activeTab === 'config' && (
             <>
-              {/* Concept Banner */}
-              <div id="div-sanityconfigmodal-7" className="p-2.5 rounded bg-[var(--surface)] border border-[var(--outline)] text-[11px] text-[var(--on-surface-variant)] leading-relaxed flex items-start gap-2">
-                <span className="material-symbols-outlined text-[15px] text-sky-400 shrink-0 mt-0.5">info</span>
-                <div id="div-sanityconfigmodal-concept-text">
-                  <strong className="text-[var(--on-surface)] font-medium">{i18n._(msg`Single Source of Truth:`)} </strong>
-                  {i18n._(msg`Tu archivo`)} <code className="font-mono text-sky-300">TASKS.md</code> {i18n._(msg`define el contenido y dependencias. Sanity almacena la posición espacial`)} <code className="font-mono text-slate-300">(x, y, w, h)</code> {i18n._(msg`y documentos de tareas.`)}
+              {/* Concept Banner with 3 Strategies / Modes */}
+              <div id="div-sanityconfigmodal-7" className="p-3 rounded bg-[var(--surface-container-high)] border border-[var(--outline)] text-[11px] text-[var(--on-surface-variant)] leading-relaxed flex flex-col gap-2">
+                <div className="flex items-center gap-2 font-semibold text-[var(--on-surface)]">
+                  <span className="material-symbols-outlined text-[16px] text-emerald-400">cloud_done</span>
+                  <span>{i18n._(msg`Modo de Funcionamiento Flexible & Privado`)}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-[var(--outline)]/50">
+                  <div className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)]/60 flex flex-col gap-1">
+                    <span className="font-semibold text-emerald-300">1. Modo Local-First</span>
+                    <span className="text-[10px] text-[var(--on-surface-variant)]">
+                      {i18n._(msg`Por defecto. 100% privado en tu navegador, sin registrarse ni hacer login.`)}
+                    </span>
+                  </div>
+                  <div className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)]/60 flex flex-col gap-1">
+                    <span className="font-semibold text-sky-300">2. Nube con API Token</span>
+                    <span className="text-[10px] text-[var(--on-surface-variant)]">
+                      {i18n._(msg`Sincronización en segundo plano sin pantallas de login, usando tu Token personal.`)}
+                    </span>
+                  </div>
+                  <div className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)]/60 flex flex-col gap-1">
+                    <span className="font-semibold text-rose-300">3. Sanity Studio CMS</span>
+                    <span className="text-[10px] text-[var(--on-surface-variant)]">
+                      {i18n._(msg`Panel CMS avanzado opcional. Requiere inicio de sesión en Sanity.io.`)}
+                    </span>
+                  </div>
                 </div>
               </div>
 
