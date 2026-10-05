@@ -811,26 +811,44 @@ export function deleteSectionFromMarkdown(
   const lines = markdown.split(/\r?\n/);
   const { groupHeadings } = scanTaskBlocks(markdown);
 
-  const cleanGroup = groupTitle.trim().toLowerCase();
+  const cleanGroup = groupTitle.trim().toLowerCase().replace(/^#+\s*/, '');
   const targetHeading = groupHeadings.find(
-    (gh) => gh.title.trim().toLowerCase() === cleanGroup
+    (gh) => gh.title.trim().toLowerCase().replace(/^#+\s*/, '') === cleanGroup
   );
 
-  if (!targetHeading) {
+  let startLine = targetHeading ? targetHeading.lineIndex : -1;
+
+  // Fallback: search line by line if scanTaskBlocks didn't find the exact heading
+  if (startLine === -1) {
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      const match = trimmed.match(/^#+\s+(.+)$/);
+      if (match && match[1].trim().toLowerCase().replace(/^#+\s*/, '') === cleanGroup) {
+        startLine = i;
+        break;
+      }
+    }
+  }
+
+  if (startLine === -1) {
     return markdown;
   }
 
-  const startLine = targetHeading.lineIndex;
-  let endLine = lines.length;
+  let actualStart = startLine;
+  while (actualStart > 0 && lines[actualStart - 1].trim() === '') {
+    actualStart--;
+  }
 
+  let endLine = lines.length;
   for (let i = startLine + 1; i < lines.length; i++) {
-    if (lines[i].trim().startsWith('## ')) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith('## ') || trimmed.startsWith('# ') || trimmed.startsWith('### ')) {
       endLine = i;
       break;
     }
   }
 
-  lines.splice(startLine, endLine - startLine);
+  lines.splice(actualStart, endLine - actualStart);
 
   const result = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return result ? `${result}\n` : '';

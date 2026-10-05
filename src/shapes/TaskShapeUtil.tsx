@@ -1213,6 +1213,10 @@ export function updateAllGroupCounts(editor: Editor) {
 
 function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
   const { title, count, completedCount, w, h } = shape.props;
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
   const globalFilters = useGlobalTaskFilters();
   const isSectionFilteredOut =
     globalFilters.section !== 'all' &&
@@ -1232,6 +1236,28 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
       }
     }
   }, [isSectionFilteredOut, shape.id]);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [isMenuOpen]);
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenuPosition({
+      x: Math.max(8, e.clientX - rect.left),
+      y: Math.max(8, e.clientY - rect.top),
+    });
+    setIsMenuOpen(true);
+  };
 
   if (isSectionFilteredOut) {
     return (
@@ -1259,9 +1285,17 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
         pointerEvents: 'none',
       }}
     >
-      <div id={`task-group-container-${shape.id}`} className="w-full h-full rounded-md bg-[var(--surface-container)]/30 border border-[var(--outline)] p-3 flex flex-col justify-start select-none transition-colors group">
+      <div
+        id={`task-group-container-${shape.id}`}
+        onContextMenu={handleContextMenu}
+        className="w-full h-full rounded-md bg-[var(--surface-container)]/30 border border-[var(--outline)] p-3 flex flex-col justify-start select-none transition-colors relative"
+      >
         {/* Header */}
-        <div id={`task-group-header-${shape.id}`} className="flex items-center justify-between border-b border-[var(--outline)] pb-2">
+        <div
+          id={`task-group-header-${shape.id}`}
+          onContextMenu={handleContextMenu}
+          className="flex items-center justify-between border-b border-[var(--outline)] pb-2 pointer-events-auto cursor-context-menu"
+        >
           <div id={`task-group-title-group-${shape.id}`} className="flex items-center gap-1.5">
             <span className="text-[var(--on-surface-variant)] font-mono text-xs font-semibold">##</span>
             <h2 className="text-xs font-semibold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[180px]">
@@ -1272,7 +1306,8 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
               {i18n._(msg`Ventosa`)}
             </span>
           </div>
-          <div id={`task-group-actions-${shape.id}`} className="flex items-center gap-1.5 pointer-events-auto">
+
+          <div id={`task-group-actions-${shape.id}`} className="flex items-center gap-1.5">
             {count > 0 && (
               <span className="text-[11px] font-mono text-[var(--on-surface-variant)] tabular-nums">
                 {completedCount > 0
@@ -1280,24 +1315,82 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
                   : formatTaskCount(count)}
               </span>
             )}
+            {/* Context menu trigger ⋮ */}
             <button
-              id={`btn-task-group-delete-${shape.id}`}
+              id={`btn-task-group-menu-${shape.id}`}
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuPosition(null);
+                setIsMenuOpen(!isMenuOpen);
+              }}
+              className="w-5 h-5 flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] rounded cursor-pointer transition-colors"
+              title={i18n._(msg`Opciones de sección`)}
+            >
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="5" r="2" />
+                <circle cx="12" cy="12" r="2" />
+                <circle cx="12" cy="19" r="2" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Popover Contextual Menu */}
+        {isMenuOpen && (
+          <div
+            ref={menuRef}
+            id={`task-group-menu-dropdown-${shape.id}`}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              left: menuPosition ? `${menuPosition.x}px` : 'auto',
+              top: menuPosition ? `${menuPosition.y}px` : '36px',
+              right: menuPosition ? 'auto' : '8px',
+              zIndex: 100,
+            }}
+            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1 flex flex-col gap-0.5 min-w-[170px] text-xs font-sans pointer-events-auto"
+          >
+            <div className="px-2 py-1 text-[11px] font-mono text-[var(--on-surface-variant)] border-b border-[var(--outline)] mb-0.5 truncate">
+              ## {title}
+            </div>
+            <button
+              id={`btn-task-group-menu-add-task-${shape.id}`}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                setIsMenuOpen(false);
+                window.dispatchEvent(
+                  new CustomEvent('antask:open-new-task-modal', {
+                    detail: { groupTitle: title },
+                  })
+                );
+              }}
+              className="px-2 py-1 rounded text-left text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer transition-colors"
+            >
+              <span className="material-symbols-outlined text-[14px]">add</span>
+              <span>{i18n._(msg`Añadir tarea`)}</span>
+            </button>
+            <button
+              id={`btn-task-group-menu-delete-${shape.id}`}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsMenuOpen(false);
                 window.dispatchEvent(
                   new CustomEvent('antask:delete-section', {
                     detail: { groupTitle: title, shapeId: shape.id },
                   })
                 );
               }}
-              className="p-1 rounded text-[var(--on-surface-variant)] hover:text-rose-400 hover:bg-[var(--surface-container-highest)] transition-colors cursor-pointer flex items-center justify-center opacity-70 hover:opacity-100"
-              title={i18n._(msg`Eliminar sección`)}
+              className="px-2 py-1 rounded text-left text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 cursor-pointer transition-colors font-medium"
             >
               <span className="material-symbols-outlined text-[14px]">delete</span>
+              <span>{i18n._(msg`Eliminar sección`)}</span>
             </button>
           </div>
-        </div>
+        )}
       </div>
     </HTMLContainer>
   );

@@ -109,6 +109,7 @@ export function KanbanBoard({
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingTitleText, setEditingTitleText] = useState<string>('');
   const [activeMenuTaskId, setActiveMenuTaskId] = useState<string | null>(null);
+  const [activeMenuSectionId, setActiveMenuSectionId] = useState<string | null>(null);
 
   // Parse tasks from markdown
   const { allTasks, sections } = useMemo(() => {
@@ -926,24 +927,7 @@ export function KanbanBoard({
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1">
-                      {sec.toLowerCase() !== 'general' && (
-                        <button
-                          id={`btn-kanban-delete-section-${secId}`}
-                          type="button"
-                          onClick={() => {
-                            window.dispatchEvent(
-                              new CustomEvent('antask:delete-section', {
-                                detail: { groupTitle: sec },
-                              })
-                            );
-                          }}
-                          className="btn-m3-icon w-6 h-6 cursor-pointer hover:text-rose-400 text-[var(--on-surface-variant)]"
-                          title={i18n._(msg`Eliminar sección`)}
-                        >
-                          <span className="material-symbols-outlined text-[15px]">delete</span>
-                        </button>
-                      )}
+                    <div className="flex items-center gap-1 relative">
                       <button
                         id={`btn-kanban-add-task-sec-${secId}`}
                         type="button"
@@ -953,6 +937,61 @@ export function KanbanBoard({
                       >
                         <span className="material-symbols-outlined text-[16px]">add</span>
                       </button>
+
+                      <button
+                        id={`btn-kanban-menu-sec-${secId}`}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMenuSectionId(activeMenuSectionId === secId ? null : secId);
+                        }}
+                        className="btn-m3-icon w-6 h-6 cursor-pointer hover:text-[var(--on-surface)] text-[var(--on-surface-variant)]"
+                        title={i18n._(msg`Opciones de sección`)}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="12" cy="5" r="2" />
+                          <circle cx="12" cy="12" r="2" />
+                          <circle cx="12" cy="19" r="2" />
+                        </svg>
+                      </button>
+
+                      {activeMenuSectionId === secId && (
+                        <div
+                          id={`kanban-section-menu-dropdown-${secId}`}
+                          className="absolute top-8 right-0 z-50 bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1 flex flex-col gap-0.5 min-w-[160px] text-xs font-sans"
+                        >
+                          <button
+                            id={`btn-kanban-menu-add-task-sec-${secId}`}
+                            type="button"
+                            onClick={() => {
+                              setActiveMenuSectionId(null);
+                              onOpenNewTaskModalWithGroup?.(sec);
+                            }}
+                            className="px-2 py-1 rounded text-left text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer transition-colors"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">add</span>
+                            <span>{i18n._(msg`Añadir tarea`)}</span>
+                          </button>
+                          {sec.toLowerCase() !== 'general' && (
+                            <button
+                              id={`btn-kanban-menu-delete-sec-${secId}`}
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuSectionId(null);
+                                window.dispatchEvent(
+                                  new CustomEvent('antask:delete-section', {
+                                    detail: { groupTitle: sec },
+                                  })
+                                );
+                              }}
+                              className="px-2 py-1 rounded text-left text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 cursor-pointer transition-colors font-medium"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">delete</span>
+                              <span>{i18n._(msg`Eliminar sección`)}</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 

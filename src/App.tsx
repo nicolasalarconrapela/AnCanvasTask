@@ -186,6 +186,8 @@ function extractPlainTextFromShape(editor: any, shape: any): string {
 export default function App() {
   const { i18n } = useLingui();
   const [editor, setEditor] = useState<Editor | null>(null);
+  const editorRef = useRef<Editor | null>(null);
+  editorRef.current = editor;
 
   // User Settings & Preferences State (DESIGN.md Section 4 & Fase 7)
   const [userSettings, setUserSettings] = useState<AppUserSettings>(() => loadUserSettings());
@@ -608,13 +610,45 @@ export default function App() {
     const handleDeleteSectionEvent = (e: any) => {
       const { groupTitle, shapeId } = e.detail || {};
       if (groupTitle) {
+        const normGroup = groupTitle.trim().toLowerCase().replace(/^#+\s*/, '');
         setMarkdownInput((currentMd) => deleteSectionFromMarkdown(currentMd, groupTitle));
-        if (editor && shapeId) {
-          try {
-            editor.deleteShapes([shapeId]);
-            triggerDebouncedVisualSave(editor);
-          } catch {
-            // ignore if shape already gone
+
+        const ed = editorRef.current;
+        if (ed) {
+          const allShapes = ed.getCurrentPageShapes();
+          const shapesToDelete = new Set<string>();
+
+          if (shapeId) {
+            shapesToDelete.add(shapeId);
+          }
+
+          for (const s of allShapes) {
+            const anyS = s as any;
+            if (anyS.type === 'task-group') {
+              const title = (anyS.props?.title || '').trim().toLowerCase().replace(/^#+\s*/, '');
+              if (title === normGroup) {
+                shapesToDelete.add(s.id);
+              }
+            } else if (anyS.type === 'task') {
+              const taskGroup = (anyS.props?.groupTitle || '').trim().toLowerCase().replace(/^#+\s*/, '');
+              if (taskGroup === normGroup) {
+                shapesToDelete.add(s.id);
+              }
+            }
+          }
+
+          for (const s of allShapes) {
+            if ((s as any).type === 'arrow') {
+              const bindings = (ed.getBindingsInvolvingShape?.(s) as any[]) || [];
+              if (bindings.some((b) => shapesToDelete.has(b.toId) || shapesToDelete.has(b.fromId))) {
+                shapesToDelete.add(s.id);
+              }
+            }
+          }
+
+          if (shapesToDelete.size > 0) {
+            ed.deleteShapes(Array.from(shapesToDelete) as any);
+            triggerDebouncedVisualSave(ed);
           }
         }
         pushToast(i18n._(msg`Sección "${groupTitle}" eliminada`), 'info');
@@ -1944,12 +1978,20 @@ export default function App() {
       }
     };
 
+    const handleOpenNewTaskModalEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ groupTitle?: string }>;
+      const { groupTitle } = customEvent.detail || {};
+      handleOpenNewTaskModal(groupTitle);
+    };
+
     window.addEventListener('antask:open-task-details', handleOpenTaskDetails);
+    window.addEventListener('antask:open-new-task-modal', handleOpenNewTaskModalEvent);
     return () => {
       window.removeEventListener('antask-request-delete-task', handleDeleteRequest);
       window.removeEventListener('antask:open-task-details', handleOpenTaskDetails);
+      window.removeEventListener('antask:open-new-task-modal', handleOpenNewTaskModalEvent);
     };
-  }, [editor]);
+  }, [editor, handleOpenNewTaskModal]);
 
   // Selection and Zoom state for Canvas (DESIGN.md Section 14)
   const [canvasZoom, setCanvasZoom] = useState<number>(100);
