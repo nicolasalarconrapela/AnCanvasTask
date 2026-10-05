@@ -73,6 +73,7 @@ import { NewFolderModal } from './components/NewFolderModal';
 import { RenameFolderModal } from './components/RenameFolderModal';
 import { MarkdownSplitEditor } from './components/MarkdownSplitEditor';
 import { SafeMarkdownNormalizerModal } from './components/SafeMarkdownNormalizerModal';
+import { SafeguardPage } from './components/SafeguardPage';
 import { LanguageSelector } from './components/LanguageSelector';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
@@ -234,6 +235,42 @@ export default function App() {
     setUserSettings(newSettings);
     saveUserSettings(newSettings);
   }, []);
+
+  // Safeguard routing & error detection (e.g. /404, /403, /500, /503 or ?error=404 / unknown sub-paths)
+  const [safeguardError, setSafeguardError] = useState<{
+    type: '404' | '403' | '500' | '503' | 'generic';
+    statusCode: number;
+    title?: string;
+    message?: string;
+  } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const path = window.location.pathname.toLowerCase();
+    const params = new URLSearchParams(window.location.search);
+    const errorParam = params.get('error') || params.get('status');
+
+    if (errorParam === '404' || path === '/404') {
+      return { type: '404', statusCode: 404 };
+    }
+    if (errorParam === '403' || path === '/403') {
+      return { type: '403', statusCode: 403 };
+    }
+    if (errorParam === '500' || path === '/500') {
+      return { type: '500', statusCode: 500 };
+    }
+    if (errorParam === '503' || path === '/503') {
+      return { type: '503', statusCode: 503 };
+    }
+    // Check if path is non-root and not /index.html and not a known static path
+    if (path !== '/' && path !== '/index.html' && path !== '' && !path.startsWith('/assets')) {
+      return {
+        type: '404',
+        statusCode: 404,
+        title: 'Página o ruta no encontrada',
+        message: `La ruta "${window.location.pathname}" no existe en la aplicación.`,
+      };
+    }
+    return null;
+  });
 
   // Shell Layout State (DESIGN.md Section 3 & 16)
   const [isMobileScreen, setIsMobileScreen] = useState<boolean>(() => {
@@ -3532,6 +3569,40 @@ export default function App() {
 
     return null;
   }, [selectedTaskShapeId, editor, markdownInput]);
+
+  if (safeguardError) {
+    return (
+      <SafeguardPage
+        type={safeguardError.type}
+        statusCode={safeguardError.statusCode}
+        title={safeguardError.title}
+        message={safeguardError.message}
+        onGoHome={() => {
+          setSafeguardError(null);
+          if (typeof window !== 'undefined') {
+            window.history.pushState({}, '', '/');
+          }
+        }}
+        onRetry={() => {
+          setSafeguardError(null);
+          if (typeof window !== 'undefined') {
+            window.location.reload();
+          }
+        }}
+        onResetStorage={() => {
+          try {
+            localStorage.clear();
+            sessionStorage.clear();
+          } catch (e) {
+            console.error(e);
+          }
+          if (typeof window !== 'undefined') {
+            window.location.href = '/';
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <div
