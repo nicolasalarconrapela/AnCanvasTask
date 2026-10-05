@@ -451,14 +451,69 @@ export function generateUniqueTaskId(title: string, markdown: string): string {
 }
 
 /**
+ * Helper to flexibly match a TaskBlockInfo by ID (#-stripped, raw, tempId, slug) or taskTitle.
+ */
+export function findMatchingTaskBlock(
+  taskBlocks: TaskBlockInfo[],
+  taskId?: string,
+  taskTitle?: string
+): TaskBlockInfo | undefined {
+  const normTargetId = (taskId || '').trim().toLowerCase().replace(/^#/, '');
+  const rawTargetId = (taskId || '').trim().toLowerCase();
+  const normTitle = (taskTitle || '').trim().toLowerCase();
+
+  // 1. Try matching by detectedId (exact or without # prefix)
+  if (normTargetId) {
+    const byId = taskBlocks.find((b) => {
+      if (!b.detectedId) return false;
+      const normDetected = b.detectedId.trim().toLowerCase().replace(/^#/, '');
+      const rawDetected = b.detectedId.trim().toLowerCase();
+      return (
+        normDetected === normTargetId ||
+        rawDetected === rawTargetId ||
+        rawDetected === normTargetId
+      );
+    });
+    if (byId) return byId;
+
+    // 2. Try matching by temporaryId
+    const byTempId = taskBlocks.find(
+      (b) => b.temporaryId && b.temporaryId.toLowerCase() === rawTargetId
+    );
+    if (byTempId) return byTempId;
+
+    // 3. Try matching by title if normTargetId matches title
+    const byIdAsTitle = taskBlocks.find((b) => {
+      if (!b.detectedTitle) return false;
+      const t = b.detectedTitle.trim().toLowerCase();
+      return t === rawTargetId || t === normTargetId;
+    });
+    if (byIdAsTitle) return byIdAsTitle;
+  }
+
+  // 4. Try matching by taskTitle if provided
+  if (normTitle) {
+    const byTitle = taskBlocks.find((b) => {
+      if (!b.detectedTitle) return false;
+      return b.detectedTitle.trim().toLowerCase() === normTitle;
+    });
+    if (byTitle) return byTitle;
+  }
+
+  return undefined;
+}
+
+/**
  * Finds tasks that list `targetTaskId` in their "Blocked by" field.
  */
 export function findDependentTasks(
   markdown: string,
-  targetTaskId: string
+  targetTaskId: string,
+  targetTaskTitle?: string
 ): Array<{ taskId: string; title: string; groupTitle: string }> {
   const { taskBlocks } = scanTaskBlocks(markdown);
-  const normalizedTargetId = targetTaskId.trim().toLowerCase();
+  const normalizedTargetId = targetTaskId.trim().toLowerCase().replace(/^#/, '');
+  const rawTargetId = targetTaskId.trim().toLowerCase();
 
   const dependents: Array<{ taskId: string; title: string; groupTitle: string }> = [];
 
@@ -466,9 +521,12 @@ export function findDependentTasks(
     if (block.detectedBlockedBy) {
       const blockers = block.detectedBlockedBy
         .split(',')
-        .map((b) => b.trim().toLowerCase());
+        .map((b) => b.trim().toLowerCase().replace(/^#/, ''));
 
-      if (blockers.includes(normalizedTargetId)) {
+      if (
+        (normalizedTargetId && blockers.includes(normalizedTargetId)) ||
+        (rawTargetId && blockers.includes(rawTargetId))
+      ) {
         dependents.push({
           taskId: block.detectedId || block.temporaryId,
           title: block.detectedTitle,
@@ -488,17 +546,13 @@ export function findDependentTasks(
 export function updateTaskInMarkdown(
   markdown: string,
   taskId: string,
-  updates: TaskUpdatePayload
+  updates: TaskUpdatePayload,
+  taskTitle?: string
 ): string {
   const lines = markdown.split(/\r?\n/);
-  const normalizedTargetId = taskId.trim().toLowerCase();
   const { taskBlocks } = scanTaskBlocks(markdown);
 
-  const targetBlock = taskBlocks.find(
-    (b) =>
-      (b.detectedId && b.detectedId.toLowerCase() === normalizedTargetId) ||
-      b.temporaryId.toLowerCase() === normalizedTargetId
-  );
+  const targetBlock = findMatchingTaskBlock(taskBlocks, taskId, taskTitle || updates.title);
 
   if (!targetBlock) {
     return markdown;
@@ -723,18 +777,17 @@ export function addTaskToMarkdown(
 }
 
 /**
- * Deletes a task block from Markdown by its taskId.
+ * Deletes a task block from Markdown by its taskId or title.
  */
-export function deleteTaskFromMarkdown(markdown: string, taskId: string): string {
+export function deleteTaskFromMarkdown(
+  markdown: string,
+  taskId: string,
+  taskTitle?: string
+): string {
   const lines = markdown.split(/\r?\n/);
-  const normalizedTargetId = taskId.trim().toLowerCase();
   const { taskBlocks } = scanTaskBlocks(markdown);
 
-  const targetBlock = taskBlocks.find(
-    (b) =>
-      (b.detectedId && b.detectedId.toLowerCase() === normalizedTargetId) ||
-      b.temporaryId.toLowerCase() === normalizedTargetId
-  );
+  const targetBlock = findMatchingTaskBlock(taskBlocks, taskId, taskTitle);
 
   if (!targetBlock) {
     return markdown;
@@ -753,18 +806,13 @@ export function deleteTaskFromMarkdown(markdown: string, taskId: string): string
 export function moveTaskToGroupInMarkdown(
   markdown: string,
   taskId: string,
-  targetGroupTitle: string
+  targetGroupTitle: string,
+  taskTitle?: string
 ): string {
-  const normalizedTargetId = taskId.trim().toLowerCase();
   const cleanTargetGroup = targetGroupTitle.trim();
   const { taskBlocks } = scanTaskBlocks(markdown);
 
-  const targetBlock = taskBlocks.find(
-    (b) =>
-      (b.detectedId && b.detectedId.toLowerCase() === normalizedTargetId) ||
-      b.temporaryId.toLowerCase() === normalizedTargetId ||
-      (b.detectedTitle && b.detectedTitle.trim().toLowerCase() === normalizedTargetId)
-  );
+  const targetBlock = findMatchingTaskBlock(taskBlocks, taskId, taskTitle);
 
   if (!targetBlock || targetBlock.groupTitle.toLowerCase() === cleanTargetGroup.toLowerCase()) {
     return markdown;

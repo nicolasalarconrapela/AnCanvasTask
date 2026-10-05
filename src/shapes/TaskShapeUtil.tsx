@@ -1548,6 +1548,16 @@ function toRichTextHelper(text: string) {
   };
 }
 
+let isPopulatingCanvasFromMarkdownFlag = false;
+
+export function isCanvasPopulatingFromMarkdown(): boolean {
+  return isPopulatingCanvasFromMarkdownFlag;
+}
+
+export function setCanvasPopulatingFromMarkdown(val: boolean) {
+  isPopulatingCanvasFromMarkdownFlag = val;
+}
+
 export function populateCanvasWithGroups(
   editor: Editor,
   groups: ParsedGroup[],
@@ -1555,7 +1565,9 @@ export function populateCanvasWithGroups(
   rawMarkdown?: string,
   options?: { shouldZoomToFit?: boolean; clearNotes?: boolean }
 ): { taskCount: number; groupCount: number } {
-  // Clear existing task, group, and arrow shapes on canvas
+  isPopulatingCanvasFromMarkdownFlag = true;
+  try {
+    // Clear existing task, group, and arrow shapes on canvas
   const existingShapes = editor
     .getCurrentPageShapes()
     .filter(
@@ -1930,6 +1942,11 @@ export function populateCanvasWithGroups(
     editor.zoomToFit({ animation: { duration: 250 } });
   }
   return { taskCount: totalTasks, groupCount: groups.length };
+  } finally {
+    setTimeout(() => {
+      isPopulatingCanvasFromMarkdownFlag = false;
+    }, 100);
+  }
 }
 
 export function seedMockTasks(

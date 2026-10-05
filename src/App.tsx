@@ -24,6 +24,7 @@ import {
 } from './services/sanityService';
 import {
   CustomNoteShapeUtil,
+  isCanvasPopulatingFromMarkdown,
   ITaskGroupShape,
   ITaskShape,
   loadTasksFromMarkdown,
@@ -1808,11 +1809,12 @@ export default function App() {
         title: string;
       }>;
       const { shapeId, taskId, title } = customEvent.detail;
-      const dependents = findDependentTasks(markdownRef.current, taskId);
+      const finalTaskId = taskId || shapeId;
+      const dependents = findDependentTasks(markdownRef.current, finalTaskId, title);
 
       setDeleteWarningState({
-        shapeId,
-        taskId,
+        shapeId: shapeId || finalTaskId,
+        taskId: finalTaskId,
         title,
         dependents,
       });
@@ -2089,6 +2091,8 @@ export default function App() {
       const unsubscribe = editorInstance.store.listen((entry) => {
         queueMicrotask(() => {
           if (!isMounted) return;
+          if (isCanvasPopulatingFromMarkdown()) return;
+
           let hasVisualChange = false;
           let hasNoteOrTextChange = false;
           const changes = entry.changes as any;
@@ -2109,23 +2113,42 @@ export default function App() {
                   hasNoteOrTextChange = true;
                 }
 
-                // 1. Detect task attribute changes (title, completed, priority)
+                // 1. Detect task attribute changes (title, completed, priority, status, tags, blockedBy)
                 if (to?.type === 'task' && from?.type === 'task') {
                   const toProps = to.props || {};
                   const fromProps = from.props || {};
                   const isTitleChanged = toProps.title !== fromProps.title;
                   const isCompletedChanged = toProps.completed !== fromProps.completed;
                   const isPriorityChanged = toProps.priority !== fromProps.priority;
+                  const isStatusChanged = toProps.status !== fromProps.status;
+                  const isTagsChanged = JSON.stringify(toProps.tags) !== JSON.stringify(fromProps.tags);
+                  const isBlockedByChanged = toProps.blockedBy !== fromProps.blockedBy;
 
-                  if (isTitleChanged || isCompletedChanged || isPriorityChanged) {
-                    const taskId = toProps.taskId || fromProps.taskId;
-                    if (taskId) {
+                  if (
+                    isTitleChanged ||
+                    isCompletedChanged ||
+                    isPriorityChanged ||
+                    isStatusChanged ||
+                    isTagsChanged ||
+                    isBlockedByChanged
+                  ) {
+                    const taskId = toProps.taskId || fromProps.taskId || to.id;
+                    const taskTitle = toProps.title || fromProps.title;
+                    if (taskId || taskTitle) {
                       setMarkdownInput((currentMd) =>
-                        updateTaskInMarkdown(currentMd, taskId, {
-                          title: toProps.title,
-                          completed: toProps.completed,
-                          priority: toProps.priority,
-                        })
+                        updateTaskInMarkdown(
+                          currentMd,
+                          taskId,
+                          {
+                            title: toProps.title,
+                            completed: toProps.completed,
+                            priority: toProps.priority,
+                            status: toProps.status,
+                            tags: toProps.tags,
+                            blockedBy: toProps.blockedBy,
+                          },
+                          taskTitle
+                        )
                       );
                     }
                   }
@@ -2134,7 +2157,8 @@ export default function App() {
                   const isPositionChanged = to.x !== from.x || to.y !== from.y;
                   if (isPositionChanged && !editorInstance.isIn('select.translating')) {
                     const taskId = toProps.taskId || fromProps.taskId;
-                    if (taskId) {
+                    const taskTitle = toProps.title || fromProps.title;
+                    if (taskId || taskTitle) {
                       const taskCenterX = to.x + (toProps.w || 320) / 2;
                       const taskCenterY = to.y + 40;
 
@@ -2164,7 +2188,7 @@ export default function App() {
                       const currentGroup = toProps.groupTitle || fromProps.groupTitle;
                       if (currentGroup?.trim().toLowerCase() !== targetGroupTitle.trim().toLowerCase()) {
                         setMarkdownInput((curr) =>
-                          moveTaskToGroupInMarkdown(curr, taskId, targetGroupTitle)
+                          moveTaskToGroupInMarkdown(curr, taskId, targetGroupTitle, taskTitle)
                         );
                         updateAllGroupCounts(editorInstance);
                       }
@@ -2261,15 +2285,27 @@ export default function App() {
             // ignore
           }
 
-          if (!hasVisualChange && changes.removed) {
+          if (changes.removed) {
+            let taskRemoved = false;
             for (const id of Object.keys(changes.removed)) {
-              if (changes.removed[id]?.typeName === 'shape') {
+              const removedItem = changes.removed[id];
+              if (removedItem?.typeName === 'shape') {
                 hasVisualChange = true;
-                if (changes.removed[id]?.type === 'note' || changes.removed[id]?.type === 'text') {
+                if (removedItem?.type === 'task') {
+                  const taskId = removedItem.props?.taskId || removedItem.props?.id || removedItem.id;
+                  const taskTitle = removedItem.props?.title;
+                  setMarkdownInput((currentMd) =>
+                    deleteTaskFromMarkdown(currentMd, taskId, taskTitle)
+                  );
+                  taskRemoved = true;
+                }
+                if (removedItem?.type === 'note' || removedItem?.type === 'text') {
                   hasNoteOrTextChange = true;
                 }
-                break;
               }
+            }
+            if (taskRemoved) {
+              updateAllGroupCounts(editorInstance);
             }
           }
 
@@ -2741,7 +2777,7 @@ export default function App() {
     const { shapeId, taskId, title } = deleteWarningState;
     const priorMarkdown = markdownInput;
 
-    const updatedMarkdown = deleteTaskFromMarkdown(markdownInput, taskId);
+    const updatedMarkdown = deleteTaskFromMarkdown(markdownInput, taskId, title);
     setMarkdownInput(updatedMarkdown);
 
     if (editor) {
@@ -3042,27 +3078,38 @@ export default function App() {
         priority?: TaskPriority;
         status?: TaskStatus;
         groupTitle?: string;
+        tags?: string[];
+        blockedBy?: string;
       }
     ) => {
       setMarkdownInput((currentMd) => {
         let updatedMd = currentMd;
 
         if (updates.groupTitle) {
-          updatedMd = moveTaskToGroupInMarkdown(updatedMd, taskId, updates.groupTitle);
+          updatedMd = moveTaskToGroupInMarkdown(updatedMd, taskId, updates.groupTitle, updates.title);
         }
 
         if (
           updates.title !== undefined ||
           updates.completed !== undefined ||
           updates.priority !== undefined ||
-          updates.status !== undefined
+          updates.status !== undefined ||
+          updates.tags !== undefined ||
+          updates.blockedBy !== undefined
         ) {
-          updatedMd = updateTaskInMarkdown(updatedMd, taskId, {
-            title: updates.title,
-            completed: updates.completed,
-            priority: updates.priority,
-            status: updates.status,
-          });
+          updatedMd = updateTaskInMarkdown(
+            updatedMd,
+            taskId,
+            {
+              title: updates.title,
+              completed: updates.completed,
+              priority: updates.priority,
+              status: updates.status,
+              tags: updates.tags,
+              blockedBy: updates.blockedBy,
+            },
+            updates.title
+          );
         }
 
         return updatedMd;
@@ -3085,6 +3132,9 @@ export default function App() {
               ...(updates.completed !== undefined ? { completed: updates.completed } : {}),
               ...(updates.priority !== undefined ? { priority: updates.priority } : {}),
               ...(updates.status !== undefined ? { status: updates.status } : {}),
+              ...(updates.tags !== undefined ? { tags: updates.tags } : {}),
+              ...(updates.blockedBy !== undefined ? { blockedBy: updates.blockedBy } : {}),
+              ...(updates.groupTitle !== undefined ? { groupTitle: updates.groupTitle } : {}),
             },
           } as any);
           triggerDebouncedVisualSave(editor);
