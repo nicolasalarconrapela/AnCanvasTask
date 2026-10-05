@@ -709,7 +709,7 @@ function TaskCardComponent({
                   setIsMenuOpen(false);
                   window.dispatchEvent(
                     new CustomEvent('antask:assign-task-id', {
-                      detail: { taskId: taskId || title, taskTitle: title },
+                      detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
                     })
                   );
                 }}
@@ -820,7 +820,7 @@ function TaskCardComponent({
                   e.stopPropagation();
                   window.dispatchEvent(
                     new CustomEvent('antask:assign-task-id', {
-                      detail: { taskId: taskId || title, taskTitle: title },
+                      detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
                     })
                   );
                 }}
@@ -839,26 +839,6 @@ function TaskCardComponent({
               >
                 dup
               </span>
-            )}
-
-            {hasMissingId && (
-              <button
-                id={`btn-task-badge-generate-id-${shape.id}`}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.dispatchEvent(
-                    new CustomEvent('antask:assign-task-id', {
-                      detail: { taskId: taskId || title, taskTitle: title },
-                    })
-                  );
-                }}
-                className="text-[10px] font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-0.5 cursor-pointer transition-colors font-mono"
-                title={_(msg`Tarea sin ID explícito en TASKS.md. Clic para generar ID automático.`)}
-              >
-                <span>sin-id</span>
-                <span className="material-symbols-outlined text-[10px]">auto_fix_high</span>
-              </button>
             )}
 
             {unresolvedBlockers && unresolvedBlockers.length > 0 && (

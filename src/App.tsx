@@ -572,7 +572,7 @@ export default function App() {
   const handleAssignSingleTaskId = useCallback(
     (targetIdOrLine: string | number, taskTitle?: string) => {
       setMarkdownInput((curr) => {
-        const { updatedMarkdown, taskId } = assignTaskIdToTask(curr, targetIdOrLine);
+        const { updatedMarkdown, taskId } = assignTaskIdToTask(curr, targetIdOrLine, taskTitle);
         if (taskId) {
           pushToast(i18n._(msg`ID #${taskId} asignado a "${taskTitle || taskId}"`), 'success');
         }

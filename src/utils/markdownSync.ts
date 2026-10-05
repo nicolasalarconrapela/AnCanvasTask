@@ -858,21 +858,17 @@ export function moveTaskToGroupInMarkdown(
 export function assignTaskIdToTask(
   markdown: string,
   targetIdOrLine: string | number,
+  taskTitle?: string,
   customId?: string
 ): { updatedMarkdown: string; taskId: string | null } {
   const { taskBlocks } = scanTaskBlocks(markdown);
-  const normalizedTarget = typeof targetIdOrLine === 'string' ? targetIdOrLine.trim().toLowerCase() : '';
 
-  const targetBlock = taskBlocks.find((b) => {
-    if (typeof targetIdOrLine === 'number') {
-      return b.taskLineIndex === targetIdOrLine;
-    }
-    return (
-      (b.detectedId && b.detectedId.toLowerCase() === normalizedTarget) ||
-      (b.temporaryId && b.temporaryId.toLowerCase() === normalizedTarget) ||
-      (b.detectedTitle && b.detectedTitle.trim().toLowerCase() === normalizedTarget)
-    );
-  });
+  let targetBlock: TaskBlockInfo | undefined;
+  if (typeof targetIdOrLine === 'number') {
+    targetBlock = taskBlocks.find((b) => b.taskLineIndex === targetIdOrLine);
+  } else {
+    targetBlock = findMatchingTaskBlock(taskBlocks, targetIdOrLine, taskTitle);
+  }
 
   if (!targetBlock) {
     return { updatedMarkdown: markdown, taskId: null };
@@ -884,7 +880,7 @@ export function assignTaskIdToTask(
   }
 
   const lines = markdown.split(/\r?\n/);
-  const finalId = customId?.trim() || generateUniqueTaskId(targetBlock.detectedTitle, markdown);
+  const finalId = customId?.trim() || generateUniqueTaskId(targetBlock.detectedTitle || taskTitle || 'task', markdown);
   const baseIndent = targetBlock.indentation ? `${targetBlock.indentation}  ` : '  ';
   const newIdLine = `${baseIndent}- ID: ${finalId}`;
 
