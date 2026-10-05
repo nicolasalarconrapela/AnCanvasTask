@@ -53,7 +53,7 @@ export const SanityStudioEmbed: React.FC<SanityStudioEmbedProps> = ({
   const isConfigured = Boolean(config.projectId && config.dataset);
 
   const studioConfig = useMemo(() => {
-    const projectId = config.projectId?.trim() || 'or19faat';
+    const projectId = config.projectId?.trim() || '';
     const dataset = config.dataset?.trim() || 'production';
 
     return defineConfig({

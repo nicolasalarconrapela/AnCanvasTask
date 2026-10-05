@@ -5,8 +5,8 @@ A continuación, se detalla el papel actual de Sanity en el repositorio, basánd
 ## Configuración
 
 ```text
-SANITY_PROJECT_ID=or19faat (via import.meta.env.VITE_SANITY_PROJECT_ID o fallback)
-SANITY_DATASET=production (via import.meta.env.VITE_SANITY_DATASET o fallback)
+SANITY_PROJECT_ID=Configurable por el usuario (via import.meta.env.VITE_SANITY_PROJECT_ID o interfaz)
+SANITY_DATASET=production (via import.meta.env.VITE_SANITY_DATASET o interfaz)
 SANITY_API_VERSION=2024-03-01
 SANITY_VERSION=v6.17.0 (y @sanity/client v8.7.0)
 ```

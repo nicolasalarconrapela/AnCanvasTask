@@ -64,7 +64,7 @@ export const logSanityWarn = (action: string, details?: any) => {
 };
 
 const DEFAULT_SANITY_CONFIG: SanityConfig = {
-  projectId: import.meta.env.VITE_SANITY_PROJECT_ID || 'or19faat',
+  projectId: import.meta.env.VITE_SANITY_PROJECT_ID || '',
   dataset: import.meta.env.VITE_SANITY_DATASET || 'production',
   apiVersion: '2024-03-01',
   token: import.meta.env.VITE_SANITY_API_TOKEN || '',

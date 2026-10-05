@@ -5090,7 +5090,9 @@ export default function App() {
                   <span className="material-symbols-outlined text-[18px] text-rose-400">cloud_sync</span>
                   <span>{i18n._(msg`Ajustes de Sanity Cloud`)}</span>
                 </div>
-                <span className="text-[10px] font-mono text-emerald-400">or19faat</span>
+                <span className="text-[10px] font-mono text-emerald-400">
+                  {sanityConfig.projectId || i18n._(msg`No conectado`)}
+                </span>
               </button>
 
               {/* Quick Guide */}
