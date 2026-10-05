@@ -100,6 +100,7 @@ import {
   saveUserSettings,
   recordRecentFile,
 } from './services/settingsService';
+import { analyzeSyncDifferences } from './services/syncEngineService';
 import {
   addTaskToMarkdown,
   assignTaskIdToTask,
@@ -704,6 +705,8 @@ export default function App() {
   const debouncedSanityTasksRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const markdownRef = useRef<string>(markdownInput);
   markdownRef.current = markdownInput;
+  const lastConflictNotifiedTimeRef = useRef<number>(0);
+  const isAutoSavingRef = useRef<boolean>(false);
 
   // Synchronize canvas shape visibility (cards, groups, and connector arrows) with active filters & search query
   useEffect(() => {
@@ -1046,6 +1049,85 @@ export default function App() {
       return nextStore;
     });
   }, [markdownInput]);
+
+  // Automatic periodic auto-save and cloud conflict detection
+  useEffect(() => {
+    if (!userSettings.autoSave) return;
+    const intervalSec = userSettings.autoSaveIntervalSeconds || 30;
+    const timer = setInterval(async () => {
+      if (isAutoSavingRef.current || isSwitchingDocRef.current || isLoadingDocument) return;
+      isAutoSavingRef.current = true;
+      try {
+        // 1. Ensure current active document content and visual layout are saved to workspaceStore in localStorage
+        setWorkspaceStore((prevStore) => {
+          let hasChanges = false;
+          const nextWs = prevStore.workspaces.map((ws) => {
+            if (ws.id !== prevStore.activeWorkspaceId) return ws;
+            const nextBranches = ws.branches.map((b) => {
+              if (b.name !== ws.activeBranchName) return b;
+              const nextDocs = b.taskDocuments.map((d) => {
+                if (d.id !== b.activeDocumentId) return d;
+                if (d.content !== markdownInput) {
+                  hasChanges = true;
+                  return {
+                    ...d,
+                    content: markdownInput,
+                    updatedAt: new Date().toISOString(),
+                  };
+                }
+                return d;
+              });
+              return { ...b, taskDocuments: nextDocs };
+            });
+            return { ...ws, branches: nextBranches, updatedAt: new Date().toISOString() };
+          });
+
+          if (hasChanges) {
+            const nextStore = { ...prevStore, workspaces: nextWs };
+            saveWorkspaceStore(nextStore);
+            return nextStore;
+          }
+          return prevStore;
+        });
+
+        // 2. If Sanity Cloud is configured, check for differences and notify on conflicts
+        const sanityConfig = getSanityConfig();
+        if (sanityConfig.projectId && sanityConfig.dataset) {
+          const diffResult = await analyzeSyncDifferences(workspaceStore);
+          const totalConflicts = diffResult.counts.conflicts + diffResult.counts.remoteOverrides;
+          if (totalConflicts > 0) {
+            const now = Date.now();
+            // Throttle notifications to at most once per 60 seconds
+            if (now - lastConflictNotifiedTimeRef.current > 60000) {
+              lastConflictNotifiedTimeRef.current = now;
+              pushToast(
+                i18n._(msg`Conflicto detectado en la sincronización automática (${totalConflicts})`),
+                'warning',
+                {
+                  label: i18n._(msg`Resolver`),
+                  onClick: () => setIsSyncOverrideModalOpen(true),
+                }
+              );
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Error during auto-save conflict check:', e);
+      } finally {
+        isAutoSavingRef.current = false;
+      }
+    }, Math.max(5, intervalSec) * 1000);
+
+    return () => clearInterval(timer);
+  }, [
+    userSettings.autoSave,
+    userSettings.autoSaveIntervalSeconds,
+    markdownInput,
+    workspaceStore,
+    isLoadingDocument,
+    pushToast,
+    i18n,
+  ]);
 
   // Reactive and reliable document switching across workspaces, branches and files
   useEffect(() => {

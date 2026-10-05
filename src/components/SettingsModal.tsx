@@ -266,6 +266,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
                   />
                 </div>
+
+                {/* Automatic Auto-Save & Conflict Check */}
+                <div id="div-settingsmodal-autosave" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Autoguardado automático`)}</span>
+                      <span className="text-[var(--on-surface-variant)] text-[11px]">
+                        {i18n._(msg`Guarda automáticamente y notifica si se detectan conflictos con la nube`)}
+                      </span>
+                    </div>
+                    <input
+                      id="checkbox-settings-autosave"
+                      type="checkbox"
+                      checked={settings.autoSave ?? true}
+                      onChange={(e) => handleUpdate('autoSave', e.target.checked)}
+                      className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
+                    />
+                  </div>
+                  {settings.autoSave && (
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-[var(--outline)]/50">
+                      <span className="text-[11px] text-[var(--on-surface-variant)]">{i18n._(msg`Frecuencia de autoguardado`)}</span>
+                      <select
+                        value={settings.autoSaveIntervalSeconds || 30}
+                        onChange={(e) => handleUpdate('autoSaveIntervalSeconds', Number(e.target.value))}
+                        className="bg-[var(--surface-container)] text-[var(--on-surface)] border border-[var(--outline)] rounded px-2.5 py-1 text-xs focus:outline-none focus:border-[var(--primary)] cursor-pointer"
+                      >
+                        <option value={10}>10s ({i18n._(msg`Rápido`)})</option>
+                        <option value={30}>30s ({i18n._(msg`Normal`)})</option>
+                        <option value={60}>60s (1 min)</option>
+                        <option value={120}>120s (2 min)</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

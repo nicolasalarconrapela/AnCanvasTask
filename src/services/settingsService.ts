@@ -15,6 +15,8 @@ export interface AppUserSettings {
   language: LanguageMode;
   defaultView: 'canvas' | 'kanban' | 'split' | 'studio';
   confirmDeleteWithDependents: boolean;
+  autoSave: boolean;
+  autoSaveIntervalSeconds: number;
   canvasShowGrid: boolean;
   canvasSnapToGrid: boolean;
   canvasInitialZoom: number; // in percentage, e.g. 100
@@ -33,6 +35,8 @@ export const DEFAULT_USER_SETTINGS: AppUserSettings = {
   language: 'en',
   defaultView: 'canvas',
   confirmDeleteWithDependents: true,
+  autoSave: true,
+  autoSaveIntervalSeconds: 30,
   canvasShowGrid: true,
   canvasSnapToGrid: false,
   canvasInitialZoom: 100,
