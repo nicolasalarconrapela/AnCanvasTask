@@ -2780,6 +2780,8 @@ export default function App() {
     async (newConfig: SanityConfig) => {
       if (newConfig.projectId && newConfig.dataset) {
         setSyncStatus('loading');
+        // Automatically open Sync & Override Detection modal on connection
+        setIsSyncOverrideModalOpen(true);
         if (editor) {
           const remoteState = await loadCanvasVisualState();
           if (remoteState) {
@@ -3852,7 +3854,28 @@ export default function App() {
                   </span>
                 </button>
 
-                {/* 2. Configuración */}
+                {/* 2. Sync & Override Detection */}
+                <button
+                  id="btn-header-more-menu-sync-override"
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setIsHeaderMenuOpen(false);
+                    setIsSyncOverrideModalOpen(true);
+                  }}
+                  className="w-full px-3 py-2 flex items-center justify-between text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] transition-colors cursor-pointer"
+                  title={i18n._(msg`Sync & Override Detection (Detección de diferencias y resolución de conflictos)`)}
+                >
+                  <div id="div-header-more-menu-sync-override-content" className="flex items-center gap-2.5">
+                    <span className="material-symbols-outlined text-[18px] text-amber-400">sync_problem</span>
+                    <span className="font-medium">{i18n._(msg`Sync & Override Detection`)}</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/60 text-amber-300">
+                    Sync
+                  </span>
+                </button>
+
+                {/* 3. Configuración */}
                 <button
                   id="btn-header-more-menu-settings"
                   role="menuitem"
@@ -5036,7 +5059,7 @@ export default function App() {
               >
                 <div id="div-app-41" className="flex items-center gap-2.5">
                   <span className="material-symbols-outlined text-[18px] text-amber-400">sync_problem</span>
-                  <span>{i18n._(msg`Sincronizar con Sanity`)}</span>
+                  <span>{i18n._(msg`Sync & Override Detection`)}</span>
                 </div>
                 <span>➔</span>
               </button>
