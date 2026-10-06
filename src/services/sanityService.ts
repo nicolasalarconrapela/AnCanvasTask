@@ -98,12 +98,16 @@ export function saveSanityConfig(config: Partial<SanityConfig>) {
   }
 }
 
+export type SanityAuthType = 'user_token' | 'robot_token' | 'public_read' | 'local';
+
 export interface SanityUserProfile {
   id: string;
   name?: string;
   email?: string;
   profileImage?: string;
   role?: string;
+  isRobot?: boolean;
+  authType: SanityAuthType;
 }
 
 const LOCAL_STORAGE_KEY_SANITY_USER = 'antask_sanity_user_profile';
@@ -118,11 +122,38 @@ export function getCachedSanityUser(): SanityUserProfile | null {
   return null;
 }
 
+export function determineSanityAuthType(config: SanityConfig, profile?: Partial<SanityUserProfile> | null): SanityAuthType {
+  if (!config.projectId || !config.dataset) {
+    return 'local';
+  }
+  if (!config.token?.trim()) {
+    return 'public_read';
+  }
+  if (profile?.isRobot || profile?.authType === 'robot_token') {
+    return 'robot_token';
+  }
+  return 'user_token';
+}
+
 export async function fetchSanityCurrentUser(configOverride?: SanityConfig): Promise<SanityUserProfile | null> {
   const config = configOverride || getSanityConfig();
   const token = config.token?.trim();
+
+  if (!config.projectId || !config.dataset) {
+    return {
+      id: 'local',
+      name: 'Modo Local',
+      authType: 'local',
+    };
+  }
+
   if (!token) {
-    return null;
+    return {
+      id: config.projectId,
+      name: `Proyecto ${config.projectId}`,
+      role: 'Público / Solo lectura',
+      authType: 'public_read',
+    };
   }
 
   try {
@@ -134,12 +165,16 @@ export async function fetchSanityCurrentUser(configOverride?: SanityConfig): Pro
 
     if (res.ok) {
       const data = await res.json();
+      const isRobot = Boolean(data.isRobot || data.type === 'robot' || (!data.email && !data.profileImage));
+      const authType: SanityAuthType = isRobot ? 'robot_token' : 'user_token';
       const user: SanityUserProfile = {
         id: data.id || 'user',
-        name: data.name || data.displayName || '',
+        name: data.name || data.displayName || data.label || (isRobot ? `Token Robot (${config.projectId})` : 'Usuario Sanity'),
         email: data.email || '',
         profileImage: data.profileImage || data.imageUrl || '',
-        role: data.role || '',
+        role: data.role || (isRobot ? 'Robot / Service' : 'Editor / Admin'),
+        isRobot,
+        authType,
       };
       try {
         localStorage.setItem(LOCAL_STORAGE_KEY_SANITY_USER, JSON.stringify(user));
@@ -147,12 +182,35 @@ export async function fetchSanityCurrentUser(configOverride?: SanityConfig): Pro
         // ignore
       }
       return user;
+    } else if (res.status === 401 || res.status === 403) {
+      // Token exists and works for dataset operations, but has restricted user/project scope (e.g. specialized deploy token)
+      const robotUser: SanityUserProfile = {
+        id: 'service-token',
+        name: `Token de Servicio (${config.projectId})`,
+        role: 'Robot / Service Token',
+        isRobot: true,
+        authType: 'robot_token',
+      };
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY_SANITY_USER, JSON.stringify(robotUser));
+      } catch {
+        // ignore
+      }
+      return robotUser;
     }
   } catch (err) {
     console.warn('Could not fetch current Sanity user:', err);
   }
 
-  return getCachedSanityUser();
+  const cached = getCachedSanityUser();
+  if (cached) return cached;
+
+  return {
+    id: config.projectId,
+    name: `Sanity (${config.projectId})`,
+    role: 'API Token',
+    authType: 'user_token',
+  };
 }
 
 export function clearSanityConfig() {
