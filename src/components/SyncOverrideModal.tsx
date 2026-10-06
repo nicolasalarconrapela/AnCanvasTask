@@ -9,6 +9,7 @@ import {
   analyzeSyncDifferences,
   resolveSyncItem,
   executeBatchSync,
+  deleteSyncItem,
   formatRelativeTime,
 } from '../services/syncEngineService';
 import { WorkspaceStoreState } from '../services/workspaceService';
@@ -38,6 +39,8 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   const [filterType, setFilterType] = useState<'all' | 'pending' | 'conflicts' | 'synced'>('all');
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
   const [resolvingItemId, setResolvingItemId] = useState<string | null>(null);
+  const [confirmDeleteItemId, setConfirmDeleteItemId] = useState<string | null>(null);
+  const [deleteScope, setDeleteScope] = useState<'local' | 'remote' | 'both'>('local');
 
   const [sanityConfig, setSanityConfig] = useState(getSanityConfig());
   const isSanityConfigured = Boolean(sanityConfig.projectId && sanityConfig.dataset);
@@ -93,6 +96,30 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       }
     } catch (err: any) {
       onShowToast(err?.message || 'Error al resolver elemento', 'error');
+    } finally {
+      setResolvingItemId(null);
+    }
+  };
+
+  const handleDeleteSingle = async (
+    item: SyncItemDiff,
+    scope: 'local' | 'remote' | 'both'
+  ) => {
+    setResolvingItemId(item.id);
+    try {
+      const res = await deleteSyncItem(item, scope, workspaceStore);
+      if (res.success) {
+        onShowToast(res.message, 'info');
+        if (res.updatedStore) {
+          onUpdateWorkspaceStore(res.updatedStore);
+        }
+        setConfirmDeleteItemId(null);
+        await handleRunAnalysis();
+      } else {
+        onShowToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      onShowToast(err?.message || 'Error al eliminar elemento', 'error');
     } finally {
       setResolvingItemId(null);
     }
@@ -470,6 +497,34 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                       )}
 
                       <button
+                        id={`btn-sync-item-delete-${item.id}`}
+                        type="button"
+                        disabled={isResolving || isProcessing}
+                        onClick={() => {
+                          if (confirmDeleteItemId === item.id) {
+                            setConfirmDeleteItemId(null);
+                          } else {
+                            setConfirmDeleteItemId(item.id);
+                            setDeleteScope(
+                              item.diffType === 'only_remote'
+                                ? 'remote'
+                                : item.diffType === 'only_local'
+                                ? 'local'
+                                : 'local'
+                            );
+                          }
+                        }}
+                        className={`btn-m3-icon w-7 h-7 cursor-pointer transition-colors ${
+                          confirmDeleteItemId === item.id
+                            ? 'bg-rose-950/60 text-rose-300 border border-rose-800'
+                            : 'text-[var(--on-surface-variant)] hover:text-rose-400 hover:bg-rose-950/30'
+                        }`}
+                        title={i18n._(msg`Eliminar elemento`)}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">delete</span>
+                      </button>
+
+                      <button
                         id={`btn-sync-item-toggle-expand-${item.id}`}
                         type="button"
                         onClick={() => setExpandedItemId(isExpanded ? null : item.id)}
@@ -482,6 +537,143 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {/* Inline Delete Confirmation Bar */}
+                  {confirmDeleteItemId === item.id && (
+                    <div
+                      id={`div-sync-item-delete-confirm-${item.id}`}
+                      className="px-3.5 py-3 border-t border-rose-900/60 bg-rose-950/25 flex flex-col gap-2.5 animate-fade-in text-xs"
+                    >
+                      <div className="flex items-center gap-2 font-medium text-rose-300">
+                        <span className="material-symbols-outlined text-[16px] text-rose-400">warning</span>
+                        <span>{i18n._(msg`¿Confirmar eliminación de "${item.title}"?`)}</span>
+                      </div>
+
+                      {item.diffType !== 'only_local' && item.diffType !== 'only_remote' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                          <label
+                            className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition-all ${
+                              deleteScope === 'local'
+                                ? 'border-sky-500 bg-sky-950/50 text-[var(--on-surface)]'
+                                : 'border-[var(--outline)] bg-[var(--surface)] text-[var(--on-surface-variant)]'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name={`delete-scope-${item.id}`}
+                              value="local"
+                              checked={deleteScope === 'local'}
+                              onChange={() => setDeleteScope('local')}
+                              className="mt-0.5"
+                            />
+                            <div className="flex flex-col">
+                              <span className="font-medium flex items-center gap-1 text-[11px] text-[var(--on-surface)]">
+                                <span className="material-symbols-outlined text-[13px] text-sky-400">devices</span>
+                                {i18n._(msg`Solo Local`)}
+                              </span>
+                              <span className="text-[10px] text-[var(--on-surface-variant)]">
+                                {i18n._(msg`Conserva la copia en Sanity Cloud`)}
+                              </span>
+                            </div>
+                          </label>
+
+                          <label
+                            className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition-all ${
+                              deleteScope === 'remote'
+                                ? 'border-amber-500 bg-amber-950/50 text-[var(--on-surface)]'
+                                : 'border-[var(--outline)] bg-[var(--surface)] text-[var(--on-surface-variant)]'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name={`delete-scope-${item.id}`}
+                              value="remote"
+                              checked={deleteScope === 'remote'}
+                              onChange={() => setDeleteScope('remote')}
+                              className="mt-0.5"
+                            />
+                            <div className="flex flex-col">
+                              <span className="font-medium flex items-center gap-1 text-[11px] text-[var(--on-surface)]">
+                                <span className="material-symbols-outlined text-[13px] text-amber-400">cloud_off</span>
+                                {i18n._(msg`Solo Remoto (Sanity)`)}
+                              </span>
+                              <span className="text-[10px] text-[var(--on-surface-variant)]">
+                                {i18n._(msg`Destruye en Sanity, conserva en local`)}
+                              </span>
+                            </div>
+                          </label>
+
+                          <label
+                            className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition-all ${
+                              deleteScope === 'both'
+                                ? 'border-rose-500 bg-rose-950/50 text-[var(--on-surface)]'
+                                : 'border-[var(--outline)] bg-[var(--surface)] text-[var(--on-surface-variant)]'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name={`delete-scope-${item.id}`}
+                              value="both"
+                              checked={deleteScope === 'both'}
+                              onChange={() => setDeleteScope('both')}
+                              className="mt-0.5"
+                            />
+                            <div className="flex flex-col">
+                              <span className="font-medium flex items-center gap-1 text-[11px] text-[var(--on-surface)]">
+                                <span className="material-symbols-outlined text-[13px] text-rose-400">delete_forever</span>
+                                {i18n._(msg`Ambos (Local y Sanity)`)}
+                              </span>
+                              <span className="text-[10px] text-[var(--on-surface-variant)]">
+                                {i18n._(msg`Eliminación permanente total`)}
+                              </span>
+                            </div>
+                          </label>
+                        </div>
+                      )}
+
+                      {item.diffType === 'only_local' && (
+                        <p className="text-[11px] text-[var(--on-surface-variant)]">
+                          {i18n._(msg`Este elemento solo existe localmente. Se eliminará de tu almacenamiento local.`)}
+                        </p>
+                      )}
+
+                      {item.diffType === 'only_remote' && (
+                        <p className="text-[11px] text-[var(--on-surface-variant)]">
+                          {i18n._(msg`Este elemento existe en Sanity Cloud. Se destruirá permanentemente de tu dataset remoto.`)}
+                        </p>
+                      )}
+
+                      <div className="flex items-center justify-end gap-2 pt-1 border-t border-rose-900/40">
+                        <button
+                          id={`btn-sync-item-cancel-delete-${item.id}`}
+                          type="button"
+                          onClick={() => setConfirmDeleteItemId(null)}
+                          className="btn-m3-secondary px-2.5 py-1 text-xs cursor-pointer"
+                        >
+                          {i18n._(msg`Cancelar`)}
+                        </button>
+                        <button
+                          id={`btn-sync-item-confirm-delete-${item.id}`}
+                          type="button"
+                          disabled={isResolving}
+                          onClick={() =>
+                            handleDeleteSingle(
+                              item,
+                              item.diffType === 'only_remote'
+                                ? 'remote'
+                                : item.diffType === 'only_local'
+                                ? 'local'
+                                : deleteScope
+                            )
+                          }
+                          className="px-3 py-1 text-xs rounded bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-medium flex items-center gap-1 cursor-pointer disabled:opacity-50 shadow-xs"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">delete</span>
+                          <span>{i18n._(msg`Confirmar eliminación`)}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Expanded Diff Viewer */}
                   {isExpanded && (

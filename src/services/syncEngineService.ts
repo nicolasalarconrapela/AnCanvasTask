@@ -3,6 +3,7 @@ import {
   WorkspaceStoreState,
   TaskDocument,
   saveWorkspaceStore,
+  getInitialDefaultWorkspaces,
 } from './workspaceService';
 import {
   getSanityConfig,
@@ -13,9 +14,13 @@ import {
   saveCanvasVisualState,
   fetchSanityDocumentsList,
   fetchSanityDocumentById,
+  deleteDocumentFromSanity,
+  deleteWorkspaceFromSanity,
+  sanitizeSanityDocId,
   SanityConfig,
 } from './sanityService';
 import { parseTasksMarkdown, ParsedGroup } from '../shapes/TaskShapeUtil';
+import { deleteTaskFromMarkdown } from '../utils/markdownSync';
 
 export type SyncDifferenceType =
   | 'synced'
@@ -496,4 +501,189 @@ export async function executeBatchSync(
       updatedStore: currentStore,
     };
   }
+}
+
+/**
+ * Deletes a sync item with a selected scope (local, remote, or both).
+ */
+export async function deleteSyncItem(
+  item: SyncItemDiff,
+  scope: 'local' | 'remote' | 'both',
+  workspaceStore: WorkspaceStoreState,
+  configOverride?: Partial<SanityConfig>
+): Promise<{ success: boolean; message: string; updatedStore?: WorkspaceStoreState }> {
+  const config = { ...getSanityConfig(), ...configOverride };
+
+  if (item.entityType === 'workspace') {
+    const wsId =
+      item.localData?.id ||
+      item.remoteData?.workspaceId ||
+      item.remoteData?.id ||
+      item.id.replace(/^ws_/, '');
+    const cleanId = sanitizeSanityDocId(String(wsId).replace(/^workspace-/, ''));
+    let updatedStore: WorkspaceStoreState | undefined;
+
+    // 1. Delete locally if scope is 'local' or 'both'
+    if (scope === 'local' || scope === 'both') {
+      const filtered = workspaceStore.workspaces.filter(
+        (w) =>
+          w.id !== wsId &&
+          w.id !== cleanId &&
+          w.id.replace(/^workspace-/, '') !== cleanId
+      );
+
+      let nextWorkspaces = filtered;
+      let nextActiveId = workspaceStore.activeWorkspaceId;
+
+      if (nextWorkspaces.length === 0) {
+        const freshDefaults = getInitialDefaultWorkspaces();
+        const cleanWs: Workspace = {
+          ...freshDefaults[0],
+          id: 'ws_' + Date.now(),
+          name: 'Mi Workspace',
+          githubRepo: {
+            owner: 'usuario',
+            repo: 'mi-repositorio',
+            fullName: 'usuario/mi-repositorio',
+            url: 'https://github.com/usuario/mi-repositorio',
+            defaultBranch: 'main',
+          },
+        };
+        nextWorkspaces = [cleanWs];
+        nextActiveId = cleanWs.id;
+      } else if (
+        workspaceStore.activeWorkspaceId === wsId ||
+        workspaceStore.activeWorkspaceId === cleanId ||
+        workspaceStore.activeWorkspaceId.replace(/^workspace-/, '') === cleanId
+      ) {
+        nextActiveId = nextWorkspaces[0].id;
+      }
+
+      updatedStore = {
+        ...workspaceStore,
+        workspaces: nextWorkspaces,
+        activeWorkspaceId: nextActiveId,
+      };
+      saveWorkspaceStore(updatedStore);
+    }
+
+    // 2. Delete remotely if scope is 'remote' or 'both'
+    if (scope === 'remote' || scope === 'both') {
+      if (config.projectId && config.dataset && config.token) {
+        const delRes = await deleteWorkspaceFromSanity(cleanId, config);
+        if (!delRes.ok && scope === 'remote') {
+          return { success: false, message: delRes.message };
+        }
+      } else if (scope === 'remote') {
+        return {
+          success: false,
+          message: 'Configura el API Token de Sanity para eliminar en remoto',
+        };
+      }
+    }
+
+    const scopeLabel =
+      scope === 'both'
+        ? 'localmente y en Sanity Cloud'
+        : scope === 'remote'
+        ? 'en Sanity Cloud'
+        : 'en local';
+
+    return {
+      success: true,
+      message: `Workspace "${item.title.replace(/^Workspace:\s*/, '')}" eliminado ${scopeLabel}`,
+      updatedStore,
+    };
+  }
+
+  if (item.entityType === 'task') {
+    const taskId =
+      item.localData?.taskId ||
+      item.localData?.temporaryId ||
+      item.id.replace(/^task_/, '');
+    let updatedStore: WorkspaceStoreState | undefined;
+
+    // 1. Delete locally if scope is 'local' or 'both'
+    if (scope === 'local' || scope === 'both') {
+      const activeWs =
+        workspaceStore.workspaces.find(
+          (w) => w.id === workspaceStore.activeWorkspaceId
+        ) || workspaceStore.workspaces[0];
+      if (activeWs) {
+        const activeBranch =
+          activeWs.branches.find((b) => b.name === activeWs.activeBranchName) ||
+          activeWs.branches[0];
+        if (activeBranch) {
+          const activeDoc =
+            activeBranch.taskDocuments.find(
+              (d) => d.id === activeBranch.activeDocumentId
+            ) || activeBranch.taskDocuments[0];
+          if (activeDoc) {
+            const newContent = deleteTaskFromMarkdown(
+              activeDoc.content,
+              taskId,
+              item.localData?.title
+            );
+            const updatedDocs = activeBranch.taskDocuments.map((d) =>
+              d.id === activeDoc.id
+                ? {
+                    ...d,
+                    content: newContent,
+                    lastSavedContent: newContent,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : d
+            );
+            const updatedBranches = activeWs.branches.map((b) =>
+              b.name === activeBranch.name
+                ? { ...b, taskDocuments: updatedDocs }
+                : b
+            );
+            const updatedWorkspaces = workspaceStore.workspaces.map((w) =>
+              w.id === activeWs.id ? { ...w, branches: updatedBranches } : w
+            );
+            updatedStore = {
+              ...workspaceStore,
+              workspaces: updatedWorkspaces,
+            };
+            saveWorkspaceStore(updatedStore);
+          }
+        }
+      }
+    }
+
+    // 2. Delete remotely if scope is 'remote' or 'both'
+    if (scope === 'remote' || scope === 'both') {
+      if (config.projectId && config.dataset && config.token) {
+        const docId = item.remoteData?._id || `task-${taskId}`;
+        const delRes = await deleteDocumentFromSanity(docId, config);
+        if (!delRes.ok && scope === 'remote') {
+          return { success: false, message: delRes.message };
+        }
+      } else if (scope === 'remote') {
+        return {
+          success: false,
+          message: 'Configura el API Token de Sanity para eliminar en remoto',
+        };
+      }
+    }
+
+    const scopeLabel =
+      scope === 'both'
+        ? 'localmente y en Sanity Cloud'
+        : scope === 'remote'
+        ? 'en Sanity Cloud'
+        : 'en local';
+
+    return {
+      success: true,
+      message: `Tarea "${item.title.replace(/^Tarea:\s*(\[[^\]]+\]\s*)?/, '')}" eliminada ${scopeLabel}`,
+      updatedStore,
+    };
+  }
+
+  return {
+    success: false,
+    message: 'Tipo de elemento no compatible para eliminación',
+  };
 }
