@@ -16,7 +16,7 @@ interface WorkspaceManagerModalProps {
   onSelectWorkspace: (id: string) => void;
   onCreateWorkspace: (workspace: Workspace) => void;
   onUpdateWorkspace?: (workspace: Workspace) => void;
-  onDeleteWorkspace: (id: string) => void;
+  onDeleteWorkspace: (id: string, deleteRemote?: boolean) => void;
   onShowToast: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
   onSyncWorkspacesToSanity?: () => Promise<void>;
   onImportWorkspacesFromSanity?: () => Promise<void>;
@@ -62,6 +62,8 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
 
   // Inline delete confirmation state (workspace id to delete)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteRemoteChoice, setDeleteRemoteChoice] = useState<boolean>(false);
+  const [deleteRemoteConfirmedLoss, setDeleteRemoteConfirmedLoss] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
@@ -127,9 +129,10 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
   };
 
   const handleConfirmDelete = (wsId: string) => {
-    onDeleteWorkspace(wsId);
+    onDeleteWorkspace(wsId, deleteRemoteChoice);
     setConfirmDeleteId(null);
-    onShowToast(i18n._(msg`Workspace eliminado`), 'info');
+    setDeleteRemoteChoice(false);
+    setDeleteRemoteConfirmedLoss(false);
   };
 
   const handleStartEdit = (ws: Workspace) => {
@@ -448,7 +451,17 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                         <button
                           id={`btn-ws-delete-trigger-${ws.id}`}
                           type="button"
-                          onClick={() => setConfirmDeleteId(isConfirmingThis ? null : ws.id)}
+                          onClick={() => {
+                            if (isConfirmingThis) {
+                              setConfirmDeleteId(null);
+                              setDeleteRemoteChoice(false);
+                              setDeleteRemoteConfirmedLoss(false);
+                            } else {
+                              setConfirmDeleteId(ws.id);
+                              setDeleteRemoteChoice(false);
+                              setDeleteRemoteConfirmedLoss(false);
+                            }
+                          }}
                           className="btn-m3-icon w-7 h-7 text-[var(--on-surface-variant)] hover:text-rose-400 cursor-pointer"
                           title={i18n._(msg`Eliminar workspace`)}
                         >
@@ -459,28 +472,113 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
 
                     {/* Inline Delete Confirmation */}
                     {isConfirmingThis && (
-                      <div id="div-workspacemanagermodal-18" className="mt-3 p-2.5 rounded bg-rose-950/30 border border-rose-800/40 flex items-center justify-between gap-2 animate-fade-in">
-                        <div id="div-workspacemanagermodal-19" className="flex items-center gap-1.5 text-xs text-rose-300">
-                          <span className="material-symbols-outlined text-[15px]">warning</span>
-                          <span>{i18n._(msg`¿Eliminar este workspace y todos sus archivos?`)}</span>
+                      <div
+                        id={`div-ws-delete-confirm-box-${ws.id}`}
+                        className="mt-3 p-3 rounded-md bg-rose-950/20 border border-rose-800/40 flex flex-col gap-2.5 animate-fade-in text-xs"
+                      >
+                        <div className="flex items-center gap-2 text-rose-300 font-semibold">
+                          <span className="material-symbols-outlined text-[16px] text-rose-400">warning</span>
+                          <span>{i18n._(msg`¿Eliminar el workspace "${ws.name}"?`)}</span>
                         </div>
 
-                        <div id="div-workspacemanagermodal-20" className="flex items-center gap-1.5 shrink-0">
+                        <p className="text-[11px] text-[var(--on-surface-variant)] leading-relaxed">
+                          {i18n._(
+                            msg`Esta acción eliminará el workspace de tu almacenamiento local en este dispositivo.`
+                          )}
+                        </p>
+
+                        {/* Remote deletion toggle if Sanity is configured */}
+                        {isSanityConfigured && (
+                          <div className="p-2.5 rounded bg-[var(--surface-container-high)]/40 border border-[var(--outline)] flex flex-col gap-2">
+                            <label className="flex items-start gap-2 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                id={`checkbox-delete-remote-${ws.id}`}
+                                checked={deleteRemoteChoice}
+                                onChange={(e) => {
+                                  setDeleteRemoteChoice(e.target.checked);
+                                  if (!e.target.checked) {
+                                    setDeleteRemoteConfirmedLoss(false);
+                                  }
+                                }}
+                                className="mt-0.5 rounded border-[var(--outline)] text-rose-600 focus:ring-rose-500 cursor-pointer"
+                              />
+                              <div className="flex flex-col">
+                                <span className="font-medium text-[var(--on-surface)] text-xs">
+                                  {i18n._(msg`Eliminar también en el servidor remoto (Sanity Cloud)`)}
+                                </span>
+                                <span className="text-[10px] text-[var(--on-surface-variant)]">
+                                  {deleteRemoteChoice
+                                    ? i18n._(msg`Se eliminará tanto de este dispositivo como de la base de datos central de Sanity.`)
+                                    : i18n._(msg`Por defecto se conserva una copia en Sanity Cloud para que puedas recuperarlo en cualquier momento.`)}
+                                </span>
+                              </div>
+                            </label>
+
+                            {/* Verification of permanent loss */}
+                            {deleteRemoteChoice && (
+                              <div className="mt-1 p-2 rounded bg-rose-950/40 border border-rose-600/50 flex flex-col gap-1.5 animate-fade-in">
+                                <div className="flex items-center gap-1.5 text-rose-300 font-bold text-[11px]">
+                                  <span className="material-symbols-outlined text-[14px] text-rose-400">gpp_bad</span>
+                                  <span>{i18n._(msg`ADVERTENCIA: Destrucción permanente e irreversible`)}</span>
+                                </div>
+                                <p className="text-[10px] text-rose-200/90 leading-tight">
+                                  {i18n._(
+                                    msg`El workspace, todas sus tareas asociadas y su historial en Sanity Cloud se perderán PARA SIEMPRE. Ningún dispositivo podrá recuperarlo.`
+                                  )}
+                                </p>
+                                <label className="flex items-center gap-1.5 mt-1 cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    id={`checkbox-verify-loss-${ws.id}`}
+                                    checked={deleteRemoteConfirmedLoss}
+                                    onChange={(e) => setDeleteRemoteConfirmedLoss(e.target.checked)}
+                                    className="rounded border-rose-500 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                                  />
+                                  <span className="text-[10px] font-semibold text-rose-300">
+                                    {i18n._(msg`Confirmo que entiendo que se perderá para siempre y deseo destruirlo`)}
+                                  </span>
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Action buttons */}
+                        <div className="flex items-center justify-end gap-2 pt-1">
                           <button
                             id={`btn-ws-cancel-delete-${ws.id}`}
                             type="button"
-                            onClick={() => setConfirmDeleteId(null)}
-                            className="px-2 py-0.5 rounded text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] cursor-pointer"
+                            onClick={() => {
+                              setConfirmDeleteId(null);
+                              setDeleteRemoteChoice(false);
+                              setDeleteRemoteConfirmedLoss(false);
+                            }}
+                            className="btn-m3-text px-2.5 py-1 text-xs cursor-pointer"
                           >
                             {i18n._(msg`Cancelar`)}
                           </button>
                           <button
                             id={`btn-ws-confirm-delete-${ws.id}`}
                             type="button"
+                            disabled={deleteRemoteChoice && !deleteRemoteConfirmedLoss}
                             onClick={() => handleConfirmDelete(ws.id)}
-                            className="px-2.5 py-0.5 rounded bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium cursor-pointer shadow-sm"
+                            className={`px-3 py-1 rounded text-xs font-semibold cursor-pointer shadow-xs transition-colors flex items-center gap-1 ${
+                              deleteRemoteChoice
+                                ? deleteRemoteConfirmedLoss
+                                  ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                                  : 'bg-rose-900/40 text-rose-400/50 cursor-not-allowed border border-rose-800/40'
+                                : 'bg-rose-700 hover:bg-rose-800 text-white'
+                            }`}
                           >
-                            {i18n._(msg`Sí, eliminar`)}
+                            <span className="material-symbols-outlined text-[13px]">
+                              {deleteRemoteChoice ? 'delete_forever' : 'delete'}
+                            </span>
+                            <span>
+                              {deleteRemoteChoice
+                                ? i18n._(msg`Destruir para siempre`)
+                                : i18n._(msg`Eliminar solo en local`)}
+                            </span>
                           </button>
                         </div>
                       </div>

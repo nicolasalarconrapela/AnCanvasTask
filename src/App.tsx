@@ -1372,7 +1372,7 @@ export default function App() {
   );
 
   const handleDeleteWorkspace = useCallback(
-    (wsId: string) => {
+    (wsId: string, deleteRemote: boolean = false) => {
       setWorkspaceStore((prev) => {
         const filtered = prev.workspaces.filter((w) => w.id !== wsId);
         let nextWorkspaces = filtered;
@@ -1399,7 +1399,11 @@ export default function App() {
           if (prev.activeWorkspaceId === wsId) {
             nextActiveId = nextWorkspaces[0].id;
           }
-          pushToast(i18n._(msg`Workspace eliminado`), 'info');
+          if (deleteRemote) {
+            pushToast(i18n._(msg`Workspace eliminado localmente y destruido en Sanity Cloud`), 'warning');
+          } else {
+            pushToast(i18n._(msg`Workspace eliminado en local (la copia remota permanece protegida en Sanity)`), 'info');
+          }
         }
 
         const nextStore: WorkspaceStoreState = {
@@ -1421,12 +1425,14 @@ export default function App() {
           triggerDebouncedVisualSave(editor);
         }
 
-        // Remove from Sanity if configured
-        const config = getSanityConfig();
-        if (config.projectId && config.dataset && config.token) {
-          deleteWorkspaceFromSanity(wsId, config).catch((e) => {
-            console.warn('Error deleting workspace from Sanity:', e);
-          });
+        // Remove from Sanity ONLY if explicitly requested and verified
+        if (deleteRemote) {
+          const config = getSanityConfig();
+          if (config.projectId && config.dataset && config.token) {
+            deleteWorkspaceFromSanity(wsId, config).catch((e) => {
+              console.warn('Error deleting workspace from Sanity:', e);
+            });
+          }
         }
 
         return nextStore;
