@@ -233,38 +233,77 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     switch (diffType) {
       case 'synced':
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/60 text-emerald-300 border border-emerald-800">
-            {i18n._(msg`Sincronizado`)}
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-950/60 text-emerald-300 border border-emerald-800/80 shadow-xs"
+            title={i18n._(msg`Totalmente sincronizado e idéntico entre local y Sanity Cloud`)}
+          >
+            <span className="material-symbols-outlined text-[13px] text-emerald-400">check_circle</span>
+            <span>{i18n._(msg`Sincronizado`)}</span>
           </span>
         );
       case 'local_override':
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-sky-950/60 text-sky-300 border border-sky-800">
-            {i18n._(msg`Local más reciente (Override)`)}
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-sky-950/60 text-sky-300 border border-sky-800/80 shadow-xs"
+            title={i18n._(msg`El estado local es más reciente. Pendiente de subir a Sanity Cloud.`)}
+          >
+            <span className="material-symbols-outlined text-[13px] text-sky-400">arrow_upward</span>
+            <span>{i18n._(msg`Local más reciente`)}</span>
+            <span className="text-[9px] font-mono font-semibold px-1 py-0.2 rounded bg-sky-900/60 text-sky-200 border border-sky-700/60">
+              Local → Cloud
+            </span>
           </span>
         );
       case 'remote_override':
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-950/60 text-amber-300 border border-amber-800">
-            {i18n._(msg`Remoto más reciente (Override)`)}
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-950/60 text-amber-300 border border-amber-800/80 shadow-xs"
+            title={i18n._(msg`El estado en Sanity Cloud es más reciente. Pendiente de descargar a local.`)}
+          >
+            <span className="material-symbols-outlined text-[13px] text-amber-400">arrow_downward</span>
+            <span>{i18n._(msg`Remoto más reciente`)}</span>
+            <span className="text-[9px] font-mono font-semibold px-1 py-0.2 rounded bg-amber-900/60 text-amber-200 border border-amber-700/60">
+              Cloud → Local
+            </span>
           </span>
         );
       case 'conflict':
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-rose-950/60 text-rose-300 border border-rose-800">
-            {i18n._(msg`Conflicto detectado`)}
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-rose-950/60 text-rose-300 border border-rose-800/80 shadow-xs"
+            title={i18n._(msg`Conflicto detectado: modificaciones divergentes en local y Sanity Cloud.`)}
+          >
+            <span className="material-symbols-outlined text-[13px] text-rose-400">sync_problem</span>
+            <span>{i18n._(msg`Conflicto detectado`)}</span>
+            <span className="text-[9px] font-mono font-semibold px-1 py-0.2 rounded bg-rose-900/60 text-rose-200 border border-rose-700/60">
+              Divergente
+            </span>
           </span>
         );
       case 'only_local':
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-950/60 text-indigo-300 border border-indigo-800">
-            {i18n._(msg`Solo local (Nuevo)`)}
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-950/60 text-indigo-300 border border-indigo-800/80 shadow-xs"
+            title={i18n._(msg`Existe únicamente en local. No ha sido subido a Sanity Cloud.`)}
+          >
+            <span className="material-symbols-outlined text-[13px] text-indigo-400">add_circle</span>
+            <span>{i18n._(msg`Solo local`)}</span>
+            <span className="text-[9px] font-mono font-semibold px-1 py-0.2 rounded bg-indigo-900/60 text-indigo-200 border border-indigo-700/60">
+              Nuevo
+            </span>
           </span>
         );
       case 'only_remote':
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-purple-950/60 text-purple-300 border border-purple-800">
-            {i18n._(msg`Solo remoto (Por descargar)`)}
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-purple-950/60 text-purple-300 border border-purple-800/80 shadow-xs"
+            title={i18n._(msg`Existe en Sanity Cloud pero no ha sido descargado localmente.`)}
+          >
+            <span className="material-symbols-outlined text-[13px] text-purple-400">cloud_download</span>
+            <span>{i18n._(msg`Solo remoto`)}</span>
+            <span className="text-[9px] font-mono font-semibold px-1 py-0.2 rounded bg-purple-900/60 text-purple-200 border border-purple-700/60">
+              Por descargar
+            </span>
           </span>
         );
     }
@@ -338,44 +377,62 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         <div id="div-syncoverridemodal-5" className="px-4 py-3 bg-[var(--surface-container-low)] border-b border-[var(--outline)] flex flex-col gap-3">
           {/* Stat Counters */}
           <div id="div-syncoverridemodal-6" className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
-            <div id="div-syncoverridemodal-7" className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col">
-              <span className="text-[10px] text-[var(--on-surface-variant)]">{i18n._(msg`Total Analizados`)}</span>
-              <span className="text-base font-semibold font-mono text-[var(--on-surface)]">
+            <div id="div-syncoverridemodal-7" className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col justify-between">
+              <span className="text-[10px] text-[var(--on-surface-variant)] flex items-center gap-1">
+                <span className="material-symbols-outlined text-[13px]">inventory_2</span>
+                <span className="truncate">{i18n._(msg`Total Analizados`)}</span>
+              </span>
+              <span className="text-base font-semibold font-mono text-[var(--on-surface)] mt-1">
                 {result?.counts.total || 0}
               </span>
             </div>
 
-            <div id="div-syncoverridemodal-8" className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col">
-              <span className="text-[10px] text-emerald-400">{i18n._(msg`Sincronizados`)}</span>
-              <span className="text-base font-semibold font-mono text-emerald-400">
+            <div id="div-syncoverridemodal-8" className="p-2 rounded bg-[var(--surface)] border border-emerald-900/30 flex flex-col justify-between">
+              <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                <span className="truncate">{i18n._(msg`Sincronizados`)}</span>
+              </span>
+              <span className="text-base font-semibold font-mono text-emerald-400 mt-1">
                 {result?.counts.synced || 0}
               </span>
             </div>
 
-            <div id="div-syncoverridemodal-9" className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col">
-              <span className="text-[10px] text-sky-400">{i18n._(msg`Local Overrides`)}</span>
-              <span className="text-base font-semibold font-mono text-sky-400">
+            <div id="div-syncoverridemodal-9" className="p-2 rounded bg-[var(--surface)] border border-sky-900/30 flex flex-col justify-between">
+              <span className="text-[10px] text-sky-400 flex items-center gap-1">
+                <span className="material-symbols-outlined text-[13px]">arrow_upward</span>
+                <span className="truncate">{i18n._(msg`Local Overrides`)}</span>
+              </span>
+              <span className="text-base font-semibold font-mono text-sky-400 mt-1">
                 {result?.counts.localOverrides || 0}
               </span>
             </div>
 
-            <div id="div-syncoverridemodal-10" className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col">
-              <span className="text-[10px] text-amber-400">{i18n._(msg`Remote Overrides`)}</span>
-              <span className="text-base font-semibold font-mono text-amber-400">
+            <div id="div-syncoverridemodal-10" className="p-2 rounded bg-[var(--surface)] border border-amber-900/30 flex flex-col justify-between">
+              <span className="text-[10px] text-amber-400 flex items-center gap-1">
+                <span className="material-symbols-outlined text-[13px]">arrow_downward</span>
+                <span className="truncate">{i18n._(msg`Remote Overrides`)}</span>
+              </span>
+              <span className="text-base font-semibold font-mono text-amber-400 mt-1">
                 {result?.counts.remoteOverrides || 0}
               </span>
             </div>
 
-            <div id="div-syncoverridemodal-11" className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col">
-              <span className="text-[10px] text-rose-400">{i18n._(msg`Conflictos`)}</span>
-              <span className="text-base font-semibold font-mono text-rose-400">
+            <div id="div-syncoverridemodal-11" className="p-2 rounded bg-[var(--surface)] border border-rose-900/30 flex flex-col justify-between">
+              <span className="text-[10px] text-rose-400 flex items-center gap-1">
+                <span className="material-symbols-outlined text-[13px]">sync_problem</span>
+                <span className="truncate">{i18n._(msg`Conflictos`)}</span>
+              </span>
+              <span className="text-base font-semibold font-mono text-rose-400 mt-1">
                 {result?.counts.conflicts || 0}
               </span>
             </div>
 
-            <div id="div-syncoverridemodal-12" className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col">
-              <span className="text-[10px] text-purple-400">{i18n._(msg`Nuevos/Únicos`)}</span>
-              <span className="text-base font-semibold font-mono text-purple-400">
+            <div id="div-syncoverridemodal-12" className="p-2 rounded bg-[var(--surface)] border border-purple-900/30 flex flex-col justify-between">
+              <span className="text-[10px] text-purple-400 flex items-center gap-1">
+                <span className="material-symbols-outlined text-[13px]">difference</span>
+                <span className="truncate">{i18n._(msg`Nuevos/Únicos`)}</span>
+              </span>
+              <span className="text-base font-semibold font-mono text-purple-400 mt-1">
                 {(result?.counts.onlyLocal || 0) + (result?.counts.onlyRemote || 0)}
               </span>
             </div>
@@ -389,49 +446,53 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                 id="btn-sync-filter-all"
                 type="button"
                 onClick={() => setFilterType('all')}
-                className={`px-2 py-0.5 rounded cursor-pointer ${
+                className={`px-2 py-0.5 rounded cursor-pointer flex items-center gap-1 ${
                   filterType === 'all'
                     ? 'bg-[var(--primary)] text-[var(--on-primary)] font-medium'
                     : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
                 }`}
               >
-                {i18n._(msg`Todos`)} ({result?.items.length || 0})
+                <span className="material-symbols-outlined text-[13px]">list</span>
+                <span>{i18n._(msg`Todos`)} ({result?.items.length || 0})</span>
               </button>
               <button
                 id="btn-sync-filter-pending"
                 type="button"
                 onClick={() => setFilterType('pending')}
-                className={`px-2 py-0.5 rounded cursor-pointer ${
+                className={`px-2 py-0.5 rounded cursor-pointer flex items-center gap-1 ${
                   filterType === 'pending'
                     ? 'bg-[var(--primary)] text-[var(--on-primary)] font-medium'
                     : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
                 }`}
               >
-                {i18n._(msg`Con Diferencias`)} ({(result?.counts.total || 0) - (result?.counts.synced || 0)})
+                <span className="material-symbols-outlined text-[13px]">change_circle</span>
+                <span>{i18n._(msg`Con Diferencias`)} ({(result?.counts.total || 0) - (result?.counts.synced || 0)})</span>
               </button>
               <button
                 id="btn-sync-filter-conflicts"
                 type="button"
                 onClick={() => setFilterType('conflicts')}
-                className={`px-2 py-0.5 rounded cursor-pointer ${
+                className={`px-2 py-0.5 rounded cursor-pointer flex items-center gap-1 ${
                   filterType === 'conflicts'
                     ? 'bg-[var(--primary)] text-[var(--on-primary)] font-medium'
                     : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
                 }`}
               >
-                {i18n._(msg`Conflictos & Remoto`)} ({(result?.counts.conflicts || 0) + (result?.counts.remoteOverrides || 0)})
+                <span className="material-symbols-outlined text-[13px]">warning</span>
+                <span>{i18n._(msg`Conflictos & Remoto`)} ({(result?.counts.conflicts || 0) + (result?.counts.remoteOverrides || 0)})</span>
               </button>
               <button
                 id="btn-sync-filter-synced"
                 type="button"
                 onClick={() => setFilterType('synced')}
-                className={`px-2 py-0.5 rounded cursor-pointer ${
+                className={`px-2 py-0.5 rounded cursor-pointer flex items-center gap-1 ${
                   filterType === 'synced'
                     ? 'bg-[var(--primary)] text-[var(--on-primary)] font-medium'
                     : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
                 }`}
               >
-                {i18n._(msg`Al Día`)} ({result?.counts.synced || 0})
+                <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                <span>{i18n._(msg`Al Día`)} ({result?.counts.synced || 0})</span>
               </button>
             </div>
 
@@ -495,6 +556,11 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               const isExpanded = expandedItemId === item.id;
               const isResolving = resolvingItemId === item.id;
 
+              const localMs = item.localTimestamp ? new Date(item.localTimestamp).getTime() : 0;
+              const remoteMs = item.remoteTimestamp ? new Date(item.remoteTimestamp).getTime() : 0;
+              const isLocalNewer = localMs > 0 && remoteMs > 0 && localMs > remoteMs + 1000;
+              const isRemoteNewer = localMs > 0 && remoteMs > 0 && remoteMs > localMs + 1000;
+
               return (
                 <div
                   key={item.id}
@@ -506,40 +572,130 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                       ? 'border-amber-800/60 bg-amber-950/10'
                       : item.diffType === 'local_override'
                       ? 'border-sky-800/60 bg-sky-950/10'
-                      : 'border-[var(--outline)] bg-[var(--surface)]'
+                      : item.diffType === 'only_local'
+                      ? 'border-indigo-800/60 bg-indigo-950/10'
+                      : item.diffType === 'only_remote'
+                      ? 'border-purple-800/60 bg-purple-950/10'
+                      : 'border-[var(--outline)] bg-[var(--surface)] hover:border-emerald-800/40'
                   }`}
                 >
                   {/* Item Row Header */}
                   <div id="div-syncoverridemodal-18" className="p-3 flex items-start justify-between gap-3">
-                    <div id="div-syncoverridemodal-19" className="flex flex-col min-w-0 flex-1">
-                      <div id="div-syncoverridemodal-20" className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-semibold text-[var(--on-surface)] font-sans truncate">
-                          {item.title}
+                    <div id="div-syncoverridemodal-19" className="flex items-start gap-2.5 min-w-0 flex-1">
+                      {/* Leading Entity & Status Avatar */}
+                      <div
+                        className={`w-8 h-8 rounded flex items-center justify-center shrink-0 border relative mt-0.5 ${
+                          item.diffType === 'conflict'
+                            ? 'bg-rose-950/40 border-rose-800/60 text-rose-300'
+                            : item.diffType === 'remote_override'
+                            ? 'bg-amber-950/40 border-amber-800/60 text-amber-300'
+                            : item.diffType === 'local_override'
+                            ? 'bg-sky-950/40 border-sky-800/60 text-sky-300'
+                            : item.diffType === 'only_local'
+                            ? 'bg-indigo-950/40 border-indigo-800/60 text-indigo-300'
+                            : item.diffType === 'only_remote'
+                            ? 'bg-purple-950/40 border-purple-800/60 text-purple-300'
+                            : 'bg-emerald-950/30 border-emerald-800/40 text-emerald-400'
+                        }`}
+                        title={
+                          item.entityType === 'workspace'
+                            ? i18n._(msg`Elemento: Workspace`)
+                            : i18n._(msg`Elemento: Tarea individual`)
+                        }
+                      >
+                        <span className="material-symbols-outlined text-[17px]">
+                          {item.entityType === 'workspace' ? 'folder' : 'task_alt'}
                         </span>
-                        {getDiffBadge(item.diffType)}
+                        <span
+                          className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[10px] bg-[var(--surface-container)] border border-[var(--outline)] shadow-xs"
+                          title={
+                            item.diffType === 'synced'
+                              ? i18n._(msg`Sincronizado`)
+                              : item.diffType === 'local_override'
+                              ? i18n._(msg`Local más reciente`)
+                              : item.diffType === 'remote_override'
+                              ? i18n._(msg`Remoto más reciente`)
+                              : item.diffType === 'conflict'
+                              ? i18n._(msg`Conflicto`)
+                              : item.diffType === 'only_local'
+                              ? i18n._(msg`Solo en local`)
+                              : i18n._(msg`Solo en remoto`)
+                          }
+                        >
+                          <span className="material-symbols-outlined text-[10px] leading-none">
+                            {item.diffType === 'synced'
+                              ? 'done'
+                              : item.diffType === 'local_override'
+                              ? 'arrow_upward'
+                              : item.diffType === 'remote_override'
+                              ? 'arrow_downward'
+                              : item.diffType === 'conflict'
+                              ? 'priority_high'
+                              : item.diffType === 'only_local'
+                              ? 'add'
+                              : 'cloud'}
+                          </span>
+                        </span>
                       </div>
 
-                      {item.subtitle && (
-                        <p className="text-xs text-[var(--on-surface-variant)] font-mono mt-0.5 truncate">
-                          {item.subtitle}
-                        </p>
-                      )}
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <div id="div-syncoverridemodal-20" className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] border border-[var(--outline)]">
+                            {item.entityType === 'workspace' ? i18n._(msg`Workspace`) : i18n._(msg`Tarea`)}
+                          </span>
+                          <span className="text-xs font-semibold text-[var(--on-surface)] font-sans truncate">
+                            {item.title.replace(/^(Workspace:\s*|Tarea:\s*)/, '')}
+                          </span>
+                          {getDiffBadge(item.diffType)}
+                        </div>
 
-                      {/* Timestamps comparison */}
-                      <div id="div-syncoverridemodal-21" className="flex items-center gap-4 text-[11px] font-mono text-[var(--on-surface-variant)] mt-1.5">
-                        <span className="flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[13px] text-sky-400">laptop</span>
-                          <span>{i18n._(msg`Local`)}: {formatRelativeTime(item.localTimestamp)}</span>
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[13px] text-rose-400">cloud</span>
-                          <span>{i18n._(msg`Remoto`)}: {formatRelativeTime(item.remoteTimestamp)}</span>
-                        </span>
+                        {item.subtitle && (
+                          <p className="text-xs text-[var(--on-surface-variant)] font-mono mt-0.5 truncate">
+                            {item.subtitle}
+                          </p>
+                        )}
+
+                        {/* Timestamps comparison */}
+                        <div id={`div-sync-timestamps-${item.id}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-mono text-[var(--on-surface-variant)] mt-1.5">
+                          <span className="flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-[13px] text-sky-400">laptop</span>
+                            <span>
+                              {i18n._(msg`Local`)}:{' '}
+                              {item.localTimestamp ? (
+                                <span className="text-[var(--on-surface)]">{formatRelativeTime(item.localTimestamp)}</span>
+                              ) : (
+                                <span className="text-[var(--on-surface-variant)] italic">{i18n._(msg`No existe`)}</span>
+                              )}
+                            </span>
+                            {isLocalNewer && (
+                              <span className="text-[9px] font-sans font-medium px-1 py-0.2 rounded bg-sky-950 text-sky-300 border border-sky-800">
+                                {i18n._(msg`Más reciente`)}
+                              </span>
+                            )}
+                          </span>
+
+                          <span className="flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-[13px] text-amber-400">cloud</span>
+                            <span>
+                              {i18n._(msg`Remoto`)}:{' '}
+                              {item.remoteTimestamp ? (
+                                <span className="text-[var(--on-surface)]">{formatRelativeTime(item.remoteTimestamp)}</span>
+                              ) : (
+                                <span className="text-[var(--on-surface-variant)] italic">{i18n._(msg`No publicado`)}</span>
+                              )}
+                            </span>
+                            {isRemoteNewer && (
+                              <span className="text-[9px] font-sans font-medium px-1 py-0.2 rounded bg-amber-950 text-amber-300 border border-amber-800">
+                                {i18n._(msg`Más reciente`)}
+                              </span>
+                            )}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
                     {/* Actions */}
-                    <div id="div-syncoverridemodal-22" className="flex items-center gap-1.5 shrink-0">
+                    <div id="div-syncoverridemodal-22" className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap">
                       {item.diffType !== 'synced' && (
                         <>
                           <button
@@ -547,7 +703,11 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                             type="button"
                             disabled={isResolving || !isSanityConfigured}
                             onClick={() => handleResolveSingle(item, 'keep_local')}
-                            className="btn-m3-secondary px-2 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                            className={`px-2 py-1 text-xs rounded font-medium flex items-center gap-1 cursor-pointer disabled:opacity-40 transition-colors ${
+                              item.diffType === 'local_override' || item.diffType === 'only_local'
+                                ? 'bg-sky-600 hover:bg-sky-500 text-white shadow-xs'
+                                : 'btn-m3-secondary text-[var(--on-surface)]'
+                            }`}
                             title={i18n._(msg`Sobrescribir versión remota en Sanity con la versión local`)}
                           >
                             <span className="material-symbols-outlined text-[13px]">cloud_upload</span>
@@ -559,7 +719,11 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                             type="button"
                             disabled={isResolving || !isSanityConfigured || !item.remoteData}
                             onClick={() => handleResolveSingle(item, 'keep_remote')}
-                            className="btn-m3-secondary px-2 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                            className={`px-2 py-1 text-xs rounded font-medium flex items-center gap-1 cursor-pointer disabled:opacity-40 transition-colors ${
+                              item.diffType === 'remote_override' || item.diffType === 'only_remote'
+                                ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-xs'
+                                : 'btn-m3-secondary text-[var(--on-surface)]'
+                            }`}
                             title={i18n._(msg`Sobrescribir versión local con los datos de Sanity`)}
                           >
                             <span className="material-symbols-outlined text-[13px]">cloud_download</span>
@@ -799,7 +963,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
 
                         {/* Remote side */}
                         <div id="div-syncoverridemodal-27" className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col">
-                          <span className="font-semibold text-rose-400 text-[11px] mb-1 flex items-center gap-1">
+                          <span className="font-semibold text-amber-400 text-[11px] mb-1 flex items-center gap-1">
                             <span className="material-symbols-outlined text-[13px]">cloud</span>
                             <span>{i18n._(msg`Versión Sanity Remote`)}</span>
                           </span>
