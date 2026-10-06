@@ -529,7 +529,9 @@ export async function deleteSyncItem(
         (w) =>
           w.id !== wsId &&
           w.id !== cleanId &&
-          w.id.replace(/^workspace-/, '') !== cleanId
+          w.id.replace(/^workspace-/, '') !== cleanId &&
+          `ws_${w.id}` !== item.id &&
+          w.id !== item.id.replace(/^ws_/, '')
       );
 
       let nextWorkspaces = filtered;
@@ -554,7 +556,8 @@ export async function deleteSyncItem(
       } else if (
         workspaceStore.activeWorkspaceId === wsId ||
         workspaceStore.activeWorkspaceId === cleanId ||
-        workspaceStore.activeWorkspaceId.replace(/^workspace-/, '') === cleanId
+        workspaceStore.activeWorkspaceId.replace(/^workspace-/, '') === cleanId ||
+        `ws_${workspaceStore.activeWorkspaceId}` === item.id
       ) {
         nextActiveId = nextWorkspaces[0].id;
       }
@@ -570,7 +573,14 @@ export async function deleteSyncItem(
     // 2. Delete remotely if scope is 'remote' or 'both'
     if (scope === 'remote' || scope === 'both') {
       if (config.projectId && config.dataset && config.token) {
-        const delRes = await deleteWorkspaceFromSanity(cleanId, config);
+        const explicitId = item.remoteData?._id;
+        let delRes = { ok: false, message: '' };
+        if (explicitId) {
+          delRes = await deleteDocumentFromSanity(explicitId, config);
+        }
+        if (!delRes.ok || !explicitId) {
+          delRes = await deleteWorkspaceFromSanity(cleanId, config);
+        }
         if (!delRes.ok && scope === 'remote') {
           return { success: false, message: delRes.message };
         }
@@ -605,58 +615,51 @@ export async function deleteSyncItem(
 
     // 1. Delete locally if scope is 'local' or 'both'
     if (scope === 'local' || scope === 'both') {
-      const activeWs =
-        workspaceStore.workspaces.find(
-          (w) => w.id === workspaceStore.activeWorkspaceId
-        ) || workspaceStore.workspaces[0];
-      if (activeWs) {
-        const activeBranch =
-          activeWs.branches.find((b) => b.name === activeWs.activeBranchName) ||
-          activeWs.branches[0];
-        if (activeBranch) {
-          const activeDoc =
-            activeBranch.taskDocuments.find(
-              (d) => d.id === activeBranch.activeDocumentId
-            ) || activeBranch.taskDocuments[0];
-          if (activeDoc) {
+      let taskFoundAndRemoved = false;
+      const updatedWorkspaces = workspaceStore.workspaces.map((w) => ({
+        ...w,
+        branches: w.branches.map((b) => ({
+          ...b,
+          taskDocuments: b.taskDocuments.map((d) => {
             const newContent = deleteTaskFromMarkdown(
-              activeDoc.content,
+              d.content,
               taskId,
               item.localData?.title
             );
-            const updatedDocs = activeBranch.taskDocuments.map((d) =>
-              d.id === activeDoc.id
-                ? {
-                    ...d,
-                    content: newContent,
-                    lastSavedContent: newContent,
-                    updatedAt: new Date().toISOString(),
-                  }
-                : d
-            );
-            const updatedBranches = activeWs.branches.map((b) =>
-              b.name === activeBranch.name
-                ? { ...b, taskDocuments: updatedDocs }
-                : b
-            );
-            const updatedWorkspaces = workspaceStore.workspaces.map((w) =>
-              w.id === activeWs.id ? { ...w, branches: updatedBranches } : w
-            );
-            updatedStore = {
-              ...workspaceStore,
-              workspaces: updatedWorkspaces,
-            };
-            saveWorkspaceStore(updatedStore);
-          }
-        }
+            if (newContent !== d.content) {
+              taskFoundAndRemoved = true;
+              return {
+                ...d,
+                content: newContent,
+                lastSavedContent: newContent,
+                updatedAt: new Date().toISOString(),
+              };
+            }
+            return d;
+          }),
+        })),
+      }));
+
+      if (taskFoundAndRemoved) {
+        updatedStore = {
+          ...workspaceStore,
+          workspaces: updatedWorkspaces,
+        };
+        saveWorkspaceStore(updatedStore);
       }
     }
 
     // 2. Delete remotely if scope is 'remote' or 'both'
     if (scope === 'remote' || scope === 'both') {
       if (config.projectId && config.dataset && config.token) {
-        const docId = item.remoteData?._id || `task-${taskId}`;
-        const delRes = await deleteDocumentFromSanity(docId, config);
+        const explicitId = item.remoteData?._id;
+        let delRes = { ok: false, message: '' };
+        if (explicitId) {
+          delRes = await deleteDocumentFromSanity(explicitId, config);
+        }
+        if (!delRes.ok || !explicitId) {
+          delRes = await deleteDocumentFromSanity(`task-${taskId}`, config);
+        }
         if (!delRes.ok && scope === 'remote') {
           return { success: false, message: delRes.message };
         }

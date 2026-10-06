@@ -109,21 +109,84 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   ) => {
     setResolvingItemId(item.id);
     try {
+      const cleanWsId = (
+        item.localData?.id ||
+        item.remoteData?.workspaceId ||
+        item.remoteData?.id ||
+        item.id.replace(/^ws_/, '')
+      ).toString();
+
       if (item.entityType === 'workspace' && onDeleteWorkspace && (scope === 'local' || scope === 'both')) {
-        onDeleteWorkspace(item.id, scope === 'both');
+        onDeleteWorkspace(cleanWsId, scope === 'both');
+
+        // Optimistically remove from result items
+        setResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                items: prev.items.filter((i) => i.id !== item.id),
+              }
+            : null
+        );
         setConfirmDeleteItemId(null);
-        await handleRunAnalysis();
+
+        // Compute local filtered store for re-analysis so it does not re-detect the removed workspace
+        const nextWorkspaces = workspaceStore.workspaces.filter(
+          (w) =>
+            w.id !== cleanWsId &&
+            w.id !== item.id &&
+            `ws_${w.id}` !== item.id &&
+            w.id.replace(/^workspace-/, '') !== cleanWsId.replace(/^workspace-/, '')
+        );
+        const nextStore: WorkspaceStoreState = {
+          ...workspaceStore,
+          workspaces: nextWorkspaces,
+          activeWorkspaceId:
+            nextWorkspaces.find((w) => w.id === workspaceStore.activeWorkspaceId)?.id ||
+            nextWorkspaces[0]?.id ||
+            workspaceStore.activeWorkspaceId,
+        };
+
+        try {
+          const fresh = await analyzeSyncDifferences(nextStore);
+          setResult({
+            ...fresh,
+            items: fresh.items.filter((i) => i.id !== item.id),
+          });
+        } catch {
+          // ignore
+        }
         return;
       }
 
       const res = await deleteSyncItem(item, scope, workspaceStore);
       if (res.success) {
         onShowToast(res.message, 'info');
+        const nextStore = res.updatedStore || workspaceStore;
         if (res.updatedStore) {
           onUpdateWorkspaceStore(res.updatedStore);
         }
+
+        // Optimistically remove from result items
+        setResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                items: prev.items.filter((i) => i.id !== item.id),
+              }
+            : null
+        );
         setConfirmDeleteItemId(null);
-        await handleRunAnalysis();
+
+        try {
+          const fresh = await analyzeSyncDifferences(nextStore);
+          setResult({
+            ...fresh,
+            items: fresh.items.filter((i) => i.id !== item.id),
+          });
+        } catch {
+          // ignore
+        }
       } else {
         onShowToast(res.message, 'error');
       }

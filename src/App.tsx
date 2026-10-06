@@ -1476,39 +1476,57 @@ export default function App() {
 
   const handleDeleteWorkspace = useCallback(
     (wsId: string, deleteRemote: boolean = false) => {
-      const targetWs = workspaceStore.workspaces.find((w) => w.id === wsId);
+      const cleanTargetId = wsId.replace(/^ws_/, '').replace(/^workspace-/, '');
+      const targetWs = workspaceStore.workspaces.find(
+        (w) =>
+          w.id === wsId ||
+          w.id === cleanTargetId ||
+          `ws_${w.id}` === wsId ||
+          w.id.replace(/^workspace-/, '') === cleanTargetId
+      );
       if (!targetWs) return;
 
+      const actualWsId = targetWs.id;
       lastLocalWorkspaceMutationTimeRef.current = Date.now();
 
       // Clear any prior pending deletion for this wsId
-      const existingPending = pendingWorkspaceDeletionsRef.current.get(wsId);
+      const existingPending =
+        pendingWorkspaceDeletionsRef.current.get(actualWsId) ||
+        pendingWorkspaceDeletionsRef.current.get(wsId);
       if (existingPending) {
         clearTimeout(existingPending.timeoutId);
       }
 
       // Schedule permanent destruction after 30 seconds
       const timeoutId = setTimeout(() => {
+        pendingWorkspaceDeletionsRef.current.delete(actualWsId);
         pendingWorkspaceDeletionsRef.current.delete(wsId);
         if (deleteRemote) {
           const config = getSanityConfig();
           if (config.projectId && config.dataset && config.token) {
-            deleteWorkspaceFromSanity(wsId, config).catch((e) => {
+            deleteWorkspaceFromSanity(actualWsId, config).catch((e) => {
               console.warn('Error deleting workspace permanently from Sanity:', e);
             });
           }
         }
       }, 30000);
 
-      pendingWorkspaceDeletionsRef.current.set(wsId, {
+      const pendingRecord = {
         timeoutId,
         workspace: targetWs,
         deleteRemote,
         deletedAt: Date.now(),
-      });
+      };
+      pendingWorkspaceDeletionsRef.current.set(actualWsId, pendingRecord);
+      pendingWorkspaceDeletionsRef.current.set(wsId, pendingRecord);
 
       setWorkspaceStore((prev) => {
-        const filtered = prev.workspaces.filter((w) => w.id !== wsId);
+        const filtered = prev.workspaces.filter(
+          (w) =>
+            w.id !== actualWsId &&
+            w.id !== wsId &&
+            w.id.replace(/^workspace-/, '') !== cleanTargetId
+        );
         let nextWorkspaces = filtered;
         let nextActiveId = prev.activeWorkspaceId;
 
@@ -1528,7 +1546,11 @@ export default function App() {
           };
           nextWorkspaces = [cleanWs];
           nextActiveId = cleanWs.id;
-        } else if (prev.activeWorkspaceId === wsId) {
+        } else if (
+          prev.activeWorkspaceId === wsId ||
+          prev.activeWorkspaceId === actualWsId ||
+          prev.activeWorkspaceId.replace(/^workspace-/, '') === cleanTargetId
+        ) {
           nextActiveId = nextWorkspaces[0].id;
         }
 
@@ -6469,6 +6491,17 @@ export default function App() {
         onUpdateWorkspaceStore={(newStore) => {
           setWorkspaceStore(newStore);
           saveWorkspaceStore(newStore);
+          const activeWs = getActiveWorkspace(newStore);
+          const activeBr = getActiveBranch(activeWs);
+          const activeDc = getActiveDocument(activeBr);
+          if (activeDc) {
+            setCurrentFileName(activeDc.path);
+            setMarkdownInput(activeDc.content);
+            setLastSavedMarkdown(activeDc.lastSavedContent);
+            if (editor) {
+              loadTasksFromMarkdown(editor, activeDc.content, activeDc.visualState);
+            }
+          }
         }}
         onShowToast={pushToast}
         onOpenSanityConfig={() => setIsSanityModalOpen(true)}

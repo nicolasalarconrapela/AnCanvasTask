@@ -1700,6 +1700,10 @@ export async function deleteWorkspaceFromSanity(
 ): Promise<{ ok: boolean; message: string }> {
   const cleanId = sanitizeSanityDocId(String(workspaceId).replace(/^workspace-/, ''));
   const docId = `workspace-${cleanId}`;
-  return deleteDocumentFromSanity(docId, configOverride);
+  const res = await deleteDocumentFromSanity(docId, configOverride);
+  if (!res.ok && workspaceId && workspaceId !== docId) {
+    return deleteDocumentFromSanity(workspaceId, configOverride);
+  }
+  return res;
 }
 
