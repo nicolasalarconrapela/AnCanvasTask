@@ -362,8 +362,8 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
 
     const localMs = item.localTimestamp ? new Date(item.localTimestamp).getTime() : 0;
     const remoteMs = item.remoteTimestamp ? new Date(item.remoteTimestamp).getTime() : 0;
-    const isLocalNewer = localMs > 0 && remoteMs > 0 && localMs > remoteMs + 1000;
-    const isRemoteNewer = localMs > 0 && remoteMs > 0 && remoteMs > localMs + 1000;
+    const isLocalNewer = item.diffType !== 'synced' && localMs > 0 && remoteMs > 0 && localMs > remoteMs + 1000;
+    const isRemoteNewer = item.diffType !== 'synced' && localMs > 0 && remoteMs > 0 && remoteMs > localMs + 1000;
 
     return (
       <div
