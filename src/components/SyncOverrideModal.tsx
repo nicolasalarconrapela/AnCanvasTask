@@ -221,25 +221,25 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div id="div-syncoverridemodal-1" className="px-4 py-3 border-b border-[var(--outline)] bg-[var(--surface)] flex items-center justify-between">
-          <div id="div-syncoverridemodal-2" className="flex items-center gap-2.5">
+        <div id="div-syncoverridemodal-1" className="px-3 sm:px-4 py-2.5 sm:py-3 border-b border-[var(--outline)] bg-[var(--surface)] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div id="div-syncoverridemodal-2" className="flex items-center gap-2.5 min-w-0">
             <div id="div-syncoverridemodal-3" className="w-7 h-7 rounded bg-rose-600 flex items-center justify-center text-white font-bold text-xs shadow-xs shrink-0">
               S
             </div>
-            <div id="div-sync-modal-header-info">
-              <h2 id="sync-modal-title" className="text-sm font-semibold text-[var(--on-surface)] flex items-center gap-2">
+            <div id="div-sync-modal-header-info" className="min-w-0">
+              <h2 id="sync-modal-title" className="text-sm font-semibold text-[var(--on-surface)] flex items-center gap-2 flex-wrap">
                 <span>{i18n._(msg`Sincronización & Detección de Overrides`)}</span>
                 <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] border border-[var(--outline)]">
                   Sanity Cloud
                 </span>
               </h2>
-              <p className="text-[11px] text-[var(--on-surface-variant)]">
+              <p className="text-[11px] text-[var(--on-surface-variant)] truncate">
                 {i18n._(msg`Dataset`)}: <span className="font-mono text-[var(--on-surface)]">{sanityConfig.dataset || 'production'}</span> • {i18n._(msg`Proyecto`)}: <span className="font-mono text-[var(--on-surface)]">{sanityConfig.projectId || i18n._(msg`No conectado`)}</span>
               </p>
             </div>
           </div>
 
-          <div id="div-syncoverridemodal-4" className="flex items-center gap-2">
+          <div id="div-syncoverridemodal-4" className="flex items-center gap-2 flex-wrap self-end sm:self-auto shrink-0">
             <button
               id="btn-sync-open-sanity-config"
               type="button"
@@ -658,12 +658,12 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                         </p>
                       )}
 
-                      <div className="flex items-center justify-end gap-2 pt-1 border-t border-rose-900/40">
+                      <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-1.5 border-t border-rose-900/40">
                         <button
                           id={`btn-sync-item-cancel-delete-${item.id}`}
                           type="button"
                           onClick={() => setConfirmDeleteItemId(null)}
-                          className="btn-m3-secondary px-2.5 py-1 text-xs cursor-pointer"
+                          className="btn-m3-secondary px-3 py-1.5 text-xs cursor-pointer w-full sm:w-auto text-center"
                         >
                           {i18n._(msg`Cancelar`)}
                         </button>
@@ -681,7 +681,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                                 : deleteScope
                             )
                           }
-                          className="px-3 py-1 text-xs rounded bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-medium flex items-center gap-1 cursor-pointer disabled:opacity-50 shadow-xs"
+                          className="px-3.5 py-1.5 text-xs rounded bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-medium flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 shadow-xs w-full sm:w-auto"
                         >
                           <span className="material-symbols-outlined text-[14px]">delete</span>
                           <span>{i18n._(msg`Confirmar eliminación`)}</span>

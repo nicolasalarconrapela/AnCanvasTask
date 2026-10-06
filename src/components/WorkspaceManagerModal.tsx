@@ -205,7 +205,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
         </div>
 
         {/* Tab switcher */}
-        <div id="div-workspacemanagermodal-3" className="flex border-b border-[var(--outline)] px-4 bg-[var(--surface)]">
+        <div id="div-workspacemanagermodal-3" className="flex border-b border-[var(--outline)] px-2 sm:px-4 bg-[var(--surface)] overflow-x-auto no-scrollbar gap-1 shrink-0">
           <button
             id="btn-workspace-tab-list"
             type="button"
@@ -213,7 +213,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
               setActiveTab('list');
               setEditingWorkspace(null);
             }}
-            className={`py-2 px-3 text-xs font-medium border-b-2 transition-colors cursor-pointer ${
+            className={`py-2 px-3 text-xs font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'list'
                 ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
                 : 'border-transparent text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
@@ -228,7 +228,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
               setActiveTab('create');
               setEditingWorkspace(null);
             }}
-            className={`py-2 px-3 text-xs font-medium border-b-2 transition-colors cursor-pointer ${
+            className={`py-2 px-3 text-xs font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'create'
                 ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
                 : 'border-transparent text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
@@ -241,7 +241,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
               id="btn-workspace-tab-edit"
               type="button"
               onClick={() => setActiveTab('edit')}
-              className={`py-2 px-3 text-xs font-medium border-b-2 transition-colors cursor-pointer flex items-center gap-1 ${
+              className={`py-2 px-3 text-xs font-medium border-b-2 transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0 ${
                 activeTab === 'edit'
                   ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
                   : 'border-transparent text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
@@ -254,17 +254,17 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
         </div>
 
         {/* Content */}
-        <div id="div-workspacemanagermodal-4" className="p-4 overflow-y-auto max-h-[60vh]">
+        <div id="div-workspacemanagermodal-4" className="p-3 sm:p-4 overflow-y-auto max-h-[calc(90vh-115px)] sm:max-h-[65vh]">
           {activeTab === 'list' ? (
             <div id="div-workspacemanagermodal-5" className="flex flex-col gap-3">
               {/* Sanity Cloud Persistence Bar */}
-              <div id="div-workspacemanagermodal-6" className="p-3 rounded-md bg-[var(--surface)] border border-[var(--outline)] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div id="div-workspacemanagermodal-6" className="p-2.5 sm:p-3 rounded-md bg-[var(--surface)] border border-[var(--outline)] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div id="div-workspacemanagermodal-7" className="flex items-center gap-2 min-w-0">
                   <div id="div-workspacemanagermodal-8" className="w-6 h-6 rounded bg-rose-600 flex items-center justify-center text-white font-bold text-[10px] shadow-xs shrink-0">
                     S
                   </div>
                   <div id="div-workspacemanagermodal-9" className="flex flex-col min-w-0">
-                    <div id="div-workspacemanagermodal-10" className="flex items-center gap-1.5">
+                    <div id="div-workspacemanagermodal-10" className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-semibold text-xs text-[var(--on-surface)]">{i18n._(msg`Estructura en Sanity`)}</span>
                       <span
                         className={`px-1.5 py-0.2 rounded text-[9px] font-mono border ${
@@ -282,14 +282,14 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                   </div>
                 </div>
 
-                <div id="div-workspacemanagermodal-11" className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                <div id="div-workspacemanagermodal-11" className="flex items-center gap-1.5 shrink-0 flex-wrap w-full sm:w-auto justify-end sm:justify-start">
                   {onOpenSyncDiffModal && (
                     <button
                       id="btn-ws-sync-diff-modal"
                       type="button"
                       disabled={!isSanityConfigured}
                       onClick={onOpenSyncDiffModal}
-                      className="btn-m3-primary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50 shadow-xs"
+                      className="btn-m3-primary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50 shadow-xs flex-1 sm:flex-none justify-center"
                       title={i18n._(msg`Analizar y resolver diferencias, overrides y conflictos con Sanity Cloud`)}
                     >
                       <span className="material-symbols-outlined text-[14px]">sync_problem</span>
@@ -310,7 +310,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                           setIsSyncingSanity(false);
                         }
                       }}
-                      className="btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      className="btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50 flex-1 sm:flex-none justify-center"
                       title={i18n._(msg`Guardar todos los workspaces en Sanity Cloud`)}
                     >
                       <span className={`material-symbols-outlined text-[14px] ${isSyncingSanity ? 'animate-spin' : ''}`}>
@@ -333,7 +333,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                           setIsImportingSanity(false);
                         }
                       }}
-                      className="btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      className="btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50 flex-1 sm:flex-none justify-center"
                       title={i18n._(msg`Cargar workspaces remotos desde Sanity Cloud`)}
                     >
                       <span className={`material-symbols-outlined text-[14px] ${isImportingSanity ? 'animate-spin' : ''}`}>
@@ -357,15 +357,15 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                   <div
                     key={ws.id}
                     id={`div-workspace-card-${ws.id}`}
-                    className={`p-3 rounded-md border transition-all ${
+                    className={`p-3 rounded-md border transition-all flex flex-col gap-2.5 ${
                       isActive
                         ? 'bg-[var(--primary-container)]/20 border-[var(--primary)]'
                         : 'bg-[var(--surface)] border-[var(--outline)] hover:border-[var(--outline-variant)]'
                     }`}
                   >
-                    <div id="div-workspacemanagermodal-12" className="flex items-start justify-between gap-3">
+                    <div id="div-workspacemanagermodal-12" className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5 sm:gap-3">
                       <div id="div-workspacemanagermodal-13" className="flex flex-col min-w-0 flex-1">
-                        <div id="div-workspacemanagermodal-14" className="flex items-center gap-2">
+                        <div id="div-workspacemanagermodal-14" className="flex items-center gap-2 flex-wrap min-w-0">
                           <span className="text-sm font-semibold text-[var(--on-surface)] font-sans truncate">
                             {ws.name}
                           </span>
@@ -383,7 +383,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                         )}
 
                         {/* Stats */}
-                        <div id="div-workspacemanagermodal-16" className="flex items-center gap-3 text-[11px] font-mono text-[var(--on-surface-variant)] mt-2">
+                        <div id="div-workspacemanagermodal-16" className="flex items-center gap-3 text-[11px] font-mono text-[var(--on-surface-variant)] mt-2 flex-wrap">
                           <span className="flex items-center gap-1">
                             <span className="material-symbols-outlined text-[13px] text-sky-400">fork_right</span>
                             <span>{ws.branches.length} {i18n._(msg`Ramas`).toLowerCase()} ({ws.activeBranchName})</span>
@@ -396,7 +396,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                       </div>
 
                       {/* Actions */}
-                      <div id="div-workspacemanagermodal-17" className="flex items-center gap-1.5 shrink-0">
+                      <div id="div-workspacemanagermodal-17" className="flex items-center gap-1.5 shrink-0 flex-wrap self-end sm:self-start mt-1 sm:mt-0">
                         {onSaveSingleWorkspaceToSanity && isSanityConfigured && (
                           <button
                             id={`btn-ws-save-sanity-${ws.id}`}
@@ -472,11 +472,11 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                     {isConfirmingThis && (
                       <div
                         id={`div-ws-delete-confirm-box-${ws.id}`}
-                        className="mt-3 p-3 rounded-md bg-[var(--surface-container-high)]/60 border border-rose-800/40 flex flex-col gap-2.5 animate-fade-in text-xs"
+                        className="mt-2 p-2.5 sm:p-3 rounded-md bg-[var(--surface-container-high)]/60 border border-rose-800/40 flex flex-col gap-2.5 animate-fade-in text-xs"
                       >
-                        <div className="flex items-center gap-2 text-rose-300 font-semibold">
-                          <span className="material-symbols-outlined text-[16px] text-rose-400">warning</span>
-                          <span>{i18n._(msg`Eliminar workspace`)}: "{ws.name}"</span>
+                        <div className="flex items-center gap-2 text-rose-300 font-semibold flex-wrap">
+                          <span className="material-symbols-outlined text-[16px] text-rose-400 shrink-0">warning</span>
+                          <span className="break-words">{i18n._(msg`Eliminar workspace`)}: "{ws.name}"</span>
                         </div>
 
                         {isSanityConfigured ? (
@@ -548,14 +548,14 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                             {deleteScope === 'both' && (
                               <div className="mt-1 p-2.5 rounded-md bg-rose-950/40 border border-rose-600/50 flex flex-col gap-2 animate-fade-in">
                                 <div className="flex items-center gap-1.5 text-rose-300 font-bold text-xs">
-                                  <span className="material-symbols-outlined text-[15px] text-rose-400">gpp_bad</span>
+                                  <span className="material-symbols-outlined text-[15px] text-rose-400 shrink-0">gpp_bad</span>
                                   <span>{i18n._(msg`Verificación de seguridad requerida`)}</span>
                                 </div>
                                 <p className="text-[11px] text-rose-200/90 leading-tight">
                                   {i18n._(msg`Para confirmar la destrucción total (con 30 segundos para revertir), escribe el nombre del workspace:`)}
                                 </p>
-                                <div className="flex items-center gap-2">
-                                  <span className="px-2 py-0.5 rounded bg-black/40 border border-rose-800/60 font-mono text-xs text-rose-200 select-all shrink-0">
+                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                  <span className="px-2 py-1 rounded bg-black/40 border border-rose-800/60 font-mono text-xs text-rose-200 select-all shrink-0 text-center sm:text-left truncate max-w-full">
                                     {ws.name}
                                   </span>
                                   <input
@@ -564,7 +564,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                                     value={deleteConfirmText}
                                     onChange={(e) => setDeleteConfirmText(e.target.value)}
                                     placeholder={i18n._(msg`Escribe el nombre aquí`)}
-                                    className="flex-1 bg-black/50 border border-rose-600/60 focus:border-rose-400 rounded px-2.5 py-1 text-xs text-white font-mono focus:outline-none"
+                                    className="flex-1 min-w-0 bg-black/50 border border-rose-600/60 focus:border-rose-400 rounded px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none w-full"
                                     autoFocus
                                   />
                                 </div>
@@ -580,7 +580,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                         )}
 
                         {/* Action buttons */}
-                        <div className="flex items-center justify-end gap-2 pt-1 border-t border-[var(--outline)]">
+                        <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-1.5 border-t border-[var(--outline)]">
                           <button
                             id={`btn-ws-cancel-delete-${ws.id}`}
                             type="button"
@@ -589,7 +589,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                               setDeleteScope('local');
                               setDeleteConfirmText('');
                             }}
-                            className="btn-m3-text px-3 py-1 text-xs cursor-pointer"
+                            className="btn-m3-text px-3 py-1.5 text-xs cursor-pointer w-full sm:w-auto text-center"
                           >
                             {i18n._(msg`Cancelar`)}
                           </button>
@@ -601,7 +601,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                               deleteConfirmText.trim().toLowerCase() !== ws.name.trim().toLowerCase()
                             }
                             onClick={() => handleConfirmDelete(ws.id)}
-                            className={`px-3.5 py-1.5 rounded text-xs font-semibold cursor-pointer shadow-xs transition-colors flex items-center gap-1.5 ${
+                            className={`px-3.5 py-1.5 rounded text-xs font-semibold cursor-pointer shadow-xs transition-colors flex items-center justify-center gap-1.5 w-full sm:w-auto ${
                               deleteScope === 'both'
                                 ? deleteConfirmText.trim().toLowerCase() === ws.name.trim().toLowerCase()
                                   ? 'bg-rose-700 hover:bg-rose-800 text-white'
@@ -627,9 +627,9 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
             </div>
           ) : activeTab === 'edit' && editingWorkspace ? (
             <form onSubmit={handleUpdate} className="flex flex-col gap-3.5">
-              <div id="div-ws-edit-header" className="p-2.5 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between text-xs text-[var(--on-surface-variant)]">
-                <span>{i18n._(msg`Editando:`)} <strong className="text-[var(--on-surface)]">{editingWorkspace.name}</strong></span>
-                <span className="font-mono text-[10px] text-[var(--on-surface-variant)]">ID: {editingWorkspace.id}</span>
+              <div id="div-ws-edit-header" className="p-2.5 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs text-[var(--on-surface-variant)]">
+                <span className="truncate">{i18n._(msg`Editando:`)} <strong className="text-[var(--on-surface)]">{editingWorkspace.name}</strong></span>
+                <span className="font-mono text-[10px] text-[var(--on-surface-variant)] shrink-0">ID: {editingWorkspace.id}</span>
               </div>
 
               <div id="div-ws-edit-name" className="flex flex-col gap-1">
@@ -685,7 +685,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                 />
               </div>
 
-              <div id="div-ws-edit-actions" className="pt-3 flex items-center justify-end gap-2 border-t border-[var(--outline)]">
+              <div id="div-ws-edit-actions" className="pt-3 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 border-t border-[var(--outline)]">
                 <button
                   id="btn-ws-edit-cancel"
                   type="button"
@@ -693,7 +693,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                     setActiveTab('list');
                     setEditingWorkspace(null);
                   }}
-                  className="btn-m3-text px-3 py-1 text-xs cursor-pointer"
+                  className="btn-m3-text px-3 py-1.5 text-xs cursor-pointer w-full sm:w-auto text-center"
                 >
                   {i18n._(msg`Cancelar`)}
                 </button>
@@ -701,7 +701,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                   id="btn-ws-edit-submit"
                   type="submit"
                   disabled={!editName.trim()}
-                  className="btn-m3-primary px-4 py-1.5 text-xs cursor-pointer shadow-sm"
+                  className="btn-m3-primary px-4 py-1.5 text-xs cursor-pointer shadow-sm w-full sm:w-auto text-center justify-center"
                 >
                   {i18n._(msg`Guardar Cambios`)}
                 </button>
@@ -749,12 +749,12 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                 />
               </div>
 
-              <div id="div-workspacemanagermodal-25" className="pt-3 flex items-center justify-end gap-2 border-t border-[var(--outline)]">
+              <div id="div-workspacemanagermodal-25" className="pt-3 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 border-t border-[var(--outline)]">
                 <button
                   id="btn-ws-create-cancel"
                   type="button"
                   onClick={() => setActiveTab('list')}
-                  className="btn-m3-text px-3 py-1 text-xs cursor-pointer"
+                  className="btn-m3-text px-3 py-1.5 text-xs cursor-pointer w-full sm:w-auto text-center"
                 >
                   {i18n._(msg`Cancelar`)}
                 </button>
@@ -762,7 +762,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                   id="btn-ws-create-submit"
                   type="submit"
                   disabled={!name.trim()}
-                  className="btn-m3-primary px-4 py-1.5 text-xs cursor-pointer shadow-sm"
+                  className="btn-m3-primary px-4 py-1.5 text-xs cursor-pointer shadow-sm w-full sm:w-auto text-center justify-center"
                 >
                   {i18n._(msg`Crear Workspace`)}
                 </button>
