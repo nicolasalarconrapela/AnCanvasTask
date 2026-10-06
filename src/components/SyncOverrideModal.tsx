@@ -436,7 +436,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                 <div
                   key={item.id}
                   id={`div-sync-item-${item.id}`}
-                  className={`border rounded-md transition-all overflow-hidden ${
+                  className={`border rounded-md transition-colors shrink-0 overflow-visible min-h-fit ${
                     item.diffType === 'conflict'
                       ? 'border-rose-800/60 bg-rose-950/10'
                       : item.diffType === 'remote_override'
@@ -551,7 +551,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                   {confirmDeleteItemId === item.id && (
                     <div
                       id={`div-sync-item-delete-confirm-${item.id}`}
-                      className="px-3.5 py-3 border-t border-rose-900/60 bg-rose-950/25 flex flex-col gap-2.5 animate-fade-in text-xs"
+                      className="px-3.5 py-3 border-t border-rose-900/60 bg-rose-950/25 flex flex-col gap-2.5 text-xs rounded-b-md shrink-0"
                     >
                       <div className="flex items-center gap-2 font-medium text-rose-300">
                         <span className="material-symbols-outlined text-[16px] text-rose-400">warning</span>
