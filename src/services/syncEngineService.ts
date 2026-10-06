@@ -655,7 +655,7 @@ export async function executeBatchSync(
 
   try {
     for (const item of items) {
-      if (item.diffType === 'synced') continue;
+      if (item.diffType === 'synced' && mode === 'smart') continue;
 
       let strategy: 'keep_local' | 'keep_remote' | 'merge' = item.resolutionStrategy;
 

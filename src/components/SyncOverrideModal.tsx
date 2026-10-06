@@ -613,6 +613,33 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               </>
             )}
 
+            {item.diffType === 'synced' && (
+              <>
+                <button
+                  id={`btn-sync-item-keep-local-${item.id}`}
+                  type="button"
+                  disabled={isResolving || !isSanityConfigured}
+                  onClick={() => handleResolveSingle(item, 'keep_local')}
+                  className="btn-m3-secondary px-2 py-1 text-xs rounded flex items-center gap-1 cursor-pointer disabled:opacity-40 text-[var(--on-surface)] hover:text-sky-400 hover:border-sky-700/60 transition-colors"
+                  title={i18n._(msg`Forzar subida de este elemento a Sanity Cloud`)}
+                >
+                  <span className="material-symbols-outlined text-[13px]">cloud_upload</span>
+                  <span>{i18n._(msg`Subir`)}</span>
+                </button>
+                <button
+                  id={`btn-sync-item-keep-remote-${item.id}`}
+                  type="button"
+                  disabled={isResolving || !isSanityConfigured || !item.remoteData}
+                  onClick={() => handleResolveSingle(item, 'keep_remote')}
+                  className="btn-m3-secondary px-2 py-1 text-xs rounded flex items-center gap-1 cursor-pointer disabled:opacity-40 text-[var(--on-surface)] hover:text-amber-400 hover:border-amber-700/60 transition-colors"
+                  title={i18n._(msg`Forzar descarga de este elemento desde Sanity Cloud`)}
+                >
+                  <span className="material-symbols-outlined text-[13px]">cloud_download</span>
+                  <span>{i18n._(msg`Bajar`)}</span>
+                </button>
+              </>
+            )}
+
             <button
               id={`btn-sync-item-delete-${item.id}`}
               type="button"
@@ -1154,7 +1181,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               <button
                 id="btn-sync-batch-push-all"
                 type="button"
-                disabled={isProcessing || !result?.hasPendingChanges || !isSanityConfigured}
+                disabled={isProcessing || !isSanityConfigured || !result}
                 onClick={() => handleBatchSyncAction('push_all')}
                 className="btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-40"
                 title={i18n._(msg`Sobrescribe Sanity con el estado local de todos los workspaces`)}
@@ -1166,7 +1193,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               <button
                 id="btn-sync-batch-pull-all"
                 type="button"
-                disabled={isProcessing || !result?.hasPendingChanges || !isSanityConfigured}
+                disabled={isProcessing || !isSanityConfigured || !result}
                 onClick={() => handleBatchSyncAction('pull_all')}
                 className="btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-40"
                 title={i18n._(msg`Sobrescribe el estado local con los datos almacenados en Sanity`)}
