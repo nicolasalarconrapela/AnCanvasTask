@@ -1310,7 +1310,10 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                           </div>
                         </button>
                         {!isCollapsed && (
-                          <div className="flex flex-col gap-2 pl-2 sm:pl-3 border-l-2 border-indigo-500/30 ml-1.5">
+                          <div
+                            id={`div-sync-tasks-scroll-${group.workspaceId}`}
+                            className="flex flex-col gap-2 pl-2 sm:pl-3 border-l-2 border-indigo-500/30 ml-1.5 max-h-[380px] sm:max-h-[440px] overflow-y-auto custom-modal-scrollbar pr-2 overscroll-contain"
+                          >
                             {group.tasks.map((taskItem) => renderItemCard(taskItem, true))}
                           </div>
                         )}
