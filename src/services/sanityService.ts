@@ -233,13 +233,35 @@ export interface SanityAccountStatus {
 
 export async function fetchSanityUserProjects(token?: string): Promise<SanityUserProjectInfo[]> {
   const t = token?.trim() || getSanityConfig().token?.trim();
-  if (!t) return [];
+  
+  // 1. If token is provided, fetch with Bearer token
+  if (t) {
+    try {
+      const res = await fetch('https://api.sanity.io/v2021-06-07/projects', {
+        headers: {
+          Authorization: `Bearer ${t}`,
+        },
+      });
 
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          return data.map((p: any) => ({
+            id: p.id,
+            displayName: p.displayName || p.name || p.id,
+            organizationId: p.organizationId,
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch user projects with token:', err);
+    }
+  }
+
+  // 2. Try fetching with browser cookies / studio session
   try {
     const res = await fetch('https://api.sanity.io/v2021-06-07/projects', {
-      headers: {
-        Authorization: `Bearer ${t}`,
-      },
+      credentials: 'include',
     });
 
     if (res.ok) {
@@ -252,11 +274,75 @@ export async function fetchSanityUserProjects(token?: string): Promise<SanityUse
         }));
       }
     }
-  } catch (err) {
-    console.warn('Could not fetch user projects from Sanity:', err);
-  }
+  } catch {}
 
   return [];
+}
+
+/**
+ * Detects if the user has authenticated in Sanity Studio or sanity.io via session cookies or localStorage.
+ */
+export async function detectSanityStudioSession(): Promise<{
+  loggedIn: boolean;
+  user?: SanityUserProfile;
+  projects?: SanityUserProjectInfo[];
+  token?: string;
+}> {
+  // 1. Try with session credentials from Sanity Studio / sanity.io
+  try {
+    const res = await fetch('https://api.sanity.io/v2021-06-07/users/me', {
+      credentials: 'include',
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && (data.id || data.email || data.name)) {
+        const user: SanityUserProfile = {
+          id: data.id || 'user',
+          name: data.name || data.displayName || 'Usuario Sanity',
+          email: data.email || '',
+          profileImage: data.profileImage || data.imageUrl || '',
+          role: data.role || 'Editor',
+          authType: 'user_token',
+        };
+        const projects = await fetchSanityUserProjects();
+        return { loggedIn: true, user, projects };
+      }
+    }
+  } catch {}
+
+  // 2. Scan localStorage for Sanity Studio auth tokens
+  try {
+    if (typeof localStorage !== 'undefined') {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.includes('__sanity_auth') || key.includes('sanitySession') || key.startsWith('sanity.auth.'))) {
+          const val = localStorage.getItem(key);
+          if (val) {
+            try {
+              const parsed = JSON.parse(val);
+              const extractedToken =
+                parsed.token || parsed.sessionToken || parsed.accessToken || (typeof parsed === 'string' ? parsed : null);
+              if (extractedToken && typeof extractedToken === 'string' && extractedToken.length > 20) {
+                const profile = await fetchSanityCurrentUser({
+                  projectId: 'temp',
+                  dataset: 'production',
+                  apiVersion: '2024-03-01',
+                  token: extractedToken,
+                  useCdn: false,
+                });
+                const projects = await fetchSanityUserProjects(extractedToken);
+                if (profile && profile.name) {
+                  return { loggedIn: true, user: profile, projects, token: extractedToken };
+                }
+              }
+            } catch {}
+          }
+        }
+      }
+    }
+  } catch {}
+
+  return { loggedIn: false };
 }
 
 export async function checkSanityAccountStatus(configOverride?: SanityConfig): Promise<SanityAccountStatus> {
