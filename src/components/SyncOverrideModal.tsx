@@ -896,11 +896,11 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   return (
     <div
       id="modal-sync-override-overlay"
-      className="fixed inset-0 z-[65] flex items-center justify-center p-2 sm:p-4 bg-black/75 animate-fade-in"
+      className="fixed inset-0 z-[65] overflow-y-auto p-2 sm:p-4 md:p-6 bg-black/75 flex justify-center items-start custom-modal-scrollbar animate-fade-in"
     >
       <div
         id="modal-sync-override-dialog"
-        className="w-full max-w-4xl bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-md flex flex-col overflow-hidden max-h-[92vh] min-h-0"
+        className="w-full max-w-4xl my-auto sm:my-4 bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-xl flex flex-col overflow-hidden max-h-[90vh] min-h-0"
         role="dialog"
         aria-modal="true"
         aria-labelledby="sync-modal-title"
@@ -958,24 +958,24 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         </div>
 
         {/* Status Summary & Quick Batch Actions */}
-        <div id="div-syncoverridemodal-5" className="px-4 py-3 bg-[var(--surface-container-low)] border-b border-[var(--outline)] flex flex-col gap-3">
-          {/* Stat Counters */}
-          <div id="div-syncoverridemodal-6" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
+        <div id="div-syncoverridemodal-5" className="px-3 sm:px-4 py-2 bg-[var(--surface-container-low)] border-b border-[var(--outline)] flex flex-col gap-2 shrink-0">
+          {/* Compact Stat Counters */}
+          <div id="div-syncoverridemodal-6" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 text-xs">
             <button
               type="button"
               id="btn-sync-stat-total"
               onClick={() => setFilterType('all')}
-              className={`p-2 rounded border flex flex-col justify-between text-left transition cursor-pointer ${
+              className={`px-2 py-1 rounded border flex items-center justify-between text-left transition cursor-pointer ${
                 filterType === 'all'
                   ? 'bg-[var(--surface-container-high)] border-[var(--primary)] ring-1 ring-[var(--primary)]'
                   : 'bg-[var(--surface)] border-[var(--outline)] hover:border-[var(--on-surface-variant)]'
               }`}
             >
-              <span className="text-[10px] text-[var(--on-surface-variant)] flex items-center gap-1">
+              <span className="text-[10px] text-[var(--on-surface-variant)] flex items-center gap-1 truncate">
                 <span className="material-symbols-outlined text-[13px]">inventory_2</span>
-                <span className="truncate">{i18n._(msg`Total Analizados`)}</span>
+                <span>{i18n._(msg`Total`)}</span>
               </span>
-              <span className="text-base font-semibold font-mono text-[var(--on-surface)] mt-1">
+              <span className="text-xs font-bold font-mono text-[var(--on-surface)] shrink-0">
                 {result?.counts.total || 0}
               </span>
             </button>
@@ -984,17 +984,17 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               type="button"
               id="btn-sync-stat-synced"
               onClick={() => setFilterType('synced')}
-              className={`p-2 rounded border flex flex-col justify-between text-left transition cursor-pointer ${
+              className={`px-2 py-1 rounded border flex items-center justify-between text-left transition cursor-pointer ${
                 filterType === 'synced'
                   ? 'bg-emerald-950/50 border-emerald-500 ring-1 ring-emerald-500'
                   : 'bg-[var(--surface)] border-emerald-900/30 hover:border-emerald-700/60'
               }`}
             >
-              <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+              <span className="text-[10px] text-emerald-400 flex items-center gap-1 truncate">
                 <span className="material-symbols-outlined text-[13px]">check_circle</span>
-                <span className="truncate">{i18n._(msg`Sincronizados`)}</span>
+                <span>{i18n._(msg`Sincronizados`)}</span>
               </span>
-              <span className="text-base font-semibold font-mono text-emerald-400 mt-1">
+              <span className="text-xs font-bold font-mono text-emerald-400 shrink-0">
                 {result?.counts.synced || 0}
               </span>
             </button>
@@ -1003,17 +1003,17 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               type="button"
               id="btn-sync-stat-local"
               onClick={() => setFilterType('local_override')}
-              className={`p-2 rounded border flex flex-col justify-between text-left transition cursor-pointer ${
+              className={`px-2 py-1 rounded border flex items-center justify-between text-left transition cursor-pointer ${
                 filterType === 'local_override'
                   ? 'bg-sky-950/50 border-sky-500 ring-1 ring-sky-500'
                   : 'bg-[var(--surface)] border-sky-900/30 hover:border-sky-700/60'
               }`}
             >
-              <span className="text-[10px] text-sky-400 flex items-center gap-1">
+              <span className="text-[10px] text-sky-400 flex items-center gap-1 truncate">
                 <span className="material-symbols-outlined text-[13px]">arrow_upward</span>
-                <span className="truncate">{i18n._(msg`Local Overrides`)}</span>
+                <span>{i18n._(msg`Local`)}</span>
               </span>
-              <span className="text-base font-semibold font-mono text-sky-400 mt-1">
+              <span className="text-xs font-bold font-mono text-sky-400 shrink-0">
                 {result?.counts.localOverrides || 0}
               </span>
             </button>
@@ -1022,17 +1022,17 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               type="button"
               id="btn-sync-stat-remote"
               onClick={() => setFilterType('remote_override')}
-              className={`p-2 rounded border flex flex-col justify-between text-left transition cursor-pointer ${
+              className={`px-2 py-1 rounded border flex items-center justify-between text-left transition cursor-pointer ${
                 filterType === 'remote_override'
                   ? 'bg-amber-950/50 border-amber-500 ring-1 ring-amber-500'
                   : 'bg-[var(--surface)] border-amber-900/30 hover:border-amber-700/60'
               }`}
             >
-              <span className="text-[10px] text-amber-400 flex items-center gap-1">
+              <span className="text-[10px] text-amber-400 flex items-center gap-1 truncate">
                 <span className="material-symbols-outlined text-[13px]">arrow_downward</span>
-                <span className="truncate">{i18n._(msg`Remote Overrides`)}</span>
+                <span>{i18n._(msg`Remoto`)}</span>
               </span>
-              <span className="text-base font-semibold font-mono text-amber-400 mt-1">
+              <span className="text-xs font-bold font-mono text-amber-400 shrink-0">
                 {result?.counts.remoteOverrides || 0}
               </span>
             </button>
@@ -1041,17 +1041,17 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               type="button"
               id="btn-sync-stat-conflicts"
               onClick={() => setFilterType('conflicts')}
-              className={`p-2 rounded border flex flex-col justify-between text-left transition cursor-pointer ${
+              className={`px-2 py-1 rounded border flex items-center justify-between text-left transition cursor-pointer ${
                 filterType === 'conflicts'
                   ? 'bg-rose-950/50 border-rose-500 ring-1 ring-rose-500'
                   : 'bg-[var(--surface)] border-rose-900/30 hover:border-rose-700/60'
               }`}
             >
-              <span className="text-[10px] text-rose-400 flex items-center gap-1">
+              <span className="text-[10px] text-rose-400 flex items-center gap-1 truncate">
                 <span className="material-symbols-outlined text-[13px]">sync_problem</span>
-                <span className="truncate">{i18n._(msg`Conflictos`)}</span>
+                <span>{i18n._(msg`Conflictos`)}</span>
               </span>
-              <span className="text-base font-semibold font-mono text-rose-400 mt-1">
+              <span className="text-xs font-bold font-mono text-rose-400 shrink-0">
                 {result?.counts.conflicts || 0}
               </span>
             </button>
@@ -1060,24 +1060,24 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               type="button"
               id="btn-sync-stat-unique"
               onClick={() => setFilterType('unique')}
-              className={`p-2 rounded border flex flex-col justify-between text-left transition cursor-pointer ${
+              className={`px-2 py-1 rounded border flex items-center justify-between text-left transition cursor-pointer ${
                 filterType === 'unique'
                   ? 'bg-purple-950/50 border-purple-500 ring-1 ring-purple-500'
                   : 'bg-[var(--surface)] border-purple-900/30 hover:border-purple-700/60'
               }`}
             >
-              <span className="text-[10px] text-purple-400 flex items-center gap-1">
+              <span className="text-[10px] text-purple-400 flex items-center gap-1 truncate">
                 <span className="material-symbols-outlined text-[13px]">difference</span>
-                <span className="truncate">{i18n._(msg`Nuevos/Únicos`)}</span>
+                <span>{i18n._(msg`Nuevos`)}</span>
               </span>
-              <span className="text-base font-semibold font-mono text-purple-400 mt-1">
+              <span className="text-xs font-bold font-mono text-purple-400 shrink-0">
                 {(result?.counts.onlyLocal || 0) + (result?.counts.onlyRemote || 0)}
               </span>
             </button>
           </div>
 
           {/* Batch Actions Toolbar */}
-          <div id="div-syncoverridemodal-13" className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div id="div-syncoverridemodal-13" className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
             {/* Filter Tabs */}
             <div id="div-syncoverridemodal-14" className="flex items-center gap-1 bg-[var(--surface)] p-0.5 rounded border border-[var(--outline)] text-xs overflow-x-auto max-w-full">
               <button
