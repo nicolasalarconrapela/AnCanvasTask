@@ -62,8 +62,8 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
 
   // Inline delete confirmation state (workspace id to delete)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [deleteRemoteChoice, setDeleteRemoteChoice] = useState<boolean>(false);
-  const [deleteRemoteConfirmedLoss, setDeleteRemoteConfirmedLoss] = useState<boolean>(false);
+  const [deleteScope, setDeleteScope] = useState<'local' | 'both'>('local');
+  const [deleteConfirmText, setDeleteConfirmText] = useState<string>('');
 
   if (!isOpen) return null;
 
@@ -129,10 +129,10 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
   };
 
   const handleConfirmDelete = (wsId: string) => {
-    onDeleteWorkspace(wsId, deleteRemoteChoice);
+    onDeleteWorkspace(wsId, deleteScope === 'both');
     setConfirmDeleteId(null);
-    setDeleteRemoteChoice(false);
-    setDeleteRemoteConfirmedLoss(false);
+    setDeleteScope('local');
+    setDeleteConfirmText('');
   };
 
   const handleStartEdit = (ws: Workspace) => {
@@ -454,12 +454,12 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                           onClick={() => {
                             if (isConfirmingThis) {
                               setConfirmDeleteId(null);
-                              setDeleteRemoteChoice(false);
-                              setDeleteRemoteConfirmedLoss(false);
+                              setDeleteScope('local');
+                              setDeleteConfirmText('');
                             } else {
                               setConfirmDeleteId(ws.id);
-                              setDeleteRemoteChoice(false);
-                              setDeleteRemoteConfirmedLoss(false);
+                              setDeleteScope('local');
+                              setDeleteConfirmText('');
                             }
                           }}
                           className="btn-m3-icon w-7 h-7 text-[var(--on-surface-variant)] hover:text-rose-400 cursor-pointer"
@@ -470,114 +470,154 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Inline Delete Confirmation */}
+                    {/* Inline Delete Confirmation without checkboxes */}
                     {isConfirmingThis && (
                       <div
                         id={`div-ws-delete-confirm-box-${ws.id}`}
-                        className="mt-3 p-3 rounded-md bg-rose-950/20 border border-rose-800/40 flex flex-col gap-2.5 animate-fade-in text-xs"
+                        className="mt-3 p-3 rounded-md bg-[var(--surface-container-high)]/60 border border-rose-800/40 flex flex-col gap-2.5 animate-fade-in text-xs"
                       >
                         <div className="flex items-center gap-2 text-rose-300 font-semibold">
                           <span className="material-symbols-outlined text-[16px] text-rose-400">warning</span>
-                          <span>{i18n._(msg`¿Eliminar el workspace "${ws.name}"?`)}</span>
+                          <span>{i18n._(msg`Eliminar workspace`)}: "{ws.name}"</span>
                         </div>
 
-                        <p className="text-[11px] text-[var(--on-surface-variant)] leading-relaxed">
-                          {i18n._(
-                            msg`Esta acción eliminará el workspace de tu almacenamiento local en este dispositivo.`
-                          )}
-                        </p>
+                        {isSanityConfigured ? (
+                          <div className="flex flex-col gap-2">
+                            <span className="text-[11px] font-medium text-[var(--on-surface-variant)]">
+                              {i18n._(msg`Selecciona el alcance de la eliminación:`)}
+                            </span>
 
-                        {/* Remote deletion toggle if Sanity is configured */}
-                        {isSanityConfigured && (
-                          <div className="p-2.5 rounded bg-[var(--surface-container-high)]/40 border border-[var(--outline)] flex flex-col gap-2">
-                            <label className="flex items-start gap-2 cursor-pointer select-none">
-                              <input
-                                type="checkbox"
-                                id={`checkbox-delete-remote-${ws.id}`}
-                                checked={deleteRemoteChoice}
-                                onChange={(e) => {
-                                  setDeleteRemoteChoice(e.target.checked);
-                                  if (!e.target.checked) {
-                                    setDeleteRemoteConfirmedLoss(false);
-                                  }
+                            {/* Visual Scope Cards - No Checkboxes */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {/* Option A: Solo Local */}
+                              <button
+                                type="button"
+                                id={`btn-delete-scope-local-${ws.id}`}
+                                onClick={() => {
+                                  setDeleteScope('local');
+                                  setDeleteConfirmText('');
                                 }}
-                                className="mt-0.5 rounded border-[var(--outline)] text-rose-600 focus:ring-rose-500 cursor-pointer"
-                              />
-                              <div className="flex flex-col">
-                                <span className="font-medium text-[var(--on-surface)] text-xs">
-                                  {i18n._(msg`Eliminar también en el servidor remoto (Sanity Cloud)`)}
-                                </span>
-                                <span className="text-[10px] text-[var(--on-surface-variant)]">
-                                  {deleteRemoteChoice
-                                    ? i18n._(msg`Se eliminará tanto de este dispositivo como de la base de datos central de Sanity.`)
-                                    : i18n._(msg`Por defecto se conserva una copia en Sanity Cloud para que puedas recuperarlo en cualquier momento.`)}
-                                </span>
-                              </div>
-                            </label>
-
-                            {/* Verification of permanent loss */}
-                            {deleteRemoteChoice && (
-                              <div className="mt-1 p-2 rounded bg-rose-950/40 border border-rose-600/50 flex flex-col gap-1.5 animate-fade-in">
-                                <div className="flex items-center gap-1.5 text-rose-300 font-bold text-[11px]">
-                                  <span className="material-symbols-outlined text-[14px] text-rose-400">gpp_bad</span>
-                                  <span>{i18n._(msg`ADVERTENCIA: Destrucción permanente e irreversible`)}</span>
-                                </div>
-                                <p className="text-[10px] text-rose-200/90 leading-tight">
-                                  {i18n._(
-                                    msg`El workspace, todas sus tareas asociadas y su historial en Sanity Cloud se perderán PARA SIEMPRE. Ningún dispositivo podrá recuperarlo.`
+                                className={`p-2.5 rounded-md border text-left flex flex-col gap-1 transition cursor-pointer ${
+                                  deleteScope === 'local'
+                                    ? 'border-sky-500 bg-sky-950/30 text-[var(--on-surface)] ring-1 ring-sky-500/50'
+                                    : 'border-[var(--outline)] bg-[var(--surface)] text-[var(--on-surface-variant)] hover:border-[var(--outline-variant)]'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5 font-semibold text-xs text-[var(--on-surface)]">
+                                    <span className="material-symbols-outlined text-[15px] text-sky-400">devices</span>
+                                    <span>{i18n._(msg`Solo en este equipo`)}</span>
+                                  </div>
+                                  {deleteScope === 'local' && (
+                                    <span className="material-symbols-outlined text-[16px] text-sky-400">check_circle</span>
                                   )}
+                                </div>
+                                <p className="text-[10px] text-[var(--on-surface-variant)] leading-tight">
+                                  {i18n._(msg`Se borra de este navegador. La copia en Sanity Cloud queda protegida para poder restaurarla.`)}
                                 </p>
-                                <label className="flex items-center gap-1.5 mt-1 cursor-pointer select-none">
-                                  <input
-                                    type="checkbox"
-                                    id={`checkbox-verify-loss-${ws.id}`}
-                                    checked={deleteRemoteConfirmedLoss}
-                                    onChange={(e) => setDeleteRemoteConfirmedLoss(e.target.checked)}
-                                    className="rounded border-rose-500 text-rose-600 focus:ring-rose-500 cursor-pointer"
-                                  />
-                                  <span className="text-[10px] font-semibold text-rose-300">
-                                    {i18n._(msg`Confirmo que entiendo que se perderá para siempre y deseo destruirlo`)}
+                              </button>
+
+                              {/* Option B: Local y Remoto */}
+                              <button
+                                type="button"
+                                id={`btn-delete-scope-both-${ws.id}`}
+                                onClick={() => {
+                                  setDeleteScope('both');
+                                  setDeleteConfirmText('');
+                                }}
+                                className={`p-2.5 rounded-md border text-left flex flex-col gap-1 transition cursor-pointer ${
+                                  deleteScope === 'both'
+                                    ? 'border-rose-500 bg-rose-950/40 text-rose-200 ring-1 ring-rose-500/50'
+                                    : 'border-[var(--outline)] bg-[var(--surface)] text-[var(--on-surface-variant)] hover:border-rose-900/50'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5 font-semibold text-xs text-rose-300">
+                                    <span className="material-symbols-outlined text-[15px] text-rose-400">cloud_off</span>
+                                    <span>{i18n._(msg`Local y Sanity Cloud`)}</span>
+                                  </div>
+                                  {deleteScope === 'both' && (
+                                    <span className="material-symbols-outlined text-[16px] text-rose-400">check_circle</span>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-rose-300/80 leading-tight">
+                                  {i18n._(msg`Destrucción definitiva. Se borrará permanentemente de la nube para todos los dispositivos.`)}
+                                </p>
+                              </button>
+                            </div>
+
+                            {/* Explicit verification input when deleting from cloud */}
+                            {deleteScope === 'both' && (
+                              <div className="mt-1 p-2.5 rounded-md bg-rose-950/40 border border-rose-600/50 flex flex-col gap-2 animate-fade-in">
+                                <div className="flex items-center gap-1.5 text-rose-300 font-bold text-xs">
+                                  <span className="material-symbols-outlined text-[15px] text-rose-400">gpp_bad</span>
+                                  <span>{i18n._(msg`Verificación de seguridad requerida`)}</span>
+                                </div>
+                                <p className="text-[11px] text-rose-200/90 leading-tight">
+                                  {i18n._(msg`Esta acción es IRREVERSIBLE. Para confirmar que comprendes que se perderá para siempre, escribe el nombre del workspace:`)}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2 py-0.5 rounded bg-black/40 border border-rose-800/60 font-mono text-xs text-rose-200 select-all shrink-0">
+                                    {ws.name}
                                   </span>
-                                </label>
+                                  <input
+                                    type="text"
+                                    id={`input-verify-delete-name-${ws.id}`}
+                                    value={deleteConfirmText}
+                                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                                    placeholder={i18n._(msg`Escribe el nombre aquí`)}
+                                    className="flex-1 bg-black/50 border border-rose-600/60 focus:border-rose-400 rounded px-2.5 py-1 text-xs text-white font-mono focus:outline-none"
+                                    autoFocus
+                                  />
+                                </div>
                               </div>
                             )}
                           </div>
+                        ) : (
+                          <p className="text-[11px] text-[var(--on-surface-variant)] leading-relaxed">
+                            {i18n._(
+                              msg`Esta acción eliminará el workspace de tu almacenamiento local en este dispositivo.`
+                            )}
+                          </p>
                         )}
 
                         {/* Action buttons */}
-                        <div className="flex items-center justify-end gap-2 pt-1">
+                        <div className="flex items-center justify-end gap-2 pt-1 border-t border-[var(--outline)]">
                           <button
                             id={`btn-ws-cancel-delete-${ws.id}`}
                             type="button"
                             onClick={() => {
                               setConfirmDeleteId(null);
-                              setDeleteRemoteChoice(false);
-                              setDeleteRemoteConfirmedLoss(false);
+                              setDeleteScope('local');
+                              setDeleteConfirmText('');
                             }}
-                            className="btn-m3-text px-2.5 py-1 text-xs cursor-pointer"
+                            className="btn-m3-text px-3 py-1 text-xs cursor-pointer"
                           >
                             {i18n._(msg`Cancelar`)}
                           </button>
                           <button
                             id={`btn-ws-confirm-delete-${ws.id}`}
                             type="button"
-                            disabled={deleteRemoteChoice && !deleteRemoteConfirmedLoss}
+                            disabled={
+                              deleteScope === 'both' &&
+                              deleteConfirmText.trim().toLowerCase() !== ws.name.trim().toLowerCase()
+                            }
                             onClick={() => handleConfirmDelete(ws.id)}
-                            className={`px-3 py-1 rounded text-xs font-semibold cursor-pointer shadow-xs transition-colors flex items-center gap-1 ${
-                              deleteRemoteChoice
-                                ? deleteRemoteConfirmedLoss
+                            className={`px-3.5 py-1.5 rounded text-xs font-semibold cursor-pointer shadow-xs transition-colors flex items-center gap-1.5 ${
+                              deleteScope === 'both'
+                                ? deleteConfirmText.trim().toLowerCase() === ws.name.trim().toLowerCase()
                                   ? 'bg-rose-700 hover:bg-rose-800 text-white'
-                                  : 'bg-rose-900/40 text-rose-400/50 cursor-not-allowed border border-rose-800/40'
+                                  : 'bg-rose-900/30 text-rose-400/40 cursor-not-allowed border border-rose-800/40'
                                 : 'bg-rose-700 hover:bg-rose-800 text-white'
                             }`}
                           >
-                            <span className="material-symbols-outlined text-[13px]">
-                              {deleteRemoteChoice ? 'delete_forever' : 'delete'}
+                            <span className="material-symbols-outlined text-[14px]">
+                              {deleteScope === 'both' ? 'delete_forever' : 'delete'}
                             </span>
                             <span>
-                              {deleteRemoteChoice
-                                ? i18n._(msg`Destruir para siempre`)
-                                : i18n._(msg`Eliminar solo en local`)}
+                              {deleteScope === 'both'
+                                ? i18n._(msg`Destruir definitivamente`)
+                                : i18n._(msg`Eliminar de este equipo`)}
                             </span>
                           </button>
                         </div>
