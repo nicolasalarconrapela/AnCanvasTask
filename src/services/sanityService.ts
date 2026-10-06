@@ -427,10 +427,11 @@ export async function fetchSanityUserProjects(token?: string): Promise<SanityUse
 
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data)) {
-          return data.map((p: any) => ({
-            id: p.id,
-            displayName: p.displayName || p.name || p.id,
+        const list = Array.isArray(data) ? data : Array.isArray(data?.projects) ? data.projects : [];
+        if (list.length > 0) {
+          return list.map((p: any) => ({
+            id: p.id || p._id,
+            displayName: p.displayName || p.name || p.title || p.id,
             organizationId: p.organizationId,
           }));
         }
@@ -448,10 +449,11 @@ export async function fetchSanityUserProjects(token?: string): Promise<SanityUse
 
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data)) {
-        return data.map((p: any) => ({
-          id: p.id,
-          displayName: p.displayName || p.name || p.id,
+      const list = Array.isArray(data) ? data : Array.isArray(data?.projects) ? data.projects : [];
+      if (list.length > 0) {
+        return list.map((p: any) => ({
+          id: p.id || p._id,
+          displayName: p.displayName || p.name || p.title || p.id,
           organizationId: p.organizationId,
         }));
       }

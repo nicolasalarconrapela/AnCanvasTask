@@ -70,25 +70,27 @@ export const SanityProfileManagerModal: React.FC<SanityProfileManagerModalProps>
   };
 
   const loadProjectsForToken = async (t: string) => {
-    if (!t.trim()) {
-      setUserProjects([]);
-      setUserProfile(null);
-      return;
-    }
     setIsLoadingProjects(true);
     try {
-      const [projects, profile] = await Promise.all([
-        fetchSanityUserProjects(t),
-        fetchSanityCurrentUser({
-          projectId: projectId || 'temp',
-          dataset: dataset || 'production',
-          apiVersion: '2024-03-01',
-          token: t,
-          useCdn: false,
-        }),
-      ]);
+      const projects = await fetchSanityUserProjects(t || undefined);
       setUserProjects(projects);
-      setUserProfile(profile);
+
+      if (t.trim()) {
+        try {
+          const profile = await fetchSanityCurrentUser({
+            projectId: projectId || 'temp',
+            dataset: dataset || 'production',
+            apiVersion: '2024-03-01',
+            token: t,
+            useCdn: false,
+          });
+          setUserProfile(profile);
+        } catch {
+          setUserProfile(null);
+        }
+      } else {
+        setUserProfile(null);
+      }
     } catch {
       setUserProjects([]);
       setUserProfile(null);
@@ -116,12 +118,7 @@ export const SanityProfileManagerModal: React.FC<SanityProfileManagerModalProps>
           setDataset(found.dataset);
           setToken(found.token || '');
           setShowToken(false);
-          if (found.token) {
-            loadProjectsForToken(found.token);
-          } else {
-            setUserProjects([]);
-            setUserProfile(null);
-          }
+          loadProjectsForToken(found.token || '');
           setView('editor');
           return;
         }
@@ -134,8 +131,7 @@ export const SanityProfileManagerModal: React.FC<SanityProfileManagerModalProps>
         setDataset('production');
         setToken('');
         setShowToken(false);
-        setUserProjects([]);
-        setUserProfile(null);
+        loadProjectsForToken('');
         setView('editor');
         return;
       }
@@ -144,6 +140,16 @@ export const SanityProfileManagerModal: React.FC<SanityProfileManagerModalProps>
       setEditingProfileId(null);
     }
   }, [isOpen, initialView, initialProfileId]);
+
+  // Debounced projects detection when editing token
+  useEffect(() => {
+    if (isOpen && view === 'editor') {
+      const timer = setTimeout(() => {
+        loadProjectsForToken(token.trim());
+      }, 350);
+      return () => clearTimeout(timer);
+    }
+  }, [token, view, isOpen]);
 
   useEffect(() => {
     const handleUpdate = () => refreshList();
@@ -611,29 +617,47 @@ export const SanityProfileManagerModal: React.FC<SanityProfileManagerModalProps>
               {/* Quick Project Suggestions if Token is active */}
               {userProjects.length > 0 && (
                 <div className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col gap-1.5">
-                  <span className="text-[11px] font-semibold text-[var(--on-surface)] flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[14px] text-sky-400">folder_shared</span>
-                    <span>{i18n._(msg`Proyectos detectados en tu cuenta:`)}</span>
-                  </span>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-[var(--on-surface)] flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[14px] text-sky-400">folder_shared</span>
+                      <span>{i18n._(msg`Proyectos detectados en tu cuenta:`)}</span>
+                    </span>
+                    {isLoadingProjects && (
+                      <span className="text-[10px] text-[var(--on-surface-variant)] flex items-center gap-1">
+                        <span className="w-2.5 h-2.5 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
+                        <span>{i18n._(msg`Actualizando...`)}</span>
+                      </span>
+                    )}
+                  </div>
                   <div className="flex flex-wrap gap-1">
-                    {userProjects.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                          setProjectId(p.id);
-                          setTestResult(null);
-                        }}
-                        className={`px-2 py-0.5 rounded text-[10px] font-mono border flex items-center gap-1 transition-all cursor-pointer ${
-                          projectId.trim() === p.id
-                            ? 'bg-sky-500/20 border-sky-400 text-sky-200 font-semibold'
-                            : 'bg-[var(--surface-container-high)] border-[var(--outline)] text-[var(--on-surface)] hover:border-sky-500/50'
-                        }`}
-                      >
-                        <span>{p.displayName}</span>
-                        <span className="text-[9px] opacity-60">({p.id})</span>
-                      </button>
-                    ))}
+                    {userProjects.map((p) => {
+                      const isSelected = projectId.trim() === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            setProjectId(p.id);
+                            if (!alias.trim() || alias.startsWith('Proyecto ')) {
+                              setAlias(p.displayName || p.id);
+                            }
+                            setTestResult(null);
+                          }}
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono border flex items-center gap-1 transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-sky-500/20 border-sky-400 text-sky-200 font-semibold ring-1 ring-sky-400/40'
+                              : 'bg-[var(--surface-container-high)] border-[var(--outline)] text-[var(--on-surface)] hover:border-sky-500/50'
+                          }`}
+                          title={`Project ID: ${p.id}`}
+                        >
+                          <span>{p.displayName}</span>
+                          <span className="text-[9px] opacity-60">({p.id})</span>
+                          {isSelected && (
+                            <span className="material-symbols-outlined text-[12px] text-sky-400">check</span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
