@@ -647,47 +647,6 @@ export const schemaTypes = [taskSchema, canvasVisualStateSchema];`,
                   </div>
                 </div>
 
-                {/* User Projects Quick Selector (if token provides accessible projects) */}
-                {userProjects.length > 0 && (
-                  <div className="p-2.5 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col gap-1.5">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-semibold text-[var(--on-surface)] flex items-center gap-1.5">
-                        <span className="material-symbols-outlined text-[15px] text-sky-400">folder_shared</span>
-                        <span>{i18n._(msg`Proyectos Disponibles en tu Cuenta de Sanity`)}</span>
-                      </span>
-                      <span className="text-[10px] text-[var(--on-surface-variant)]">
-                        {i18n._(msg`Haz clic para autocompletar`)}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1.5 pt-0.5">
-                      {userProjects.map((p) => {
-                        const isSelected = projectId.trim() === p.id;
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              setProjectId(p.id);
-                              setTestResult(null);
-                            }}
-                            className={`px-2.5 py-1 rounded text-[11px] font-mono border flex items-center gap-1.5 transition-all cursor-pointer ${
-                              isSelected
-                                ? 'bg-sky-500/20 border-sky-400 text-sky-200 font-semibold ring-1 ring-sky-400/50'
-                                : 'bg-[var(--surface-container-high)] border-[var(--outline)] text-[var(--on-surface)] hover:border-sky-500/50'
-                            }`}
-                          >
-                            <span className="truncate max-w-[150px]">{p.displayName}</span>
-                            <span className="text-[9px] opacity-60">({p.id})</span>
-                            {isSelected && (
-                              <span className="material-symbols-outlined text-[13px] text-sky-400">check</span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
 
 
               </form>
@@ -695,7 +654,7 @@ export const schemaTypes = [taskSchema, canvasVisualStateSchema];`,
               {/* Test Connection Button & Status Box */}
               <div id="div-sanityconfigmodal-12" className="pt-1 flex flex-col gap-2.5">
                 <div id="div-sanityconfigmodal-13" className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-[var(--on-surface)] text-xs">{i18n._(msg`Comprobación de conectividad`)}</span>
+                  <span className="font-medium text-[var(--on-surface)] text-xs"></span>
                   <button
                     id="btn-sanity-test-connection"
                     type="button"
@@ -1043,14 +1002,6 @@ export const schemaTypes = [taskSchema, canvasVisualStateSchema];`,
           </div>
 
           <div id="div-sanityconfigmodal-42" className="flex items-center gap-2">
-            <button
-              id="btn-sanity-cancel-footer"
-              type="button"
-              onClick={onClose}
-              className="btn-m3-text px-3.5 py-1 text-xs cursor-pointer"
-            >
-              {i18n._(msg`Cerrar`)}
-            </button>
             <button
               id="btn-sanity-save-footer"
               type="submit"
