@@ -924,7 +924,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         {/* Status Summary & Quick Batch Actions */}
         <div id="div-syncoverridemodal-5" className="px-4 py-3 bg-[var(--surface-container-low)] border-b border-[var(--outline)] flex flex-col gap-3">
           {/* Stat Counters */}
-          <div id="div-syncoverridemodal-6" className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
+          <div id="div-syncoverridemodal-6" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
             <button
               type="button"
               id="btn-sync-stat-total"

@@ -172,7 +172,7 @@ export const TaskDocumentExplorer: React.FC<TaskDocumentExplorerProps> = ({
                 e.stopPropagation();
                 setActiveMenuDocId(activeMenuDocId === doc.id ? null : doc.id);
               }}
-              className="btn-m3-icon w-5 h-5 opacity-0 group-hover:opacity-100 hover:text-[var(--on-surface)] cursor-pointer"
+              className="btn-m3-icon w-5 h-5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-[var(--on-surface)] cursor-pointer"
               title={i18n._(msg`Opciones de archivo`)}
             >
               <span className="material-symbols-outlined text-[13px]">more_vert</span>
@@ -515,7 +515,7 @@ export const TaskDocumentExplorer: React.FC<TaskDocumentExplorerProps> = ({
                   <span className="truncate text-[var(--on-surface)]">{folderLabel}</span>
                 </button>
 
-                <div id="div-taskdocumentexplorer-27" className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div id="div-taskdocumentexplorer-27" className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                   <button
                     id={`btn-explorer-add-doc-to-folder-${folder}`}
                     type="button"
