@@ -15,6 +15,7 @@ interface WorkspaceManagerModalProps {
   activeWorkspaceId: string;
   onSelectWorkspace: (id: string) => void;
   onCreateWorkspace: (workspace: Workspace) => void;
+  onUpdateWorkspace?: (workspace: Workspace) => void;
   onDeleteWorkspace: (id: string) => void;
   onShowToast: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
   onSyncWorkspacesToSanity?: () => Promise<void>;
@@ -31,6 +32,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
   activeWorkspaceId,
   onSelectWorkspace,
   onCreateWorkspace,
+  onUpdateWorkspace,
   onDeleteWorkspace,
   onShowToast,
   onSyncWorkspacesToSanity,
@@ -40,7 +42,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
   isSanityConfigured = false,
 }) => {
   const { i18n } = useLingui();
-  const [activeTab, setActiveTab] = useState<'list' | 'create'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'create' | 'edit'>('list');
   const [isSyncingSanity, setIsSyncingSanity] = useState<boolean>(false);
   const [isImportingSanity, setIsImportingSanity] = useState<boolean>(false);
   const [savingWsId, setSavingWsId] = useState<string | null>(null);
@@ -50,6 +52,13 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
   const [repoInput, setRepoInput] = useState('');
   const [defaultBranch, setDefaultBranch] = useState('main');
   const [description, setDescription] = useState('');
+
+  // Form state for editing workspace
+  const [editingWorkspace, setEditingWorkspace] = useState<Workspace | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editRepoInput, setEditRepoInput] = useState('');
+  const [editDefaultBranch, setEditDefaultBranch] = useState('main');
+  const [editDescription, setEditDescription] = useState('');
 
   // Inline delete confirmation state (workspace id to delete)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -123,6 +132,48 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
     onShowToast(i18n._(msg`Workspace eliminado`), 'info');
   };
 
+  const handleStartEdit = (ws: Workspace) => {
+    setEditingWorkspace(ws);
+    setEditName(ws.name || '');
+    setEditRepoInput(ws.githubRepo?.fullName || ws.githubRepo?.url || '');
+    setEditDefaultBranch(ws.githubRepo?.defaultBranch || ws.activeBranchName || 'main');
+    setEditDescription(ws.githubRepo?.description || '');
+    setActiveTab('edit');
+  };
+
+  const handleUpdate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingWorkspace) return;
+    if (!editName.trim()) {
+      onShowToast(i18n._(msg`Por favor completa el nombre del workspace`), 'warning');
+      return;
+    }
+
+    const safeRepoInput =
+      editRepoInput.trim() ||
+      `local/${editName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'workspace'}`;
+    const repoInfo = parseGitHubRepoInput(safeRepoInput);
+    const branchName = editDefaultBranch.trim() || editingWorkspace.activeBranchName || 'main';
+
+    const updatedWorkspace: Workspace = {
+      ...editingWorkspace,
+      name: editName.trim(),
+      githubRepo: {
+        ...editingWorkspace.githubRepo,
+        ...repoInfo,
+        defaultBranch: branchName,
+        description: editDescription.trim() || undefined,
+      },
+      activeBranchName: branchName,
+      updatedAt: new Date().toISOString(),
+    };
+
+    onUpdateWorkspace?.(updatedWorkspace);
+    onShowToast(i18n._(msg`Workspace "${updatedWorkspace.name}" actualizado`), 'success');
+    setActiveTab('list');
+    setEditingWorkspace(null);
+  };
+
   return (
     <div
       id="modal-workspace-manager-overlay"
@@ -157,7 +208,10 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
           <button
             id="btn-workspace-tab-list"
             type="button"
-            onClick={() => setActiveTab('list')}
+            onClick={() => {
+              setActiveTab('list');
+              setEditingWorkspace(null);
+            }}
             className={`py-2 px-3 text-xs font-medium border-b-2 transition-colors cursor-pointer ${
               activeTab === 'list'
                 ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
@@ -169,7 +223,10 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
           <button
             id="btn-workspace-tab-create"
             type="button"
-            onClick={() => setActiveTab('create')}
+            onClick={() => {
+              setActiveTab('create');
+              setEditingWorkspace(null);
+            }}
             className={`py-2 px-3 text-xs font-medium border-b-2 transition-colors cursor-pointer ${
               activeTab === 'create'
                 ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
@@ -178,6 +235,21 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
           >
             + {i18n._(msg`Nuevo Workspace`)}
           </button>
+          {editingWorkspace && (
+            <button
+              id="btn-workspace-tab-edit"
+              type="button"
+              onClick={() => setActiveTab('edit')}
+              className={`py-2 px-3 text-xs font-medium border-b-2 transition-colors cursor-pointer flex items-center gap-1 ${
+                activeTab === 'edit'
+                  ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
+                  : 'border-transparent text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[13px]">edit</span>
+              <span>{i18n._(msg`Editar`)}: {editingWorkspace.name}</span>
+            </button>
+          )}
         </div>
 
         {/* Content */}
@@ -346,6 +418,18 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                           </button>
                         )}
 
+                        {onUpdateWorkspace && (
+                          <button
+                            id={`btn-ws-edit-${ws.id}`}
+                            type="button"
+                            onClick={() => handleStartEdit(ws)}
+                            className="btn-m3-icon w-7 h-7 text-[var(--on-surface-variant)] hover:text-sky-400 cursor-pointer"
+                            title={i18n._(msg`Editar workspace`)}
+                          >
+                            <span className="material-symbols-outlined text-[15px]">edit</span>
+                          </button>
+                        )}
+
                         {!isActive && (
                           <button
                             id={`btn-ws-open-${ws.id}`}
@@ -405,6 +489,88 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                 );
               })}
             </div>
+          ) : activeTab === 'edit' && editingWorkspace ? (
+            <form onSubmit={handleUpdate} className="flex flex-col gap-3.5">
+              <div id="div-ws-edit-header" className="p-2.5 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between text-xs text-[var(--on-surface-variant)]">
+                <span>{i18n._(msg`Editando:`)} <strong className="text-[var(--on-surface)]">{editingWorkspace.name}</strong></span>
+                <span className="font-mono text-[10px] text-[var(--on-surface-variant)]">ID: {editingWorkspace.id}</span>
+              </div>
+
+              <div id="div-ws-edit-name" className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--on-surface)]">
+                  {i18n._(msg`Nombre del Workspace`)}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder={i18n._(msg`Nombre del workspace`)}
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+
+              <div id="div-ws-edit-repo" className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--on-surface)]">
+                  {i18n._(msg`Repositorio (GitHub / Local)`)}
+                </label>
+                <input
+                  type="text"
+                  value={editRepoInput}
+                  onChange={(e) => setEditRepoInput(e.target.value)}
+                  placeholder="usuario/repositorio"
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-mono text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+
+              <div id="div-ws-edit-branch" className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--on-surface)]">
+                  {i18n._(msg`Rama activa / por defecto`)}
+                </label>
+                <input
+                  type="text"
+                  value={editDefaultBranch}
+                  onChange={(e) => setEditDefaultBranch(e.target.value)}
+                  placeholder="main"
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-mono text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+
+              <div id="div-ws-edit-desc" className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--on-surface)]">
+                  {i18n._(msg`Descripción (opcional)`)}
+                </label>
+                <input
+                  type="text"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder={i18n._(msg`Breve resumen del propósito de este workspace`)}
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+
+              <div id="div-ws-edit-actions" className="pt-3 flex items-center justify-end gap-2 border-t border-[var(--outline)]">
+                <button
+                  id="btn-ws-edit-cancel"
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('list');
+                    setEditingWorkspace(null);
+                  }}
+                  className="btn-m3-text px-3 py-1 text-xs cursor-pointer"
+                >
+                  {i18n._(msg`Cancelar`)}
+                </button>
+                <button
+                  id="btn-ws-edit-submit"
+                  type="submit"
+                  disabled={!editName.trim()}
+                  className="btn-m3-primary px-4 py-1.5 text-xs cursor-pointer shadow-sm"
+                >
+                  {i18n._(msg`Guardar Cambios`)}
+                </button>
+              </div>
+            </form>
           ) : (
             <form onSubmit={handleCreate} className="flex flex-col gap-3.5">
               <div id="div-workspacemanagermodal-21" className="flex flex-col gap-1">

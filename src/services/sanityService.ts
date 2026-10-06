@@ -1389,7 +1389,7 @@ export async function saveWorkspaceToSanity(
 ): Promise<{ ok: boolean; message: string; document?: any }> {
   const config = { ...getSanityConfig(), ...configOverride };
   const rawId = workspace.workspaceId || workspace.id || 'ws_' + Date.now();
-  const cleanId = String(rawId).replace(/^workspace-/, '');
+  const cleanId = sanitizeSanityDocId(String(rawId).replace(/^workspace-/, ''));
   const docId = `workspace-${cleanId}`;
   const now = new Date().toISOString();
 
@@ -1496,6 +1496,70 @@ export async function saveWorkspaceToSanity(
 }
 
 /**
+ * Normalizes a Sanity workspace document into application Workspace model.
+ */
+export function normalizeSanityWorkspaceDoc(doc: any): any {
+  if (!doc) return null;
+  const rawBranches = Array.isArray(doc.branches) && doc.branches.length > 0
+    ? doc.branches
+    : [{ name: 'main', isProtected: true, taskDocuments: [] }];
+
+  const branches = rawBranches.map((b: any) => {
+    const rawDocs = Array.isArray(b.taskDocuments) ? b.taskDocuments : [];
+    const taskDocuments = rawDocs.length > 0
+      ? rawDocs.map((d: any) => ({
+          id: d.id || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          name: d.name || 'TASKS.md',
+          folder: d.folder || '',
+          path: d.path || (d.folder ? `${d.folder}/${d.name || 'TASKS.md'}` : d.name || 'TASKS.md'),
+          content: typeof d.content === 'string' ? d.content : '',
+          lastSavedContent: typeof d.lastSavedContent === 'string' ? d.lastSavedContent : (d.content || ''),
+          updatedAt: d.updatedAt || doc._updatedAt || new Date().toISOString(),
+        }))
+      : [
+          {
+            id: `doc_${b.name || 'main'}_root`,
+            name: 'TASKS.md',
+            folder: '',
+            path: 'TASKS.md',
+            content: '# Tareas\n\n## General\n- [ ] Tarea inicial\n  id: task_init\n  priority: P1\n',
+            lastSavedContent: '# Tareas\n\n## General\n- [ ] Tarea inicial\n  id: task_init\n  priority: P1\n',
+            updatedAt: new Date().toISOString(),
+          },
+        ];
+
+    return {
+      name: b.name || 'main',
+      isProtected: Boolean(b.isProtected),
+      activeDocumentId: b.activeDocumentId || taskDocuments[0]?.id || `doc_${Date.now()}`,
+      lastCommit: b.lastCommit,
+      taskDocuments,
+    };
+  });
+
+  const rawId = doc.workspaceId || doc._id?.replace(/^workspace-/, '') || doc._id || `ws_${Date.now()}`;
+  const cleanId = sanitizeSanityDocId(String(rawId).replace(/^workspace-/, ''));
+
+  return {
+    id: cleanId,
+    name: doc.name || doc.title || 'Workspace',
+    githubRepo: {
+      owner: doc.githubRepo?.owner || 'usuario',
+      repo: doc.githubRepo?.repo || 'proyecto',
+      fullName: doc.githubRepo?.fullName || `${doc.githubRepo?.owner || 'usuario'}/${doc.githubRepo?.repo || 'proyecto'}`,
+      url: doc.githubRepo?.url || `https://github.com/${doc.githubRepo?.fullName || 'proyecto'}`,
+      defaultBranch: doc.githubRepo?.defaultBranch || 'main',
+      isPrivate: Boolean(doc.githubRepo?.isPrivate),
+      description: doc.githubRepo?.description || '',
+    },
+    activeBranchName: doc.activeBranchName || branches[0]?.name || 'main',
+    branches,
+    createdAt: doc.createdAt || doc._createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc._updatedAt || new Date().toISOString(),
+  };
+}
+
+/**
  * Loads all workspaces from Sanity dataset.
  */
 export async function loadWorkspacesFromSanity(
@@ -1524,62 +1588,9 @@ export async function loadWorkspacesFromSanity(
 
     logSanityTrace(`Cargados ${results.length} workspace(s) desde Sanity (${config.dataset})`);
 
-    return results.map((doc: any) => {
-      const rawBranches = Array.isArray(doc.branches) && doc.branches.length > 0
-        ? doc.branches
-        : [{ name: 'main', isProtected: true, taskDocuments: [] }];
-
-      const branches = rawBranches.map((b: any) => {
-        const rawDocs = Array.isArray(b.taskDocuments) ? b.taskDocuments : [];
-        const taskDocuments = rawDocs.length > 0
-          ? rawDocs.map((d: any) => ({
-              id: d.id || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-              name: d.name || 'TASKS.md',
-              folder: d.folder || '',
-              path: d.path || (d.folder ? `${d.folder}/${d.name || 'TASKS.md'}` : d.name || 'TASKS.md'),
-              content: typeof d.content === 'string' ? d.content : '',
-              lastSavedContent: typeof d.lastSavedContent === 'string' ? d.lastSavedContent : (d.content || ''),
-              updatedAt: d.updatedAt || doc._updatedAt || new Date().toISOString(),
-            }))
-          : [
-              {
-                id: `doc_${b.name || 'main'}_root`,
-                name: 'TASKS.md',
-                folder: '',
-                path: 'TASKS.md',
-                content: '# Tareas\n\n## General\n- [ ] Tarea inicial\n  id: task_init\n  priority: P1\n',
-                lastSavedContent: '# Tareas\n\n## General\n- [ ] Tarea inicial\n  id: task_init\n  priority: P1\n',
-                updatedAt: new Date().toISOString(),
-              },
-            ];
-
-        return {
-          name: b.name || 'main',
-          isProtected: Boolean(b.isProtected),
-          activeDocumentId: b.activeDocumentId || taskDocuments[0].id,
-          lastCommit: b.lastCommit,
-          taskDocuments,
-        };
-      });
-
-      return {
-        id: doc.workspaceId || doc._id?.replace(/^workspace-/, '') || doc._id,
-        name: doc.name || doc.title || 'Workspace',
-        githubRepo: {
-          owner: doc.githubRepo?.owner || 'usuario',
-          repo: doc.githubRepo?.repo || 'proyecto',
-          fullName: doc.githubRepo?.fullName || `${doc.githubRepo?.owner || 'usuario'}/${doc.githubRepo?.repo || 'proyecto'}`,
-          url: doc.githubRepo?.url || `https://github.com/${doc.githubRepo?.fullName || 'proyecto'}`,
-          defaultBranch: doc.githubRepo?.defaultBranch || 'main',
-          isPrivate: Boolean(doc.githubRepo?.isPrivate),
-          description: doc.githubRepo?.description || '',
-        },
-        activeBranchName: doc.activeBranchName || branches[0]?.name || 'main',
-        branches,
-        createdAt: doc.createdAt || doc._createdAt || new Date().toISOString(),
-        updatedAt: doc.updatedAt || doc._updatedAt || new Date().toISOString(),
-      };
-    });
+    return results
+      .map((doc: any) => normalizeSanityWorkspaceDoc(doc))
+      .filter((w): w is NonNullable<typeof w> => Boolean(w));
   } catch (err) {
     logSanityWarn('Error al cargar workspaces desde Sanity:', err);
     return [];

@@ -16,6 +16,7 @@ import {
 } from '../src/services/workspaceService';
 import {
   buildSanityTaskDocId,
+  normalizeSanityWorkspaceDoc,
 } from '../src/services/sanityService';
 
 console.log('--- Iniciando suite de pruebas de AnTaskCanvas (Core sin GitHub) ---');
@@ -163,7 +164,51 @@ assert.strictEqual(task1WsB, 'task-project-b-setup');
 
 const taskLegacy = buildSanityTaskDocId('setup');
 assert.strictEqual(taskLegacy, 'task-setup', 'Tareas sin workspace deben mantener formato legacy');
-console.log('   ✓ Aislamiento de IDs por workspace en Sanity verificado.');
+// 8. Sanity Workspace Normalization & Real-time CRUD Model (Zero Data Loss)
+console.log('8. Verificando normalización y reconciliación de Workspaces de Sanity...');
+const rawRemoteSanityDoc = {
+  _id: 'workspace-project-remote',
+  _type: 'workspace',
+  workspaceId: 'project-remote',
+  name: 'Proyecto Remoto',
+  githubRepo: {
+    owner: 'remoteteam',
+    repo: 'remoterepo',
+    fullName: 'remoteteam/remoterepo',
+    url: 'https://github.com/remoteteam/remoterepo',
+    defaultBranch: 'main',
+    description: 'Repo remoto sincronizado',
+  },
+  branches: [
+    {
+      name: 'main',
+      taskDocuments: [
+        {
+          id: 'doc_1',
+          name: 'TASKS.md',
+          content: '# Tareas Remotas\n- [ ] Tarea 1\n  id: rem_1\n',
+        },
+      ],
+    },
+  ],
+};
+
+const normalizedWs = normalizeSanityWorkspaceDoc(rawRemoteSanityDoc);
+assert(normalizedWs, 'El workspace normalizado debe existir');
+assert.strictEqual(normalizedWs.id, 'project-remote', 'El ID debe ser saneado y sin prefijo workspace-');
+assert.strictEqual(normalizedWs.name, 'Proyecto Remoto');
+assert.strictEqual(normalizedWs.branches.length, 1);
+assert.strictEqual(normalizedWs.branches[0].taskDocuments.length, 1);
+assert.strictEqual(normalizedWs.branches[0].taskDocuments[0].id, 'doc_1');
+
+// Test fallback handling for empty or malformed remote workspace documents
+const fallbackWs = normalizeSanityWorkspaceDoc({ _id: 'workspace-empty-ws' });
+assert(fallbackWs, 'Debe crear fallback para documentos mínimos');
+assert.strictEqual(fallbackWs.id, 'empty-ws');
+assert.strictEqual(fallbackWs.branches.length, 1, 'Debe autogenerar rama default');
+assert.strictEqual(fallbackWs.branches[0].name, 'main');
+assert(fallbackWs.branches[0].taskDocuments.length > 0, 'Debe autogenerar documento inicial');
+console.log('   ✓ Normalización, resiliencia y Zero Data Loss de Workspaces verificado.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 

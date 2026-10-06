@@ -358,11 +358,10 @@ function SdkDocumentsList({
                 key={h.documentId}
                 id={`btn-sanity-sdk-handle-${h.documentId}`}
                 onClick={() => onSelectHandle(h)}
-                className={`text-left p-3 border transition flex flex-col justify-between gap-2 cursor-pointer ${
-                  isSelected
+                className={`text-left p-3 border transition flex flex-col justify-between gap-2 cursor-pointer ${isSelected
                     ? 'bg-neutral-800 border-neutral-500'
                     : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700'
-                }`}
+                  }`}
               >
                 <div id="div-sanitysdkexplorer-16" className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 bg-neutral-950 border border-neutral-800 text-neutral-300">
@@ -414,11 +413,11 @@ function SdkGroqSandbox({
   const PRESET_QUERIES = [
     ...(cleanWs
       ? [
-          {
-            label: 'Tareas del Workspace actual',
-            query: `*[_type == "task" && (workspaceId == "${cleanWs}" || workspace._ref == "workspace-${cleanWs}")] | order(_updatedAt desc)[0...15]`,
-          },
-        ]
+        {
+          label: 'Tareas del Workspace actual',
+          query: `*[_type == "task" && (workspaceId == "${cleanWs}" || workspace._ref == "workspace-${cleanWs}")] | order(_updatedAt desc)[0...15]`,
+        },
+      ]
       : []),
     { label: 'Todas las tareas', query: `*[_type == "task"] | order(_updatedAt desc)[0...10]` },
     { label: 'Workspaces y ramas', query: `*[_type == "workspace"] | order(_updatedAt desc)` },
@@ -445,11 +444,10 @@ function SdkGroqSandbox({
               setInputQuery(preset.query);
               setActiveQuery(preset.query);
             }}
-            className={`px-2.5 py-1 text-xs border transition ${
-              activeQuery === preset.query
+            className={`px-2.5 py-1 text-xs border transition ${activeQuery === preset.query
                 ? 'bg-neutral-800 border-neutral-500 text-neutral-100 font-medium'
                 : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-neutral-200'
-            }`}
+              }`}
           >
             {preset.label}
           </button>
@@ -748,11 +746,10 @@ function SdkExplorerInner({
         <button
           id="btn-sanity-sdk-tab-documents"
           onClick={() => setActiveTab('documents')}
-          className={`px-4 py-2 text-xs font-medium border-b-2 transition flex items-center gap-1.5 ${
-            activeTab === 'documents'
+          className={`px-4 py-2 text-xs font-medium border-b-2 transition flex items-center gap-1.5 ${activeTab === 'documents'
               ? 'border-emerald-500 text-neutral-100 bg-neutral-900/60'
               : 'border-transparent text-neutral-400 hover:text-neutral-200'
-          }`}
+            }`}
         >
           <Database className="w-3.5 h-3.5 text-emerald-400" />
           Documentos Reactivos (useDocuments)
@@ -760,11 +757,10 @@ function SdkExplorerInner({
         <button
           id="btn-sanity-sdk-tab-groq"
           onClick={() => setActiveTab('groq')}
-          className={`px-4 py-2 text-xs font-medium border-b-2 transition flex items-center gap-1.5 ${
-            activeTab === 'groq'
+          className={`px-4 py-2 text-xs font-medium border-b-2 transition flex items-center gap-1.5 ${activeTab === 'groq'
               ? 'border-emerald-500 text-neutral-100 bg-neutral-900/60'
               : 'border-transparent text-neutral-400 hover:text-neutral-200'
-          }`}
+            }`}
         >
           <Terminal className="w-3.5 h-3.5 text-amber-400" />
           Consultas GROQ Live (useQuery)
@@ -772,11 +768,10 @@ function SdkExplorerInner({
         <button
           id="btn-sanity-sdk-tab-events"
           onClick={() => setActiveTab('events')}
-          className={`px-4 py-2 text-xs font-medium border-b-2 transition flex items-center gap-1.5 ${
-            activeTab === 'events'
+          className={`px-4 py-2 text-xs font-medium border-b-2 transition flex items-center gap-1.5 ${activeTab === 'events'
               ? 'border-emerald-500 text-neutral-100 bg-neutral-900/60'
               : 'border-transparent text-neutral-400 hover:text-neutral-200'
-          }`}
+            }`}
         >
           <Activity className="w-3.5 h-3.5 text-sky-400" />
           Eventos en Tiempo Real ({eventsLog.length})
@@ -804,11 +799,10 @@ function SdkExplorerInner({
                     setSelectedDocType(t);
                     setSelectedHandle(null);
                   }}
-                  className={`px-2.5 py-1 text-xs font-mono transition ${
-                    selectedDocType === t
+                  className={`px-2.5 py-1 text-xs font-mono transition ${selectedDocType === t
                       ? 'bg-neutral-800 text-neutral-100 font-semibold'
                       : 'text-neutral-400 hover:text-neutral-200'
-                  }`}
+                    }`}
                 >
                   {t}
                 </button>

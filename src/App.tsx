@@ -23,6 +23,7 @@ import {
   SanityConfig,
   buildSanityTaskDocId,
   sanitizeSanityDocId,
+  normalizeSanityWorkspaceDoc,
 } from './services/sanityService';
 import {
   CustomNoteShapeUtil,
@@ -1333,6 +1334,41 @@ export default function App() {
       });
     },
     [editor, triggerDebouncedVisualSave]
+  );
+
+  const handleUpdateWorkspace = useCallback(
+    (updatedWs: Workspace) => {
+      setWorkspaceStore((prev) => {
+        const nextWorkspaces = prev.workspaces.map((w) =>
+          w.id === updatedWs.id ? updatedWs : w
+        );
+        const nextStore: WorkspaceStoreState = {
+          ...prev,
+          workspaces: nextWorkspaces,
+        };
+        saveWorkspaceStore(nextStore);
+
+        // Persist to Sanity if configured (Zero Data Loss)
+        const config = getSanityConfig();
+        if (config.projectId && config.dataset && config.token) {
+          saveWorkspaceToSanity(updatedWs, config)
+            .then((res) => {
+              if (res.ok) {
+                pushToast(i18n._(msg`Workspace "${updatedWs.name}" sincronizado con Sanity`), 'success');
+              } else {
+                pushToast(res.message, 'warning');
+              }
+            })
+            .catch((err) => {
+              console.warn('Error saving updated workspace to Sanity:', err);
+            });
+        }
+
+        return nextStore;
+      });
+      pushToast(i18n._(msg`Workspace "${updatedWs.name}" actualizado`), 'success');
+    },
+    [pushToast]
   );
 
   const handleDeleteWorkspace = useCallback(
@@ -3205,42 +3241,99 @@ export default function App() {
             'info'
           );
         }
-      } else if (event.type === 'workspace' && event.document) {
-        // Reconcile remote workspace updates into local workspaceStore (INV-03, INV-11)
-        const remoteWs = event.document;
-        const remoteCleanId = remoteWs.workspaceId || (remoteWs._id ? remoteWs._id.replace(/^workspace-/, '') : null);
-        if (remoteCleanId) {
-          setWorkspaceStore((prevStore) => {
-            const idx = prevStore.workspaces.findIndex(
-              (w) =>
-                w.id === remoteCleanId ||
-                w.id === `workspace-${remoteCleanId}` ||
-                w.id.replace(/^workspace-/, '') === remoteCleanId
-            );
-            if (idx >= 0) {
-              const existingWs = prevStore.workspaces[idx];
-              const updatedList = [...prevStore.workspaces];
-              updatedList[idx] = {
-                ...existingWs,
-                name: remoteWs.name || existingWs.name,
-                activeBranchName: remoteWs.activeBranchName || existingWs.activeBranchName,
-                branches:
-                  remoteWs.branches && Array.isArray(remoteWs.branches) && remoteWs.branches.length > 0
-                    ? remoteWs.branches
-                    : existingWs.branches,
-                updatedAt: remoteWs.updatedAt || new Date().toISOString(),
+      } else if (event.type === 'workspace') {
+        const docId = event.documentId || event.document?._id;
+        const cleanDocId = sanitizeSanityDocId(String(docId || '').replace(/^workspace-/, ''));
+
+        if (event.transition === 'disappear') {
+          // Zero data loss & remote deletion sync
+          if (cleanDocId) {
+            setWorkspaceStore((prevStore) => {
+              const exists = prevStore.workspaces.some(
+                (w) => w.id === cleanDocId || w.id.replace(/^workspace-/, '') === cleanDocId
+              );
+              if (!exists) return prevStore;
+
+              const filtered = prevStore.workspaces.filter(
+                (w) => w.id !== cleanDocId && w.id.replace(/^workspace-/, '') !== cleanDocId
+              );
+              if (filtered.length === 0) {
+                return prevStore;
+              }
+              const nextActiveId =
+                prevStore.activeWorkspaceId === cleanDocId ||
+                prevStore.activeWorkspaceId.replace(/^workspace-/, '') === cleanDocId
+                  ? filtered[0].id
+                  : prevStore.activeWorkspaceId;
+
+              const nextStore: WorkspaceStoreState = {
+                ...prevStore,
+                workspaces: filtered,
+                activeWorkspaceId: nextActiveId,
               };
-              const nextStore = { ...prevStore, workspaces: updatedList };
               saveWorkspaceStore(nextStore);
               return nextStore;
-            }
-            return prevStore;
-          });
+            });
+            pushToast(i18n._(msg`Sanity: Espacio de trabajo eliminado remotamente`), 'info');
+          }
+        } else if (event.document) {
+          // Reconcile remote workspace updates into local workspaceStore (INV-03, INV-11)
+          const remoteWs = event.document;
+          const remoteCleanId =
+            remoteWs.workspaceId ||
+            (remoteWs._id ? remoteWs._id.replace(/^workspace-/, '') : cleanDocId);
+
+          if (remoteCleanId) {
+            setWorkspaceStore((prevStore) => {
+              const idx = prevStore.workspaces.findIndex(
+                (w) =>
+                  w.id === remoteCleanId ||
+                  w.id === `workspace-${remoteCleanId}` ||
+                  w.id.replace(/^workspace-/, '') === remoteCleanId
+              );
+              if (idx >= 0) {
+                const existingWs = prevStore.workspaces[idx];
+                const updatedList = [...prevStore.workspaces];
+                updatedList[idx] = {
+                  ...existingWs,
+                  name: remoteWs.name || existingWs.name,
+                  githubRepo: {
+                    ...existingWs.githubRepo,
+                    owner: remoteWs.githubRepo?.owner || existingWs.githubRepo.owner,
+                    repo: remoteWs.githubRepo?.repo || existingWs.githubRepo.repo,
+                    fullName: remoteWs.githubRepo?.fullName || existingWs.githubRepo.fullName,
+                    url: remoteWs.githubRepo?.url || existingWs.githubRepo.url,
+                    defaultBranch: remoteWs.githubRepo?.defaultBranch || existingWs.githubRepo.defaultBranch,
+                    description: remoteWs.githubRepo?.description ?? existingWs.githubRepo.description,
+                  },
+                  activeBranchName: remoteWs.activeBranchName || existingWs.activeBranchName,
+                  branches:
+                    remoteWs.branches && Array.isArray(remoteWs.branches) && remoteWs.branches.length > 0
+                      ? remoteWs.branches
+                      : existingWs.branches,
+                  updatedAt: remoteWs.updatedAt || new Date().toISOString(),
+                };
+                const nextStore = { ...prevStore, workspaces: updatedList };
+                saveWorkspaceStore(nextStore);
+                return nextStore;
+              } else {
+                // Remote workspace created on another device/tab
+                const normalizedNew = normalizeSanityWorkspaceDoc(remoteWs);
+                if (!normalizedNew) return prevStore;
+                const nextStore: WorkspaceStoreState = {
+                  ...prevStore,
+                  workspaces: [...prevStore.workspaces, normalizedNew],
+                };
+                saveWorkspaceStore(nextStore);
+                return nextStore;
+              }
+            });
+            pushToast(
+              i18n._(msg`Sanity: Espacio de trabajo "${event.document.name || 'Workspace'}" sincronizado en tiempo real`),
+              'info'
+            );
+          }
         }
-        pushToast(
-          `Sanity: Espacio de trabajo "${event.document.name || 'Workspace'}" sincronizado`,
-          'info'
-        );
       }
     }, activeSanityConfig);
 
@@ -6149,6 +6242,7 @@ export default function App() {
         activeWorkspaceId={workspaceStore.activeWorkspaceId}
         onSelectWorkspace={handleSelectWorkspace}
         onCreateWorkspace={handleCreateWorkspace}
+        onUpdateWorkspace={handleUpdateWorkspace}
         onDeleteWorkspace={handleDeleteWorkspace}
         onShowToast={pushToast}
         onSyncWorkspacesToSanity={handleSyncAllWorkspacesToSanity}
