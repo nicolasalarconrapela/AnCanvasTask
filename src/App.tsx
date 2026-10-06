@@ -5055,6 +5055,8 @@ export default function App() {
 
                 return (
                   <SanityStudio
+                    activeWorkspaceId={activeWorkspace.id}
+                    activeWorkspaceName={activeWorkspace.name}
                     onOpenSanityConfig={() => setIsSanityModalOpen(true)}
                     onImportTaskToMarkdown={handleImportTaskFromSanity}
                     onActivateWorkspace={handleActivateWorkspaceFromSanity}
@@ -6085,12 +6087,15 @@ export default function App() {
           <div id="div-app-85" className="w-full max-w-6xl h-[90vh] bg-neutral-950 border border-neutral-800 rounded-md shadow-md overflow-hidden flex flex-col">
             <SanityStudioEmbed
               isModal={true}
+              activeWorkspaceId={activeWorkspace.id}
+              activeWorkspaceName={activeWorkspace.name}
               onClose={() => setIsNativeStudioModalOpen(false)}
               onOpenSanityConfig={() => {
                 setIsNativeStudioModalOpen(false);
                 setIsSanityModalOpen(true);
               }}
               onShowToast={pushToast}
+              onImportTaskToMarkdown={handleImportTaskFromSanity}
             />
           </div>
         </div>

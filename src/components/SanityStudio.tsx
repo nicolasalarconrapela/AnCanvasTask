@@ -17,6 +17,8 @@ export interface SanityStudioProps {
   onActivateWorkspace?: (workspace: any) => void;
   onOpenSyncDiffModal?: () => void;
   onShowToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  activeWorkspaceId?: string;
+  activeWorkspaceName?: string;
 }
 
 type DocumentTypeFilter = 'all' | 'workspace' | 'task' | 'canvasVisualState';
@@ -29,6 +31,8 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
   onActivateWorkspace,
   onOpenSyncDiffModal,
   onShowToast,
+  activeWorkspaceId,
+  activeWorkspaceName,
 }) => {
   const [config, setConfig] = useState<SanityConfig>(() => getSanityConfig());
   const [studioMode, setStudioMode] = useState<StudioMode>('native');
@@ -515,13 +519,18 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
       {studioMode === 'native' ? (
         <div id="div-sanitystudio-7" className="flex-1 h-full overflow-hidden flex flex-col">
           <SanityStudioEmbed
+            activeWorkspaceId={activeWorkspaceId}
+            activeWorkspaceName={activeWorkspaceName}
             onOpenSanityConfig={onOpenSanityConfig}
             onShowToast={onShowToast}
+            onImportTaskToMarkdown={onImportTaskToMarkdown}
           />
         </div>
       ) : studioMode === 'sdk' ? (
         <div id="div-sanitystudio-8" className="flex-1 overflow-y-auto p-4 bg-neutral-950 text-neutral-100">
           <SanitySdkExplorer
+            activeWorkspaceId={activeWorkspaceId}
+            activeWorkspaceName={activeWorkspaceName}
             onOpenSanityConfig={onOpenSanityConfig}
             onSwitchToDeskTool={() => setStudioMode('desk')}
             onSwitchToNativeStudio={() => setStudioMode('native')}

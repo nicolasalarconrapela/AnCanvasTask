@@ -15,6 +15,7 @@ import {
   SanityAccountStatus,
   SanityUserProjectInfo,
 } from '../services/sanityService';
+import { SanitySdkExplorer } from './SanitySdkExplorer';
 import {
   ExternalLink,
   Settings,
@@ -35,6 +36,9 @@ export interface SanityStudioEmbedProps {
   onClose?: () => void;
   isModal?: boolean;
   onShowToast?: (msg: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  activeWorkspaceId?: string;
+  activeWorkspaceName?: string;
+  onImportTaskToMarkdown?: (task: any) => void;
 }
 
 export const SanityStudioEmbed: React.FC<SanityStudioEmbedProps> = ({
@@ -42,9 +46,13 @@ export const SanityStudioEmbed: React.FC<SanityStudioEmbedProps> = ({
   onClose,
   isModal = false,
   onShowToast,
+  activeWorkspaceId,
+  activeWorkspaceName,
+  onImportTaskToMarkdown,
 }) => {
   const { _ } = useLingui();
   const [config, setConfig] = useState<SanityConfig>(() => getSanityConfig());
+  const [viewMode, setViewMode] = useState<'studio' | 'sdk'>('studio');
   const [accountStatus, setAccountStatus] = useState<SanityAccountStatus | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [renderKey, setRenderKey] = useState<number>(0);
@@ -238,6 +246,38 @@ export const SanityStudioEmbed: React.FC<SanityStudioEmbedProps> = ({
           </div>
         </div>
 
+        {/* Studio Mode Switcher: Studio Nativo vs App SDK (@sanity/sdk-react) */}
+        <div className="flex items-center bg-neutral-950 p-0.5 rounded border border-neutral-800 text-[11px] shrink-0">
+          <button
+            id="btn-sanity-studio-view-native"
+            type="button"
+            onClick={() => setViewMode('studio')}
+            className={`px-2.5 py-1 rounded transition flex items-center gap-1.5 cursor-pointer ${
+              viewMode === 'studio'
+                ? 'bg-neutral-800 text-neutral-100 font-medium'
+                : 'text-neutral-400 hover:text-neutral-200'
+            }`}
+          >
+            <Layers className="w-3 h-3 text-rose-400" />
+            <span className="hidden sm:inline">{_(msg`Studio Nativo`)}</span>
+            <span className="sm:hidden">Studio</span>
+          </button>
+          <button
+            id="btn-sanity-studio-view-sdk"
+            type="button"
+            onClick={() => setViewMode('sdk')}
+            className={`px-2.5 py-1 rounded transition flex items-center gap-1.5 cursor-pointer ${
+              viewMode === 'sdk'
+                ? 'bg-neutral-800 text-neutral-100 font-medium'
+                : 'text-neutral-400 hover:text-neutral-200'
+            }`}
+          >
+            <Database className="w-3 h-3 text-emerald-400" />
+            <span className="hidden sm:inline">App SDK (@sanity/sdk-react)</span>
+            <span className="sm:hidden">SDK</span>
+          </button>
+        </div>
+
         {/* Project Selector in Studio Toolbar (when user has accessible projects) */}
         {userProjects.length > 0 && (
           <div className="hidden md:flex items-center gap-1.5 bg-neutral-800/80 px-2 py-1 rounded border border-neutral-700 text-xs">
@@ -330,7 +370,18 @@ export const SanityStudioEmbed: React.FC<SanityStudioEmbedProps> = ({
       </div>
 
       {/* Main Studio Viewport */}
-      {isMismatch ? (
+      {viewMode === 'sdk' ? (
+        <div id="div-sanity-studio-sdk-container" className="flex-1 h-full overflow-y-auto p-4 bg-neutral-950 text-neutral-100">
+          <SanitySdkExplorer
+            activeWorkspaceId={activeWorkspaceId}
+            activeWorkspaceName={activeWorkspaceName}
+            onOpenSanityConfig={onOpenSanityConfig}
+            onSwitchToNativeStudio={() => setViewMode('studio')}
+            onImportTaskToMarkdown={onImportTaskToMarkdown}
+            onShowToast={onShowToast || (() => {})}
+          />
+        </div>
+      ) : isMismatch ? (
         /* Mismatch Prevention Screen: Avoids native 403 access confrontation */
         <div id="div-sanitystudioembed-mismatch-screen" className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-neutral-950 text-neutral-200 overflow-y-auto">
           <div className="w-12 h-12 rounded-full bg-amber-950/80 border border-amber-600/60 flex items-center justify-center text-amber-400 mb-3 shadow-md">

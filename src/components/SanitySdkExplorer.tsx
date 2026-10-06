@@ -12,7 +12,7 @@ import {
   type DocumentHandle,
   type DocumentEvent,
 } from '@sanity/sdk-react';
-import { getSanityConfig, SanityConfig } from '../services/sanityService';
+import { getSanityConfig, SanityConfig, sanitizeSanityDocId } from '../services/sanityService';
 import {
   Database,
   Search,
@@ -75,6 +75,8 @@ export interface SanitySdkExplorerProps {
   onImportTaskToMarkdown?: (task: any) => void;
   onActivateWorkspace?: (workspace: any) => void;
   onShowToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  activeWorkspaceId?: string;
+  activeWorkspaceName?: string;
 }
 
 // -------------------------------------------------------------
@@ -102,12 +104,14 @@ function SdkDocumentInspector({
   onImportTaskToMarkdown,
   onActivateWorkspace,
   onShowToast,
+  activeWorkspaceId,
 }: {
   handle: DocumentHandle;
   onClose: () => void;
   onImportTaskToMarkdown?: (task: any) => void;
   onActivateWorkspace?: (workspace: any) => void;
   onShowToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  activeWorkspaceId?: string;
 }) {
   const { data: document } = useDocument<any>({
     documentId: handle.documentId,
@@ -144,12 +148,17 @@ function SdkDocumentInspector({
   const handleApplyQuickEdit = async () => {
     setIsSaving(true);
     try {
+      const cleanWs = activeWorkspaceId
+        ? sanitizeSanityDocId(activeWorkspaceId.replace(/^workspace-/, ''))
+        : undefined;
       await editDocument((current: any) => ({
         ...current,
         title: editTitle,
         name: editTitle,
         status: editStatus,
         completed: editStatus === 'done',
+        workspaceId: current?.workspaceId || cleanWs,
+        ...(cleanWs && !current?.workspace ? { workspace: { _type: 'reference', _ref: `workspace-${cleanWs}` } } : {}),
         updatedAt: new Date().toISOString(),
       }));
       setIsEditing(false);
@@ -391,8 +400,26 @@ function SdkDocumentsList({
 // -------------------------------------------------------------
 // Live GROQ Query Sandbox using `useQuery` hook
 // -------------------------------------------------------------
-function SdkGroqSandbox({ onShowToast }: { onShowToast: (msg: string, type?: any) => void }) {
+function SdkGroqSandbox({
+  activeWorkspaceId,
+  onShowToast,
+}: {
+  activeWorkspaceId?: string;
+  onShowToast: (msg: string, type?: any) => void;
+}) {
+  const cleanWs = activeWorkspaceId
+    ? sanitizeSanityDocId(activeWorkspaceId.replace(/^workspace-/, ''))
+    : null;
+
   const PRESET_QUERIES = [
+    ...(cleanWs
+      ? [
+          {
+            label: 'Tareas del Workspace actual',
+            query: `*[_type == "task" && (workspaceId == "${cleanWs}" || workspace._ref == "workspace-${cleanWs}")] | order(_updatedAt desc)[0...15]`,
+          },
+        ]
+      : []),
     { label: 'Todas las tareas', query: `*[_type == "task"] | order(_updatedAt desc)[0...10]` },
     { label: 'Workspaces y ramas', query: `*[_type == "workspace"] | order(_updatedAt desc)` },
     { label: 'Canvas visual state', query: `*[_type == "canvasVisualState"][0...5]` },
@@ -485,9 +512,11 @@ function SdkGroqSandbox({ onShowToast }: { onShowToast: (msg: string, type?: any
 // Document Creator using `useCreateDocument` hook
 // -------------------------------------------------------------
 function SdkDocumentCreator({
+  activeWorkspaceId,
   onCreated,
   onShowToast,
 }: {
+  activeWorkspaceId?: string;
   onCreated: (handle: DocumentHandle) => void;
   onShowToast: (msg: string, type?: any) => void;
 }) {
@@ -507,8 +536,12 @@ function SdkDocumentCreator({
     setIsCreating(true);
     try {
       const now = new Date().toISOString();
+      const cleanWorkspaceId = activeWorkspaceId
+        ? sanitizeSanityDocId(activeWorkspaceId.replace(/^workspace-/, ''))
+        : 'default';
+      const rawTaskId = 'sdk-' + Date.now().toString(36);
       const newHandle = await createTask({
-        taskId: 'sdk-task-' + Date.now().toString(36),
+        taskId: rawTaskId,
         title: title.trim(),
         completed: false,
         status: 'todo',
@@ -516,6 +549,11 @@ function SdkDocumentCreator({
         groupTitle: groupTitle.trim(),
         tags: ['sanity-app-sdk', 'reactive'],
         description: `Creada en tiempo real con @sanity/sdk-react useCreateDocument a las ${new Date().toLocaleTimeString()}.`,
+        workspaceId: cleanWorkspaceId,
+        workspace: {
+          _type: 'reference',
+          _ref: `workspace-${cleanWorkspaceId}`,
+        },
         updatedAt: now,
       });
 
@@ -597,6 +635,8 @@ function SdkExplorerInner({
   onImportTaskToMarkdown,
   onActivateWorkspace,
   onShowToast,
+  activeWorkspaceId,
+  activeWorkspaceName,
 }: {
   config: SanityConfig;
   onOpenSanityConfig: () => void;
@@ -605,6 +645,8 @@ function SdkExplorerInner({
   onImportTaskToMarkdown?: (task: any) => void;
   onActivateWorkspace?: (workspace: any) => void;
   onShowToast: (msg: string, type?: any) => void;
+  activeWorkspaceId?: string;
+  activeWorkspaceName?: string;
 }) {
   const [activeTab, setActiveTab] = useState<'documents' | 'groq' | 'events'>('documents');
   const [selectedDocType, setSelectedDocType] = useState<string>('task');
@@ -648,6 +690,12 @@ function SdkExplorerInner({
             <span>
               Dataset: <strong className="font-mono text-neutral-200">{config.dataset}</strong>
             </span>
+            {activeWorkspaceName && (
+              <>
+                <span>·</span>
+                <span className="text-sky-300 font-mono">Workspace: {activeWorkspaceName}</span>
+              </>
+            )}
             <span>·</span>
             <span className="text-emerald-400 font-mono">Suscripciones reactivas en vivo</span>
           </div>
@@ -740,6 +788,7 @@ function SdkExplorerInner({
         <div id="div-sanitysdkexplorer-37" className="space-y-4">
           {/* Creator Form */}
           <SdkDocumentCreator
+            activeWorkspaceId={activeWorkspaceId}
             onCreated={(handle) => setSelectedHandle(handle)}
             onShowToast={onShowToast}
           />
@@ -813,6 +862,7 @@ function SdkExplorerInner({
                     onImportTaskToMarkdown={onImportTaskToMarkdown}
                     onActivateWorkspace={onActivateWorkspace}
                     onShowToast={onShowToast}
+                    activeWorkspaceId={activeWorkspaceId}
                   />
                 </Suspense>
               </div>
@@ -831,7 +881,7 @@ function SdkExplorerInner({
             </div>
           }
         >
-          <SdkGroqSandbox onShowToast={onShowToast} />
+          <SdkGroqSandbox activeWorkspaceId={activeWorkspaceId} onShowToast={onShowToast} />
         </Suspense>
       )}
 
@@ -895,6 +945,8 @@ export const SanitySdkExplorer: React.FC<SanitySdkExplorerProps> = ({
   onImportTaskToMarkdown,
   onActivateWorkspace,
   onShowToast,
+  activeWorkspaceId,
+  activeWorkspaceName,
 }) => {
   const [config, setConfig] = useState<SanityConfig>(() => getSanityConfig());
 
@@ -998,6 +1050,8 @@ export const SanitySdkExplorer: React.FC<SanitySdkExplorerProps> = ({
           onImportTaskToMarkdown={onImportTaskToMarkdown}
           onActivateWorkspace={onActivateWorkspace}
           onShowToast={onShowToast}
+          activeWorkspaceId={activeWorkspaceId}
+          activeWorkspaceName={activeWorkspaceName}
         />
       </SanityApp>
     </SdkErrorBoundary>
