@@ -54,6 +54,7 @@ import {
 } from './utils/filterStore';
 import { ToastContainer, ToastItem, ToastType } from './components/ToastSystem';
 import { QuickGuideModal } from './components/QuickGuideModal';
+import { WelcomeModal } from './components/WelcomeModal';
 import {
   ActiveConnectionSource,
   getActiveConnectionSource,
@@ -487,6 +488,10 @@ export default function App() {
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState<boolean>(false);
   const headerMenuRef = useRef<HTMLDivElement>(null);
   const [isQuickGuideOpen, setIsQuickGuideOpen] = useState<boolean>(false);
+  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState<boolean>(() => {
+    if (typeof localStorage === 'undefined') return false;
+    return !localStorage.getItem('antask_welcome_dismissed');
+  });
   const [isSafeNormalizerOpen, setIsSafeNormalizerOpen] = useState<boolean>(false);
   const [deleteWarningState, setDeleteWarningState] = useState<DeleteWarningInfo | null>(null);
 
@@ -3812,6 +3817,16 @@ export default function App() {
         },
       },
       {
+        id: 'welcome-screen',
+        title: 'Pantalla de bienvenida y modo demo',
+        shortcut: '',
+        icon: 'waving_hand',
+        category: 'action',
+        perform: () => {
+          setIsWelcomeModalOpen(true);
+        },
+      },
+      {
         id: 'load-sample-project',
         title: 'Cargar proyecto de ejemplo inicial',
         shortcut: '',
@@ -4369,6 +4384,24 @@ export default function App() {
                   <kbd className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface)] border border-[var(--outline)] text-[var(--on-surface-variant)]">
                     ?
                   </kbd>
+                </button>
+
+                {/* 4. Pantalla de bienvenida y Modo Demo */}
+                <button
+                  id="btn-header-more-menu-welcome"
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setIsHeaderMenuOpen(false);
+                    setIsWelcomeModalOpen(true);
+                  }}
+                  className="w-full px-3 py-2 flex items-center justify-between text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] transition-colors cursor-pointer"
+                  title={i18n._(msg`Pantalla de bienvenida y modo demo`)}
+                >
+                  <div id="div-header-more-menu-welcome-content" className="flex items-center gap-2.5">
+                    <span className="material-symbols-outlined text-[18px] text-[var(--on-surface-variant)]">waving_hand</span>
+                    <span className="font-medium">{i18n._(msg`Bienvenida / Demo`)}</span>
+                  </div>
                 </button>
 
                 {/* En pantallas móviles: acceso rápido al panel de herramientas completo */}
@@ -5660,6 +5693,23 @@ export default function App() {
                 <span>➔</span>
               </button>
 
+              {/* Welcome Screen / Demo Mode */}
+              <button
+                id="btn-mobile-menu-welcome"
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  setIsWelcomeModalOpen(true);
+                }}
+                className="w-full min-h-[44px] px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] cursor-pointer"
+              >
+                <div id="div-app-welcome" className="flex items-center gap-2.5">
+                  <span className="material-symbols-outlined text-[18px] text-emerald-400">waving_hand</span>
+                  <span>{i18n._(msg`Bienvenida y Modo Demo`)}</span>
+                </div>
+                <span>➔</span>
+              </button>
+
               {/* Problems & Validation Panel */}
               {validationReport.issues.length > 0 && (
                 <button
@@ -6269,6 +6319,17 @@ export default function App() {
         isOpen={isQuickGuideOpen}
         onClose={() => setIsQuickGuideOpen(false)}
         onOpenSampleProject={handleLoadSampleProject}
+      />
+
+      {/* Welcome & Onboarding Modal (Demo Mode & Sanity Cloud Connect) */}
+      <WelcomeModal
+        isOpen={isWelcomeModalOpen}
+        onClose={() => setIsWelcomeModalOpen(false)}
+        onStartDemoMode={handleLoadSampleProject}
+        onConnectSanitySuccess={() => {
+          handleImportWorkspacesFromSanity();
+        }}
+        onShowToast={pushToast}
       />
 
       {/* Settings & Preferences Modal (DESIGN.md Section 4 & Fase 7) */}
