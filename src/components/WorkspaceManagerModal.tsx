@@ -539,7 +539,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                                   )}
                                 </div>
                                 <p className="text-[10px] text-rose-300/80 leading-tight">
-                                  {i18n._(msg`Destrucción definitiva. Se borrará permanentemente de la nube para todos los dispositivos.`)}
+                                  {i18n._(msg`Destrucción definitiva. Se programa la eliminación permanente tras 30s (con opción de deshacer).`)}
                                 </p>
                               </button>
                             </div>
@@ -552,7 +552,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                                   <span>{i18n._(msg`Verificación de seguridad requerida`)}</span>
                                 </div>
                                 <p className="text-[11px] text-rose-200/90 leading-tight">
-                                  {i18n._(msg`Esta acción es IRREVERSIBLE. Para confirmar que comprendes que se perderá para siempre, escribe el nombre del workspace:`)}
+                                  {i18n._(msg`Para confirmar la destrucción total (con 30 segundos para revertir), escribe el nombre del workspace:`)}
                                 </p>
                                 <div className="flex items-center gap-2">
                                   <span className="px-2 py-0.5 rounded bg-black/40 border border-rose-800/60 font-mono text-xs text-rose-200 select-all shrink-0">

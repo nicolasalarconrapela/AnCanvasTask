@@ -510,6 +510,17 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const lastToastTimestampsRef = useRef<Map<string, number>>(new Map());
   const lastLocalWorkspaceMutationTimeRef = useRef<number>(0);
+  const pendingWorkspaceDeletionsRef = useRef<
+    Map<
+      string,
+      {
+        timeoutId: NodeJS.Timeout;
+        workspace: Workspace;
+        deleteRemote: boolean;
+        deletedAt: number;
+      }
+    >
+  >(new Map());
 
   // Sanity Live Bidirectional Synchronization State
   const [isLiveSyncActive, setIsLiveSyncActive] = useState<boolean>(false);
@@ -517,7 +528,12 @@ export default function App() {
   const isRemoteMutationInProgressRef = useRef<boolean>(false);
 
   const pushToast = useCallback(
-    (message: string, type: ToastType = 'info', action?: { label: string; onClick: () => void }) => {
+    (
+      message: string,
+      type: ToastType = 'info',
+      action?: { label: string; onClick: () => void },
+      duration?: number
+    ) => {
       const trimmed = message ? message.trim() : '';
       if (!trimmed) return;
 
@@ -545,7 +561,7 @@ export default function App() {
         if (prev.some((t) => t.message === trimmed)) {
           return prev;
         }
-        return [...prev.slice(-2), { id, message: trimmed, type, action }];
+        return [...prev.slice(-2), { id, message: trimmed, type, action, duration }];
       });
     },
     []
@@ -1410,9 +1426,87 @@ export default function App() {
     [pushToast, i18n]
   );
 
+  const handleUndoDeleteWorkspace = useCallback(
+    (wsId: string) => {
+      const pending = pendingWorkspaceDeletionsRef.current.get(wsId);
+      if (!pending) return;
+
+      clearTimeout(pending.timeoutId);
+      pendingWorkspaceDeletionsRef.current.delete(wsId);
+      lastLocalWorkspaceMutationTimeRef.current = Date.now();
+
+      setWorkspaceStore((prev) => {
+        const isOnlyFreshPlaceholder =
+          prev.workspaces.length === 1 &&
+          prev.workspaces[0].name === 'Mi Workspace' &&
+          prev.workspaces[0].id.startsWith('ws_');
+
+        const nextWorkspaces = isOnlyFreshPlaceholder
+          ? [pending.workspace]
+          : [...prev.workspaces.filter((w) => w.id !== pending.workspace.id), pending.workspace];
+
+        const nextStore: WorkspaceStoreState = {
+          ...prev,
+          workspaces: nextWorkspaces,
+          activeWorkspaceId: pending.workspace.id,
+        };
+        saveWorkspaceStore(nextStore);
+
+        const activeBr = getActiveBranch(pending.workspace);
+        const activeDc = getActiveDocument(activeBr);
+        setCurrentFileName(activeDc.path);
+        setMarkdownInput(activeDc.content);
+        setLastSavedMarkdown(activeDc.lastSavedContent);
+
+        if (editor) {
+          loadTasksFromMarkdown(editor, activeDc.content, activeDc.visualState);
+          triggerDebouncedVisualSave(editor);
+        }
+
+        return nextStore;
+      });
+
+      pushToast(
+        i18n._(msg`Workspace "${pending.workspace.name}" restaurado con éxito`),
+        'success'
+      );
+    },
+    [editor, pushToast, triggerDebouncedVisualSave, i18n]
+  );
+
   const handleDeleteWorkspace = useCallback(
     (wsId: string, deleteRemote: boolean = false) => {
+      const targetWs = workspaceStore.workspaces.find((w) => w.id === wsId);
+      if (!targetWs) return;
+
       lastLocalWorkspaceMutationTimeRef.current = Date.now();
+
+      // Clear any prior pending deletion for this wsId
+      const existingPending = pendingWorkspaceDeletionsRef.current.get(wsId);
+      if (existingPending) {
+        clearTimeout(existingPending.timeoutId);
+      }
+
+      // Schedule permanent destruction after 30 seconds
+      const timeoutId = setTimeout(() => {
+        pendingWorkspaceDeletionsRef.current.delete(wsId);
+        if (deleteRemote) {
+          const config = getSanityConfig();
+          if (config.projectId && config.dataset && config.token) {
+            deleteWorkspaceFromSanity(wsId, config).catch((e) => {
+              console.warn('Error deleting workspace permanently from Sanity:', e);
+            });
+          }
+        }
+      }, 30000);
+
+      pendingWorkspaceDeletionsRef.current.set(wsId, {
+        timeoutId,
+        workspace: targetWs,
+        deleteRemote,
+        deletedAt: Date.now(),
+      });
+
       setWorkspaceStore((prev) => {
         const filtered = prev.workspaces.filter((w) => w.id !== wsId);
         let nextWorkspaces = filtered;
@@ -1434,16 +1528,8 @@ export default function App() {
           };
           nextWorkspaces = [cleanWs];
           nextActiveId = cleanWs.id;
-          pushToast(i18n._(msg`Workspace eliminado. Se ha inicializado un nuevo workspace limpio.`), 'info');
-        } else {
-          if (prev.activeWorkspaceId === wsId) {
-            nextActiveId = nextWorkspaces[0].id;
-          }
-          if (deleteRemote) {
-            pushToast(i18n._(msg`Workspace eliminado localmente y destruido en Sanity Cloud`), 'warning');
-          } else {
-            pushToast(i18n._(msg`Workspace eliminado en local (la copia remota permanece protegida en Sanity)`), 'info');
-          }
+        } else if (prev.activeWorkspaceId === wsId) {
+          nextActiveId = nextWorkspaces[0].id;
         }
 
         const nextStore: WorkspaceStoreState = {
@@ -1465,20 +1551,33 @@ export default function App() {
           triggerDebouncedVisualSave(editor);
         }
 
-        // Remove from Sanity ONLY if explicitly requested and verified
-        if (deleteRemote) {
-          const config = getSanityConfig();
-          if (config.projectId && config.dataset && config.token) {
-            deleteWorkspaceFromSanity(wsId, config).catch((e) => {
-              console.warn('Error deleting workspace from Sanity:', e);
-            });
-          }
-        }
-
         return nextStore;
       });
+
+      pushToast(
+        deleteRemote
+          ? i18n._(
+              msg`Workspace "${targetWs.name}" eliminado. Destrucción total en Sanity en 30s.`
+            )
+          : i18n._(
+              msg`Workspace "${targetWs.name}" eliminado. Tienes 30s para revertir el cambio.`
+            ),
+        'warning',
+        {
+          label: i18n._(msg`Deshacer (30s)`),
+          onClick: () => handleUndoDeleteWorkspace(wsId),
+        },
+        30000
+      );
     },
-    [editor, pushToast, triggerDebouncedVisualSave]
+    [
+      editor,
+      pushToast,
+      triggerDebouncedVisualSave,
+      handleUndoDeleteWorkspace,
+      workspaceStore.workspaces,
+      i18n,
+    ]
   );
 
   // Activate a workspace document imported directly from Sanity Studio or Sanity Cloud
