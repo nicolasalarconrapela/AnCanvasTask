@@ -4,7 +4,7 @@
 >
 > Diseñada para humanos y agentes de IA (Codex, Claude, Gemini, Cursor, etc.).
 >
-> Objetivo: producir interfaces \*\*sobrias, profesionales, legibles, eficientes, accesibles, rápidas y consistentes\*\*, evitando la estética genérica de aplicaciones generadas por IA.
+> Objetivo: producir interfaces \*\*sobrias, profesionales, legibles, eficientes, accesibles, rápidas y consistentes\*\*, evitando la estética genérica de aplicaciones generadas por IA, la creación innecesaria de componentes y la sobreinformación visual.
 
 \---
 
@@ -128,7 +128,202 @@ Cada elemento visible debe cumplir al menos una función:
 
 \---
 
-# 5\. Jerarquía de decisiones de diseño
+# 5\. Economía visual e informativa
+
+La interfaz debe comunicar la **máxima información útil con el mínimo número de elementos visuales necesarios**.
+
+No crear un componente visual cuando texto, alineación, espaciado, tipografía o un indicador simple puedan resolver correctamente la misma función.
+
+Antes de añadir cualquier elemento visible, comprobar:
+
+1. ¿El usuario necesita conocer esta información en este momento?
+2. ¿Esta información ya aparece en otra parte de la interfaz?
+3. ¿Necesita realmente un componente propio?
+4. ¿Puede mostrarse como texto simple o indicador inline?
+5. ¿Necesita icono?
+6. ¿Necesita color?
+7. ¿Necesita fondo de color?
+8. ¿Necesita borde?
+9. ¿Necesita permanecer visible constantemente?
+10. ¿Su importancia visual corresponde con su importancia funcional?
+
+Si varias respuestas son negativas, simplificar o eliminar el elemento.
+
+Regla de preferencia:
+
+```text
+menos componente               → antes que más componente
+texto simple                   → antes que badge o chip
+inline                         → antes que bloque independiente
+neutral                        → antes que coloreado
+una señal semántica            → antes que varias simultáneas
+información bajo demanda       → antes que información permanente
+reutilizar                     → antes que crear un componente nuevo
+```
+
+No diseñar algo únicamente porque exista espacio disponible o porque el dato esté disponible.
+
+La ausencia de un elemento visual también es una decisión de diseño válida.
+
+\---
+
+# 6\. Estados e indicadores
+
+Los estados normales y rutinarios deben tener **baja prominencia visual**.
+
+Ejemplos habituales:
+
+* Sincronizado;
+* Conectado;
+* Guardado;
+* Actualizado;
+* Disponible;
+* Listo;
+* Correcto;
+* Sin cambios.
+
+Estos estados no deben convertirse automáticamente en:
+
+* badges coloreados;
+* pills;
+* botones;
+* tarjetas;
+* bloques con fondo;
+* banners permanentes;
+* icono + texto + fondo + borde + color semántico simultáneamente;
+* elementos de gran contraste.
+
+Preferir, según importancia:
+
+```text
+Sincronizado
+```
+
+o:
+
+```text
+● Sincronizado
+```
+
+o un icono discreto con tooltip cuando el texto permanente no sea necesario.
+
+El color semántico puede reforzar el estado, pero no debe convertir un estado correcto y rutinario en uno de los elementos más visibles de la pantalla.
+
+Reservar mayor prominencia visual principalmente para estados que requieren atención o una decisión:
+
+* error;
+* advertencia;
+* bloqueo;
+* conflicto;
+* pérdida de conexión relevante;
+* operación crítica;
+* acción necesaria.
+
+Jerarquía recomendada:
+
+```text
+estado normal        → texto o indicador inline discreto
+estado en progreso   → indicador simple + progreso si aporta información
+advertencia          → énfasis moderado
+error accionable     → énfasis claro
+bloqueo / crítico    → alta prominencia justificada
+```
+
+Un estado correcto no debe competir visualmente con las acciones, los datos o los problemas que requieren atención.
+
+No convertir un estado en botón salvo que exista una acción real asociada.
+
+\---
+
+# 7\. No duplicar información ni señales
+
+Una misma información no debe mostrarse simultáneamente mediante varios elementos salvo que exista una razón funcional, de contexto o de accesibilidad.
+
+Evitar combinaciones como:
+
+```text
+icono + label + badge + fondo + borde + color + descripción
+```
+
+cuando:
+
+```text
+label
+```
+
+o:
+
+```text
+icono + label
+```
+
+comunican suficientemente el estado.
+
+No repetir información existente en:
+
+* encabezado y card;
+* toolbar y banner;
+* sidebar y contenido;
+* badge y label;
+* icono y texto cuando ambos expresan exactamente lo mismo;
+* tooltip y texto permanente;
+* título y subtítulo con el mismo significado;
+* estado global y estado repetido en cada elemento sin necesidad.
+
+Cada repetición debe aportar contexto nuevo.
+
+El refuerzo multimodal es válido cuando mejora accesibilidad o reduce ambigüedad, pero debe ser proporcional. Por defecto, una señal principal y, cuando sea útil, una señal secundaria son suficientes.
+
+\---
+
+# 8\. Divulgación progresiva y control de sobreinformación
+
+No toda la información disponible debe estar visible permanentemente.
+
+Clasificar la información en:
+
+```text
+Primaria
+    Necesaria para comprender o realizar la tarea actual.
+
+Secundaria
+    Útil, pero no imprescindible constantemente.
+
+Técnica
+    Diagnóstico, identificadores, rutas completas, timestamps detallados,
+    métricas internas, metadatos, logs y datos de implementación.
+```
+
+Por defecto:
+
+* mostrar la información primaria;
+* mantener la secundaria discreta;
+* mostrar información técnica bajo demanda mediante detalles, inspector, tooltip, menú, expansión, panel lateral o vista especializada;
+* evitar presentar simultáneamente información que pertenece a distintos niveles de detalle cuando no sea necesaria para la tarea.
+
+No mostrar información simplemente porque esté disponible.
+
+No añadir textos explicativos de conceptos obvios para el usuario objetivo.
+
+No añadir subtítulos, ayudas, leyendas o mensajes permanentes si el control se entiende correctamente sin ellos.
+
+Cuando exista mucha información, priorizar:
+
+```text
+resumen → detalle bajo demanda
+```
+
+antes que:
+
+```text
+todo visible al mismo tiempo
+```
+
+La interfaz debe permitir profundizar sin obligar a procesar detalles innecesarios constantemente.
+
+\---
+
+# 9\. Jerarquía de decisiones de diseño
 
 Ante cualquier decisión visual, seguir este orden:
 
@@ -150,7 +345,7 @@ Nunca usar como referencia implícita:
 
 \---
 
-# 6\. Tema claro y oscuro
+# 10\. Tema claro y oscuro
 
 Toda interfaz debe diseñarse considerando ambos temas desde el principio cuando el producto los soporte.
 
@@ -198,7 +393,7 @@ Preferir:
 
 \---
 
-# 7\. Sistema de color
+# 11\. Sistema de color
 
 El color debe ser **funcional antes que decorativo**.
 
@@ -223,7 +418,7 @@ Si un elemento puede entenderse perfectamente sin color, el color debe actuar co
 
 \---
 
-# 8\. Tipografía
+# 12\. Tipografía
 
 La tipografía debe favorecer sesiones de lectura prolongadas.
 
@@ -250,7 +445,7 @@ No introducir tipografías decorativas como fuente principal de interfaz.
 
 \---
 
-# 9\. CamelCase y nombres
+# 13\. CamelCase y nombres
 
 Para nombres de entidades, módulos, recursos técnicos o elementos identificables, se puede utilizar CamelCase cuando forme parte del lenguaje del producto:
 
@@ -284,7 +479,7 @@ CamelCase es apropiado para nombres técnicos, módulos, herramientas, productos
 
 \---
 
-# 10\. Escala tipográfica
+# 14\. Escala tipográfica
 
 Mantener una jerarquía contenida.
 
@@ -303,7 +498,7 @@ Para aplicaciones densas, priorizar **14–16 px** como rango principal.
 
 \---
 
-# 11\. Densidad
+# 15\. Densidad
 
 Una aplicación profesional no debe desperdiciar espacio.
 
@@ -326,7 +521,7 @@ Marketing                        → fuera del alcance por defecto
 
 \---
 
-# 12\. Spacing
+# 16\. Spacing
 
 Usar una escala consistente:
 
@@ -346,7 +541,7 @@ Los espacios pequeños deben crear relaciones. Los grandes deben separar context
 
 \---
 
-# 13\. Bordes y radios
+# 17\. Bordes y radios
 
 Los radios deben ser moderados.
 
@@ -362,7 +557,7 @@ No redondear todos los elementos porque sí.
 
 \---
 
-# 14\. Sombras
+# 18\. Sombras
 
 Preferir:
 
@@ -378,7 +573,7 @@ Evitar sombras decorativas permanentes en cada componente.
 
 \---
 
-# 15\. Cards
+# 19\. Cards
 
 No convertir cada grupo de información en una card.
 
@@ -397,7 +592,7 @@ Preferir estructuras simples y planas cuando comuniquen mejor.
 
 \---
 
-# 16\. Layout
+# 20\. Layout
 
 Preferir estructuras claras:
 
@@ -423,7 +618,7 @@ Priorizar alineación, ritmo, columnas, jerarquía y agrupación semántica.
 
 \---
 
-# 17\. Tablas y datos densos
+# 21\. Tablas y datos densos
 
 Para aplicaciones profesionales con mucha información:
 
@@ -441,7 +636,7 @@ No reemplazar automáticamente tablas por grids de cards.
 
 \---
 
-# 18\. Toolbars
+# 22\. Toolbars
 
 Las acciones principales deben estar agrupadas de forma estable.
 
@@ -457,7 +652,7 @@ No usar botones enormes para acciones frecuentes.
 
 \---
 
-# 19\. Botones
+# 23\. Botones
 
 Jerarquía recomendada:
 
@@ -476,7 +671,7 @@ Evitar botones gigantes, gradientes, glow, animaciones llamativas y pills enorme
 
 \---
 
-# 20\. Iconografía
+# 24\. Iconografía
 
 Preferir una única familia de iconos.
 
@@ -491,7 +686,7 @@ No mezclar filled, outline, 3D, emoji e ilustraciones sin sistema.
 
 \---
 
-# 21\. Animaciones
+# 25\. Animaciones
 
 Las animaciones deben explicar cambios de estado, mantener contexto o mejorar continuidad.
 
@@ -507,7 +702,7 @@ Respetar `prefers-reduced-motion`.
 
 \---
 
-# 22\. Marketing vs aplicación
+# 26\. Marketing vs aplicación
 
 Una aplicación no debe comportarse visualmente como una landing page.
 
@@ -525,7 +720,7 @@ El producto debe mostrar función, estado, contexto, acción y datos.
 
 \---
 
-# 23\. Formularios
+# 27\. Formularios
 
 Los formularios deben ser predecibles.
 
@@ -543,7 +738,7 @@ Mostrar validación, error, ayuda, disabled y loading cuando corresponda.
 
 \---
 
-# 24\. Feedback
+# 28\. Feedback
 
 Cada acción debe producir feedback proporcional.
 
@@ -554,9 +749,11 @@ Cada acción debe producir feedback proporcional.
 
 No abusar de toast notifications. Si un cambio puede representarse directamente en la UI, preferir eso.
 
+No confirmar de forma llamativa acciones rutinarias cuyo resultado ya sea evidente. Evitar acumular simultáneamente toast + badge + cambio de color + mensaje persistente para comunicar un único éxito.
+
 \---
 
-# 25\. Estados vacíos
+# 29\. Estados vacíos
 
 Los empty states deben ser útiles, no promocionales.
 
@@ -577,7 +774,7 @@ Transforma tu productividad con IA
 
 \---
 
-# 26\. Accesibilidad
+# 30\. Accesibilidad
 
 Toda UI debe:
 
@@ -594,7 +791,7 @@ ARIA debe complementar HTML, no sustituirlo innecesariamente.
 
 \---
 
-# 27\. Responsive
+# 31\. Responsive
 
 Diseñar por espacio disponible, no por dispositivos concretos.
 
@@ -611,7 +808,7 @@ Una aplicación de escritorio debe degradar su layout de forma coherente en vent
 
 \---
 
-# 28\. Rendimiento visual
+# 32\. Rendimiento visual
 
 No añadir efectos visuales que introduzcan coste importante sin beneficio.
 
@@ -629,7 +826,7 @@ La UI debe sentirse inmediata.
 
 \---
 
-# 29\. Estados de aplicación
+# 33\. Estados de aplicación
 
 Toda pantalla relevante debe contemplar:
 
@@ -649,7 +846,7 @@ No diseñar únicamente el happy path.
 
 \---
 
-# 30\. Design tokens universales
+# 34\. Design tokens universales
 
 ```css
 :root {
@@ -679,7 +876,7 @@ El proyecto puede modificar valores, pero debe mantener coherencia.
 
 \---
 
-# 31\. Tema base conceptual
+# 35\. Tema base conceptual
 
 ## Light
 
@@ -707,7 +904,7 @@ Evitar colores RGB intensos en superficies grandes.
 
 \---
 
-# 32\. Componentes reutilizables
+# 36\. Componentes reutilizables
 
 Crear componentes para comportamiento repetible, no únicamente por encapsular HTML.
 
@@ -715,9 +912,11 @@ Un componente debe tener responsabilidad clara, API clara, estados claros, compo
 
 No crear abstracciones excesivas antes de que exista repetición real.
 
+Tampoco crear un componente nuevo únicamente para envolver texto, aplicar un fondo, añadir un icono o representar un estado que ya puede integrarse de forma clara en un componente existente.
+
 \---
 
-# 33\. Regla native-first
+# 37\. Regla native-first
 
 Antes de añadir JavaScript o una dependencia, comprobar:
 
@@ -730,7 +929,7 @@ Después considerar una dependencia.
 
 \---
 
-# 34\. Baseline y compatibilidad
+# 38\. Baseline y compatibilidad
 
 Para funcionalidad crítica:
 
@@ -744,7 +943,7 @@ No introducir APIs experimentales como dependencia esencial sin justificación.
 
 \---
 
-# 35\. Core Web Vitals
+# 39\. Core Web Vitals
 
 Objetivos recomendados:
 
@@ -758,7 +957,7 @@ La estética nunca debe comprometer significativamente estas métricas.
 
 \---
 
-# 36\. Seguridad visual y funcional
+# 40\. Seguridad visual y funcional
 
 Nunca:
 
@@ -771,7 +970,7 @@ Nunca:
 
 \---
 
-# 37\. Reglas específicas para agentes de IA
+# 41\. Reglas específicas para agentes de IA
 
 Todo agente que modifique frontend debe seguir estas reglas.
 
@@ -797,11 +996,33 @@ Todo agente que modifique frontend debe seguir estas reglas.
 * no añadir animaciones decorativas;
 * no introducir librerías UI sin autorización;
 * no cambiar tipografía global salvo petición;
-* no convertir una aplicación en una landing page.
+* no convertir una aplicación en una landing page;
+* buscar primero si la información puede incorporarse a un componente existente;
+* preferir modificar o reutilizar antes que crear un componente nuevo;
+* no crear badges, chips, cards, banners, callouts o indicadores de estado automáticamente;
+* no envolver texto en un contenedor únicamente para estilizarlo;
+* no añadir iconos cuando el texto ya comunica claramente la función;
+* no añadir texto explicativo obvio;
+* no mostrar estados positivos rutinarios con alta prominencia;
+* no duplicar una misma información mediante varias señales visuales;
+* no mostrar información técnica de forma permanente sin necesidad;
+* eliminar ruido y redundancia antes de añadir nueva información.
+
+## Antes de crear un componente nuevo
+
+El agente debe comprobar internamente:
+
+1. ¿Ya existe un componente que pueda asumir esta función?
+2. ¿Puede resolverse mediante texto, layout o estilo dentro de una estructura existente?
+3. ¿El componente representa una entidad, acción, estado o agrupación realmente independiente?
+4. ¿Seguiría siendo necesario si se eliminaran fondo, borde, icono y color?
+5. ¿Añade comprensión o solo decoración?
+
+Si no existe una justificación funcional clara, no crear el componente.
 
 \---
 
-# 38\. Preguntas obligatorias del agente al diseñar
+# 42\. Preguntas obligatorias del agente al diseñar
 
 Antes de crear UI, el agente debe responder internamente:
 
@@ -820,10 +1041,16 @@ Antes de crear UI, el agente debe responder internamente:
 13. ¿Qué ocurre si los datos son largos?
 14. ¿Qué ocurre sin datos?
 15. ¿Qué ocurre si falla?
+16. ¿Estoy creando un componente que podría evitarse?
+17. ¿Esta información ya existe en otra parte?
+18. ¿Estoy mostrando un estado rutinario con demasiada prominencia?
+19. ¿Estoy usando más señales visuales de las necesarias para comunicar una sola cosa?
+20. ¿Puede parte de esta información mostrarse bajo demanda?
+21. ¿Estoy añadiendo algo porque es útil o simplemente porque puedo mostrarlo?
 
 \---
 
-# 39\. Definición de “profesional”
+# 43\. Definición de “profesional”
 
 En este documento “profesional” significa:
 
@@ -843,9 +1070,13 @@ No significa aburrido, anticuado o sin personalidad.
 
 La personalidad debe aparecer mediante tipografía, ritmo, acento, iconografía, microdetalles y estructura; no mediante decoración excesiva.
 
+Regla resumida:
+
+> **No diseñar lo que no necesita ser diseñado. No mostrar lo que no necesita estar visible.**
+
 \---
 
-# 40\. Ejemplo de transformación
+# 44\. Ejemplo de transformación
 
 ## Evitar
 
@@ -884,7 +1115,7 @@ La segunda interfaz comunica más con menos elementos.
 
 \---
 
-# 41\. Checklist visual
+# 45\. Checklist visual
 
 Antes de considerar terminada una pantalla:
 
@@ -910,10 +1141,20 @@ Antes de considerar terminada una pantalla:
 * \[ ] Estados de error/loading/empty considerados.
 * \[ ] La pantalla funciona con contenido largo.
 * \[ ] No se añadieron dependencias innecesarias.
+* \[ ] Cada elemento visible aporta información o acción necesaria.
+* \[ ] No hay información duplicada sin una razón clara.
+* \[ ] Los estados normales tienen baja prominencia.
+* \[ ] No existen badges, chips, banners o indicadores innecesarios.
+* \[ ] No se ha creado un componente cuando bastaba texto o contenido inline.
+* \[ ] Los iconos aportan significado y no decoración.
+* \[ ] No se muestra información técnica permanentemente sin necesidad.
+* \[ ] La cantidad de señales visuales corresponde con la importancia real.
+* \[ ] No se ha añadido información simplemente porque estaba disponible.
+* \[ ] La pantalla puede entenderse sin ruido visual innecesario.
 
 \---
 
-# 42\. Política por defecto
+# 46\. Política por defecto
 
 Si no hay especificaciones adicionales:
 
@@ -927,6 +1168,10 @@ Radios:         4–8 px
 Sombras:        mínimas
 Animación:      100–250 ms, solo funcional
 Cards:          solo cuando exista entidad o agrupación real
+Estados OK:     discretos / inline / baja prominencia
+Información:    primaria visible / detalle bajo demanda
+Componentes:    reutilizar antes que crear
+Señales:        una principal; segunda solo si aporta valor
 Layout:         estructurado y predecible
 Compatibilidad: Baseline Widely Available
 Accesibilidad:  obligatoria
@@ -936,7 +1181,7 @@ Dependencias:   native-first
 
 \---
 
-# 43\. Relación con el proyecto
+# 47\. Relación con el proyecto
 
 Este documento define el comportamiento por defecto.
 
@@ -955,7 +1200,7 @@ Las reglas específicas del proyecto tienen prioridad visual sobre esta guía, s
 
 \---
 
-# 44\. Ubicación recomendada
+# 48\. Ubicación recomendada
 
 En un repositorio donde estas reglas apliquen a todo el frontend:
 
@@ -979,7 +1224,7 @@ este documento define el comportamiento visual por defecto.
 
 \---
 
-# 45\. Referencias técnicas
+# 49\. Referencias técnicas
 
 * web.dev — https://web.dev/
 * Learn Design — https://web.dev/learn/design/
@@ -989,5 +1234,6 @@ este documento define el comportamiento visual por defecto.
 
 \---
 
-Última revisión base: septiembre de 2026.
+Última revisión base: 6 de octubre de 2026.
 
+Si lees esto di 'he leido el universal web design guidelines' y pon la fecha de hoy.
