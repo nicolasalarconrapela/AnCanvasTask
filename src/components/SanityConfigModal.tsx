@@ -9,9 +9,13 @@ import {
   writeTestingTaskToSanity,
   deleteDocumentFromSanity,
   fetchSanityDocumentsList,
+  fetchSanityUserProjects,
+  fetchSanityCurrentUser,
   SanityConfig,
   SanityConnectionTestResult,
   SanityWriteTestResult,
+  SanityUserProjectInfo,
+  SanityUserProfile,
 } from '../services/sanityService';
 
 export interface SanityConfigModalProps {
@@ -40,6 +44,11 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
   const [token, setToken] = useState<string>('');
   const [showToken, setShowToken] = useState<boolean>(false);
 
+  // Authenticated user & projects list
+  const [userProfile, setUserProfile] = useState<SanityUserProfile | null>(null);
+  const [userProjects, setUserProjects] = useState<SanityUserProjectInfo[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState<boolean>(false);
+
   // Connection test state
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<SanityConnectionTestResult | null>(null);
@@ -59,6 +68,33 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
   const [selectedSchema, setSelectedSchema] = useState<'task' | 'canvasVisualState' | 'index'>('task');
   const [copiedSchema, setCopiedSchema] = useState<boolean>(false);
 
+  const loadUserInfoAndProjects = async (t: string, pId?: string, ds?: string) => {
+    if (!t.trim()) {
+      setUserProjects([]);
+      setUserProfile(null);
+      return;
+    }
+    setIsLoadingProjects(true);
+    try {
+      const [projects, profile] = await Promise.all([
+        fetchSanityUserProjects(t),
+        fetchSanityCurrentUser({
+          projectId: pId || 'temp',
+          dataset: ds || 'production',
+          apiVersion: '2024-03-01',
+          token: t,
+          useCdn: false,
+        }),
+      ]);
+      setUserProjects(projects);
+      setUserProfile(profile);
+    } catch (e) {
+      console.warn('Error loading Sanity projects/user:', e);
+    } finally {
+      setIsLoadingProjects(false);
+    }
+  };
+
   // Sync state with current saved config when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -71,8 +107,29 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
       setIsTesting(false);
       setShowToken(false);
       setRemoteDocs([]);
+
+      if (current.token) {
+        loadUserInfoAndProjects(current.token, current.projectId, current.dataset);
+      } else {
+        setUserProjects([]);
+        setUserProfile(null);
+      }
     }
   }, [isOpen]);
+
+  // Debounced fetch of projects when token changes
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = setTimeout(() => {
+      if (token.trim()) {
+        loadUserInfoAndProjects(token, projectId, dataset);
+      } else {
+        setUserProjects([]);
+        setUserProfile(null);
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [token, isOpen]);
 
   if (!isOpen) return null;
 
@@ -107,6 +164,9 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
         token: token.trim() || undefined,
       });
       setTestResult(res);
+      if (token.trim()) {
+        loadUserInfoAndProjects(token.trim(), projectId.trim(), dataset.trim());
+      }
       if (res.ok) {
         onShowToast(res.message, 'success');
       } else {
@@ -463,6 +523,48 @@ export const schemaTypes = [taskSchema, canvasVisualStateSchema];`,
 
               {/* Form */}
               <form id="sanity-config-form" onSubmit={handleSave} className="flex flex-col gap-3">
+                {/* User Projects Quick Selector (if token provides accessible projects) */}
+                {userProjects.length > 0 && (
+                  <div className="p-2.5 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-[var(--on-surface)] flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[15px] text-sky-400">folder_shared</span>
+                        <span>{i18n._(msg`Tus Proyectos en Sanity (${userProfile?.name || userProfile?.email || 'Cuenta'})`)}</span>
+                      </span>
+                      <span className="text-[10px] text-[var(--on-surface-variant)]">
+                        {i18n._(msg`Haz clic para seleccionar`)}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {userProjects.map((p) => {
+                        const isSelected = projectId.trim() === p.id;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              setProjectId(p.id);
+                              setTestResult(null);
+                            }}
+                            className={`px-2.5 py-1 rounded text-[11px] font-mono border flex items-center gap-1.5 transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-sky-500/20 border-sky-400 text-sky-200 font-semibold ring-1 ring-sky-400/50'
+                                : 'bg-[var(--surface-container-high)] border-[var(--outline)] text-[var(--on-surface)] hover:border-sky-500/50'
+                            }`}
+                          >
+                            <span className="truncate max-w-[150px]">{p.displayName}</span>
+                            <span className="text-[9px] opacity-60">({p.id})</span>
+                            {isSelected && (
+                              <span className="material-symbols-outlined text-[13px] text-sky-400">check</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Project ID */}
                 <div id="div-sanityconfigmodal-8" className="flex flex-col gap-1">
                   <label htmlFor="sanity-project-id" className="font-medium text-[var(--on-surface)] flex items-center justify-between">
@@ -479,8 +581,24 @@ export const schemaTypes = [taskSchema, canvasVisualStateSchema];`,
                     }}
                     placeholder={i18n._(msg`ej. a1b2c3d4`)}
                     required
-                    className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-3 py-1.5 text-xs font-mono text-[var(--on-surface)] focus:outline-none"
+                    className={`w-full bg-[var(--surface)] border rounded px-3 py-1.5 text-xs font-mono text-[var(--on-surface)] focus:outline-none ${
+                      userProjects.length > 0 && projectId.trim() && !userProjects.some((p) => p.id === projectId.trim())
+                        ? 'border-amber-500/70 focus:border-amber-400'
+                        : 'border-[var(--outline)] focus:border-[var(--primary)]'
+                    }`}
                   />
+
+                  {/* Warning if project ID mismatch with user projects */}
+                  {userProjects.length > 0 && projectId.trim() && !userProjects.some((p) => p.id === projectId.trim()) && (
+                    <div className="p-2 rounded bg-amber-950/30 border border-amber-800/60 text-amber-200 text-[11px] flex items-start gap-1.5 mt-0.5">
+                      <span className="material-symbols-outlined text-[14px] text-amber-400 shrink-0 mt-0.5">warning</span>
+                      <span>
+                        {i18n._(
+                          msg`Discrepancia: El Project ID "${projectId}" no figura entre los proyectos asociados al token de ${userProfile?.name || userProfile?.email || 'este usuario'}. Si pertenece a otra cuenta o dataset, es posible que la sincronización falle.`
+                        )}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Dataset */}

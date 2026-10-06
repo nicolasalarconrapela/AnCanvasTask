@@ -213,6 +213,92 @@ export async function fetchSanityCurrentUser(configOverride?: SanityConfig): Pro
   };
 }
 
+export interface SanityUserProjectInfo {
+  id: string;
+  displayName: string;
+  organizationId?: string;
+}
+
+export interface SanityAccountStatus {
+  user: SanityUserProfile | null;
+  authType: SanityAuthType;
+  configuredProjectId: string;
+  configuredDataset: string;
+  isConfigured: boolean;
+  isProjectMismatch: boolean;
+  projectDisplayName?: string;
+  userProjects: SanityUserProjectInfo[];
+  mismatchReason?: string;
+}
+
+export async function fetchSanityUserProjects(token?: string): Promise<SanityUserProjectInfo[]> {
+  const t = token?.trim() || getSanityConfig().token?.trim();
+  if (!t) return [];
+
+  try {
+    const res = await fetch('https://api.sanity.io/v2021-06-07/projects', {
+      headers: {
+        Authorization: `Bearer ${t}`,
+      },
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.map((p: any) => ({
+          id: p.id,
+          displayName: p.displayName || p.name || p.id,
+          organizationId: p.organizationId,
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn('Could not fetch user projects from Sanity:', err);
+  }
+
+  return [];
+}
+
+export async function checkSanityAccountStatus(configOverride?: SanityConfig): Promise<SanityAccountStatus> {
+  const config = configOverride || getSanityConfig();
+  const user = await fetchSanityCurrentUser(config);
+  const authType = determineSanityAuthType(config, user);
+  const configuredProjectId = config.projectId?.trim() || '';
+  const configuredDataset = config.dataset?.trim() || '';
+  const isConfigured = Boolean(configuredProjectId && configuredDataset);
+
+  let userProjects: SanityUserProjectInfo[] = [];
+  let isProjectMismatch = false;
+  let projectDisplayName: string | undefined = undefined;
+  let mismatchReason: string | undefined = undefined;
+
+  if (config.token && isConfigured) {
+    userProjects = await fetchSanityUserProjects(config.token);
+
+    if (userProjects.length > 0) {
+      const matchedProject = userProjects.find((p) => p.id === configuredProjectId);
+      if (matchedProject) {
+        projectDisplayName = matchedProject.displayName;
+      } else {
+        isProjectMismatch = true;
+        mismatchReason = `Has iniciado sesión como "${user?.name || user?.email || 'Usuario'}", pero el Project ID configurado ("${configuredProjectId}") pertenece a otro usuario o no figura entre tus proyectos.`;
+      }
+    }
+  }
+
+  return {
+    user,
+    authType,
+    configuredProjectId,
+    configuredDataset,
+    isConfigured,
+    isProjectMismatch,
+    projectDisplayName,
+    userProjects,
+    mismatchReason,
+  };
+}
+
 export function clearSanityConfig() {
   try {
     localStorage.removeItem(LOCAL_STORAGE_KEY_SANITY_CONFIG);
