@@ -98,6 +98,135 @@ export function saveSanityConfig(config: Partial<SanityConfig>) {
   }
 }
 
+// -------------------------------------------------------------
+// LOCAL MULTI-PROFILE STORAGE (Alias, Project ID, Dataset, Token)
+// Strictly client-side local storage with security isolation
+// -------------------------------------------------------------
+
+export interface SanityLocalProfile {
+  id: string;
+  alias: string;
+  projectId: string;
+  dataset: string;
+  token?: string;
+  apiVersion?: string;
+  useCdn?: boolean;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
+const LOCAL_STORAGE_KEY_SANITY_PROFILES = 'antask_sanity_saved_profiles_v1';
+const LOCAL_STORAGE_KEY_ACTIVE_PROFILE_ID = 'antask_sanity_active_profile_id';
+
+export function getSavedSanityProfiles(): SanityLocalProfile[] {
+  try {
+    const stored = localStorage.getItem(LOCAL_STORAGE_KEY_SANITY_PROFILES);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn('Could not read saved Sanity profiles', e);
+  }
+  return [];
+}
+
+export function saveSanityProfile(profile: {
+  id?: string;
+  alias: string;
+  projectId: string;
+  dataset: string;
+  token?: string;
+  apiVersion?: string;
+  useCdn?: boolean;
+}): SanityLocalProfile {
+  const profiles = getSavedSanityProfiles();
+  const now = new Date().toISOString();
+  const profileId = profile.id || `prof_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+
+  const cleanProfile: SanityLocalProfile = {
+    id: profileId,
+    alias: profile.alias.trim() || `Proyecto (${profile.projectId})`,
+    projectId: profile.projectId.trim(),
+    dataset: profile.dataset.trim() || 'production',
+    token: profile.token?.trim() || '',
+    apiVersion: profile.apiVersion || '2024-03-01',
+    useCdn: profile.useCdn ?? false,
+    createdAt: profiles.find((p) => p.id === profileId)?.createdAt || now,
+    lastUsedAt: now,
+  };
+
+  const existingIndex = profiles.findIndex((p) => p.id === profileId);
+  let updatedProfiles: SanityLocalProfile[];
+
+  if (existingIndex >= 0) {
+    updatedProfiles = [...profiles];
+    updatedProfiles[existingIndex] = cleanProfile;
+  } else {
+    updatedProfiles = [...profiles, cleanProfile];
+  }
+
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY_SANITY_PROFILES, JSON.stringify(updatedProfiles));
+    localStorage.setItem(LOCAL_STORAGE_KEY_ACTIVE_PROFILE_ID, profileId);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('antask_sanity_profiles_updated', { detail: updatedProfiles }));
+    }
+  } catch (e) {
+    console.warn('Could not save Sanity profile', e);
+  }
+
+  return cleanProfile;
+}
+
+export function deleteSanityProfile(profileId: string): void {
+  try {
+    const profiles = getSavedSanityProfiles();
+    const updatedProfiles = profiles.filter((p) => p.id !== profileId);
+    localStorage.setItem(LOCAL_STORAGE_KEY_SANITY_PROFILES, JSON.stringify(updatedProfiles));
+
+    if (getActiveSanityProfileId() === profileId) {
+      localStorage.removeItem(LOCAL_STORAGE_KEY_ACTIVE_PROFILE_ID);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('antask_sanity_profiles_updated', { detail: updatedProfiles }));
+    }
+  } catch (e) {
+    console.warn('Could not delete Sanity profile', e);
+  }
+}
+
+export function getActiveSanityProfileId(): string | null {
+  try {
+    return localStorage.getItem(LOCAL_STORAGE_KEY_ACTIVE_PROFILE_ID);
+  } catch {
+    return null;
+  }
+}
+
+export function activateSanityProfile(profileId: string): SanityConfig | null {
+  const profiles = getSavedSanityProfiles();
+  const target = profiles.find((p) => p.id === profileId);
+  if (!target) return null;
+
+  target.lastUsedAt = new Date().toISOString();
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY_SANITY_PROFILES, JSON.stringify(profiles));
+    localStorage.setItem(LOCAL_STORAGE_KEY_ACTIVE_PROFILE_ID, profileId);
+  } catch {}
+
+  const applied = saveSanityConfig({
+    projectId: target.projectId,
+    dataset: target.dataset,
+    token: target.token || '',
+    apiVersion: target.apiVersion || '2024-03-01',
+    useCdn: target.useCdn ?? false,
+  });
+
+  return applied;
+}
+
 export type SanityAuthType = 'user_token' | 'robot_token' | 'public_read' | 'local';
 
 export interface SanityUserProfile {

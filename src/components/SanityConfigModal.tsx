@@ -11,11 +11,17 @@ import {
   fetchSanityDocumentsList,
   fetchSanityUserProjects,
   fetchSanityCurrentUser,
+  getSavedSanityProfiles,
+  saveSanityProfile,
+  deleteSanityProfile,
+  getActiveSanityProfileId,
+  activateSanityProfile,
   SanityConfig,
   SanityConnectionTestResult,
   SanityWriteTestResult,
   SanityUserProjectInfo,
   SanityUserProfile,
+  SanityLocalProfile,
 } from '../services/sanityService';
 
 export interface SanityConfigModalProps {
@@ -37,6 +43,11 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
 }) => {
   const { i18n } = useLingui();
   const [activeTab, setActiveTab] = useState<ModalTab>('config');
+
+  // Saved Local Profiles State
+  const [profiles, setProfiles] = useState<SanityLocalProfile[]>(() => getSavedSanityProfiles());
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(() => getActiveSanityProfileId());
+  const [profileAlias, setProfileAlias] = useState<string>('');
 
   // Config fields
   const [projectId, setProjectId] = useState<string>('');
@@ -68,6 +79,19 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
   const [selectedSchema, setSelectedSchema] = useState<'task' | 'canvasVisualState' | 'index'>('task');
   const [copiedSchema, setCopiedSchema] = useState<boolean>(false);
 
+  const refreshProfilesList = () => {
+    const pList = getSavedSanityProfiles();
+    const actId = getActiveSanityProfileId();
+    setProfiles(pList);
+    setActiveProfileId(actId);
+    if (actId) {
+      const activeProf = pList.find((p) => p.id === actId);
+      if (activeProf && !profileAlias) {
+        setProfileAlias(activeProf.alias);
+      }
+    }
+  };
+
   const loadUserInfoAndProjects = async (t: string, pId?: string, ds?: string) => {
     if (!t.trim()) {
       setUserProjects([]);
@@ -95,10 +119,23 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
     }
   };
 
-  // Sync state with current saved config when modal opens
+  // Sync state with current saved config and profiles when modal opens
   useEffect(() => {
     if (isOpen) {
       const current = getSanityConfig();
+      const pList = getSavedSanityProfiles();
+      const actId = getActiveSanityProfileId();
+      setProfiles(pList);
+      setActiveProfileId(actId);
+
+      const matchedProfile = pList.find((p) => p.id === actId || (p.projectId === current.projectId && p.dataset === current.dataset));
+      if (matchedProfile) {
+        setProfileAlias(matchedProfile.alias);
+        setActiveProfileId(matchedProfile.id);
+      } else {
+        setProfileAlias('');
+      }
+
       setProjectId(current.projectId || '');
       setDataset(current.dataset || 'production');
       setToken(current.token || '');
@@ -117,6 +154,15 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
     }
   }, [isOpen]);
 
+  // Listen to profile updates
+  useEffect(() => {
+    const handleProfilesUpdated = () => {
+      refreshProfilesList();
+    };
+    window.addEventListener('antask_sanity_profiles_updated', handleProfilesUpdated);
+    return () => window.removeEventListener('antask_sanity_profiles_updated', handleProfilesUpdated);
+  }, []);
+
   // Debounced fetch of projects when token changes
   useEffect(() => {
     if (!isOpen) return;
@@ -130,6 +176,61 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
     }, 600);
     return () => clearTimeout(timer);
   }, [token, isOpen]);
+
+  const handleSelectProfile = (profile: SanityLocalProfile) => {
+    setActiveProfileId(profile.id);
+    setProfileAlias(profile.alias);
+    setProjectId(profile.projectId);
+    setDataset(profile.dataset);
+    setToken(profile.token || '');
+    setTestResult(null);
+    setWriteTestResult(null);
+    loadUserInfoAndProjects(profile.token || '', profile.projectId, profile.dataset);
+    onShowToast(i18n._(msg`Perfil "${profile.alias}" cargado en el formulario`), 'info');
+  };
+
+  const handleSaveCurrentAsProfile = (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    if (!projectId.trim()) {
+      onShowToast(i18n._(msg`Introduce al menos un Project ID para guardar el perfil`), 'warning');
+      return;
+    }
+
+    const aliasToUse = profileAlias.trim() || `Proyecto ${projectId.trim()}`;
+    const saved = saveSanityProfile({
+      id: activeProfileId || undefined,
+      alias: aliasToUse,
+      projectId: projectId.trim(),
+      dataset: dataset.trim() || 'production',
+      token: token.trim(),
+    });
+
+    setActiveProfileId(saved.id);
+    setProfileAlias(saved.alias);
+    refreshProfilesList();
+    onShowToast(i18n._(msg`Perfil local "${saved.alias}" guardado con éxito`), 'success');
+  };
+
+  const handleDeleteCurrentProfile = (profileId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    deleteSanityProfile(profileId);
+    if (activeProfileId === profileId) {
+      setActiveProfileId(null);
+      setProfileAlias('');
+    }
+    refreshProfilesList();
+    onShowToast(i18n._(msg`Perfil eliminado`), 'info');
+  };
+
+  const handleNewBlankProfile = () => {
+    setActiveProfileId(null);
+    setProfileAlias('');
+    setProjectId('');
+    setDataset('production');
+    setToken('');
+    setTestResult(null);
+    setWriteTestResult(null);
+  };
 
   if (!isOpen) return null;
 
@@ -268,6 +369,18 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (projectId.trim()) {
+      const aliasToUse = profileAlias.trim() || `Proyecto (${projectId.trim()})`;
+      saveSanityProfile({
+        id: activeProfileId || undefined,
+        alias: aliasToUse,
+        projectId: projectId.trim(),
+        dataset: dataset.trim() || 'production',
+        token: token.trim(),
+      });
+    }
+
     const updated = saveSanityConfig({
       projectId: projectId.trim(),
       dataset: dataset.trim(),
@@ -523,16 +636,103 @@ export const schemaTypes = [taskSchema, canvasVisualStateSchema];`,
 
               {/* Form */}
               <form id="sanity-config-form" onSubmit={handleSave} className="flex flex-col gap-3">
+                {/* LOCAL MULTI-PROFILE MANAGER */}
+                <div className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-semibold text-xs text-[var(--on-surface)]">
+                      <span className="material-symbols-outlined text-[16px] text-emerald-400">badge</span>
+                      <span>{i18n._(msg`Perfiles Locales Guardados`)}</span>
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950/60 border border-emerald-800/60 text-emerald-300">
+                        {profiles.length} {profiles.length === 1 ? i18n._(msg`perfil`) : i18n._(msg`perfiles`)}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleNewBlankProfile}
+                      className="px-2 py-0.5 rounded text-[10px] text-sky-400 hover:text-sky-300 border border-sky-800/60 hover:bg-sky-950/40 flex items-center gap-1 cursor-pointer transition"
+                      title={i18n._(msg`Crear un nuevo perfil vacío`)}
+                    >
+                      <span className="material-symbols-outlined text-[13px]">add</span>
+                      <span>{i18n._(msg`Nuevo Perfil`)}</span>
+                    </button>
+                  </div>
+
+                  {/* Profile Selector Chips */}
+                  {profiles.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {profiles.map((p) => {
+                        const isSelected = activeProfileId === p.id || (projectId.trim() === p.projectId && dataset.trim() === p.dataset);
+                        return (
+                          <div
+                            key={p.id}
+                            onClick={() => handleSelectProfile(p)}
+                            className={`px-2.5 py-1 rounded text-[11px] font-mono border flex items-center gap-1.5 transition-all cursor-pointer select-none ${
+                              isSelected
+                                ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200 font-semibold ring-1 ring-emerald-400/50'
+                                : 'bg-[var(--surface-container-high)] border-[var(--outline)] text-[var(--on-surface)] hover:border-emerald-500/50'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[12px] text-emerald-400">account_circle</span>
+                            <span className="font-sans font-medium truncate max-w-[130px]">{p.alias}</span>
+                            <span className="text-[9px] opacity-60">({p.projectId})</span>
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteCurrentProfile(p.id, e)}
+                              className="text-neutral-400 hover:text-rose-400 p-0.5 rounded cursor-pointer ml-0.5"
+                              title={i18n._(msg`Eliminar este perfil guardado`)}
+                            >
+                              <span className="material-symbols-outlined text-[11px]">close</span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Profile Alias Input & Save Button */}
+                  <div className="flex items-center gap-2 pt-1 border-t border-[var(--outline)]/50">
+                    <div className="flex-1 flex flex-col gap-1">
+                      <label htmlFor="sanity-profile-alias" className="text-[10px] text-[var(--on-surface-variant)] font-medium">
+                        {i18n._(msg`Alias / Nombre del Perfil:`)}
+                      </label>
+                      <input
+                        id="sanity-profile-alias"
+                        type="text"
+                        value={profileAlias}
+                        onChange={(e) => setProfileAlias(e.target.value)}
+                        placeholder={i18n._(msg`ej. Personal - Web, Empresa - Staging, Cliente Acme`)}
+                        className="w-full bg-[var(--surface-container-high)] border border-[var(--outline)] focus:border-emerald-400 rounded px-2.5 py-1 text-xs text-[var(--on-surface)] focus:outline-none"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveCurrentAsProfile}
+                      className="mt-4 px-3 py-1 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-600/70 text-emerald-200 rounded text-xs flex items-center gap-1 cursor-pointer transition shrink-0"
+                      title={i18n._(msg`Guardar esta configuración bajo este alias local`)}
+                    >
+                      <span className="material-symbols-outlined text-[14px]">save</span>
+                      <span>{activeProfileId ? i18n._(msg`Actualizar Perfil`) : i18n._(msg`Guardar Perfil`)}</span>
+                    </button>
+                  </div>
+
+                  <span className="text-[10px] text-[var(--on-surface-variant)] flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[12px] text-emerald-400">lock</span>
+                    <span>{i18n._(msg`Medida de seguridad: Los perfiles y tokens se guardan exclusivamente en el almacenamiento local de tu navegador.`)}</span>
+                  </span>
+                </div>
+
                 {/* User Projects Quick Selector (if token provides accessible projects) */}
                 {userProjects.length > 0 && (
                   <div className="p-2.5 rounded bg-[var(--surface)] border border-[var(--outline)] flex flex-col gap-1.5">
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="font-semibold text-[var(--on-surface)] flex items-center gap-1.5">
                         <span className="material-symbols-outlined text-[15px] text-sky-400">folder_shared</span>
-                        <span>{i18n._(msg`Tus Proyectos en Sanity (${userProfile?.name || userProfile?.email || 'Cuenta'})`)}</span>
+                        <span>{i18n._(msg`Proyectos Disponibles en tu Cuenta de Sanity`)}</span>
                       </span>
                       <span className="text-[10px] text-[var(--on-surface-variant)]">
-                        {i18n._(msg`Haz clic para seleccionar`)}
+                        {i18n._(msg`Haz clic para autocompletar`)}
                       </span>
                     </div>
 

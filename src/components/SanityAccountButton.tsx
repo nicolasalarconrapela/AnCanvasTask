@@ -6,11 +6,15 @@ import {
   saveSanityConfig,
   clearSanityConfig,
   checkSanityAccountStatus,
+  getSavedSanityProfiles,
+  activateSanityProfile,
+  getActiveSanityProfileId,
   SanityConfig,
   SanityUserProfile,
   SanityAuthType,
   SanityAccountStatus,
   SanityUserProjectInfo,
+  SanityLocalProfile,
 } from '../services/sanityService';
 
 export function SanityLogoIcon({
@@ -57,6 +61,8 @@ export function SanityAccountButton({
 }: SanityAccountButtonProps) {
   const { i18n } = useLingui();
   const [config, setConfig] = useState<SanityConfig>(() => getSanityConfig());
+  const [savedProfiles, setSavedProfiles] = useState<SanityLocalProfile[]>(() => getSavedSanityProfiles());
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(() => getActiveSanityProfileId());
   const [accountStatus, setAccountStatus] = useState<SanityAccountStatus | null>(null);
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [isSwitchingProject, setIsSwitchingProject] = useState<boolean>(false);
@@ -66,6 +72,8 @@ export function SanityAccountButton({
     checkSanityAccountStatus(cfg || config).then((status) => {
       setAccountStatus(status);
     });
+    setSavedProfiles(getSavedSanityProfiles());
+    setActiveProfileId(getActiveSanityProfileId());
   };
 
   useEffect(() => {
@@ -75,11 +83,18 @@ export function SanityAccountButton({
       refreshStatus(updatedConfig);
     };
 
+    const handleProfilesUpdate = () => {
+      setSavedProfiles(getSavedSanityProfiles());
+      setActiveProfileId(getActiveSanityProfileId());
+    };
+
     window.addEventListener('antask_sanity_config_updated', handleConfigUpdate);
+    window.addEventListener('antask_sanity_profiles_updated', handleProfilesUpdate);
     refreshStatus(config);
 
     return () => {
       window.removeEventListener('antask_sanity_config_updated', handleConfigUpdate);
+      window.removeEventListener('antask_sanity_profiles_updated', handleProfilesUpdate);
     };
   }, [config.projectId, config.dataset, config.token]);
 
@@ -115,6 +130,16 @@ export function SanityAccountButton({
       setIsOpen(false);
     } finally {
       setIsSwitchingProject(false);
+    }
+  };
+
+  const handleActivateProfile = (profile: SanityLocalProfile) => {
+    const applied = activateSanityProfile(profile.id);
+    if (applied) {
+      setConfig(applied);
+      refreshStatus(applied);
+      onShowToast?.(i18n._(msg`Perfil "${profile.alias}" activado`), 'success');
+      setIsOpen(false);
     }
   };
 
@@ -398,6 +423,53 @@ export function SanityAccountButton({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Saved Local Profiles Switcher */}
+          {savedProfiles.length > 0 && (
+            <div className="px-3.5 py-2 border-b border-[var(--outline)] bg-[var(--surface)] flex flex-col gap-1.5">
+              <div className="flex items-center justify-between text-[10px] text-[var(--on-surface-variant)]">
+                <span className="font-semibold flex items-center gap-1 text-[var(--on-surface)]">
+                  <span className="material-symbols-outlined text-[13px] text-emerald-400">badge</span>
+                  <span>{i18n._(msg`Perfiles Guardados:`)}</span>
+                </span>
+                <span className="font-mono text-[9px] opacity-70">
+                  {savedProfiles.length} {savedProfiles.length === 1 ? 'perfil' : 'perfiles'}
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-1 max-h-28 overflow-y-auto">
+                {savedProfiles.map((p) => {
+                  const isActive = activeProfileId === p.id || (config.projectId === p.projectId && config.dataset === p.dataset);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handleActivateProfile(p)}
+                      className={`w-full px-2 py-1 rounded text-left text-[11px] flex items-center justify-between cursor-pointer transition border ${
+                        isActive
+                          ? 'bg-emerald-950/40 border-emerald-500/60 text-emerald-200 font-semibold'
+                          : 'bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border-[var(--outline)] text-[var(--on-surface)]'
+                      }`}
+                    >
+                      <div className="flex flex-col min-w-0 pr-1.5">
+                        <span className="truncate">{p.alias}</span>
+                        <span className="text-[9px] font-mono opacity-70 truncate">{p.projectId} · {p.dataset}</span>
+                      </div>
+                      {isActive ? (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-emerald-900/60 text-emerald-300 border border-emerald-700/60 shrink-0">
+                          {i18n._(msg`Activo`)}
+                        </span>
+                      ) : (
+                        <span className="material-symbols-outlined text-[13px] text-[var(--on-surface-variant)] shrink-0">
+                          swap_horiz
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
