@@ -6472,6 +6472,7 @@ export default function App() {
         }}
         onShowToast={pushToast}
         onOpenSanityConfig={() => setIsSanityModalOpen(true)}
+        onDeleteWorkspace={handleDeleteWorkspace}
       />
 
       {/* Modal: Crear nuevo archivo Task MD */}
