@@ -52,6 +52,14 @@ export function sanitizeSanityDocId(id: string): string {
   return String(id || '').replace(/[^a-zA-Z0-9_.-]/g, '_');
 }
 
+// Builds collision-free, workspace-scoped Sanity document ID for tasks (INV-01, INV-06)
+export function buildSanityTaskDocId(taskId: string, workspaceId?: string): string {
+  const safeId = sanitizeSanityDocId(taskId);
+  if (!workspaceId) return `task-${safeId}`;
+  const cleanWs = sanitizeSanityDocId(String(workspaceId).replace(/^workspace-/, ''));
+  return `task-${cleanWs}-${safeId}`;
+}
+
 // Identifiable Trace Logger for Sanity Integration
 export const logSanityTrace = (action: string, details?: any) => {
   const timestamp = new Date().toISOString().substring(11, 19);
@@ -63,19 +71,23 @@ export const logSanityWarn = (action: string, details?: any) => {
   console.warn(`[AnTask Sanity Bridge ${timestamp}] ⚠️ ${action}`, details || '');
 };
 
+const envObj = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : {};
+
 const DEFAULT_SANITY_CONFIG: SanityConfig = {
-  projectId: import.meta.env.VITE_SANITY_PROJECT_ID || '',
-  dataset: import.meta.env.VITE_SANITY_DATASET || 'production',
+  projectId: envObj.VITE_SANITY_PROJECT_ID || '',
+  dataset: envObj.VITE_SANITY_DATASET || 'production',
   apiVersion: '2024-03-01',
-  token: import.meta.env.VITE_SANITY_API_TOKEN || '',
+  token: envObj.VITE_SANITY_API_TOKEN || '',
   useCdn: false,
 };
 
 export function getSanityConfig(): SanityConfig {
   try {
-    const stored = localStorage.getItem(LOCAL_STORAGE_KEY_SANITY_CONFIG);
-    if (stored) {
-      return { ...DEFAULT_SANITY_CONFIG, ...JSON.parse(stored) };
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEY_SANITY_CONFIG);
+      if (stored) {
+        return { ...DEFAULT_SANITY_CONFIG, ...JSON.parse(stored) };
+      }
     }
   } catch (e) {
     console.warn('Could not read Sanity config from storage', e);
@@ -751,11 +763,12 @@ export async function saveCanvasVisualState(
   state: { tasks: TaskVisualState[]; groups: GroupVisualState[] },
   projectId: string = 'default'
 ): Promise<{ success: boolean; remote: boolean }> {
-  const docId = `canvasVisualState-${projectId}`;
+  const cleanId = sanitizeSanityDocId(projectId.replace(/^canvasVisualState-/, ''));
+  const docId = `canvasVisualState-${cleanId}`;
   const docData: CanvasVisualDocument = {
     _id: docId,
     _type: 'canvasVisualState',
-    projectId,
+    projectId: cleanId,
     tasks: state.tasks.map((t) => ({
       taskId: t.taskId,
       x: Math.round(t.x),
@@ -774,10 +787,10 @@ export async function saveCanvasVisualState(
     updatedAt: new Date().toISOString(),
   };
 
-  // 1. Always save to local visual cache (both under projectId and default)
+  // 1. Always save to local visual cache (both under cleanId and default)
   try {
     localStorage.setItem(
-      `${LOCAL_STORAGE_KEY_VISUAL_STATE}_${projectId}`,
+      `${LOCAL_STORAGE_KEY_VISUAL_STATE}_${cleanId}`,
       JSON.stringify(docData)
     );
     localStorage.setItem(
@@ -794,7 +807,16 @@ export async function saveCanvasVisualState(
 
   if (client && config.token) {
     try {
-      await client.createOrReplace(docData as any);
+      await client.createIfNotExists(docData as any);
+      await client
+        .patch(docId)
+        .set({
+          tasks: docData.tasks,
+          groups: docData.groups,
+          updatedAt: docData.updatedAt,
+          projectId: cleanId,
+        })
+        .commit();
       return { success: true, remote: true };
     } catch (err) {
       console.warn('Could not persist visual state to Sanity:', err);
@@ -840,7 +862,8 @@ export async function syncAllTasksToSanity(
     subtasks?: Array<{ title: string; completed?: boolean }>;
     description?: string;
   }>,
-  configOverride?: Partial<SanityConfig>
+  configOverride?: Partial<SanityConfig>,
+  workspaceId?: string
 ): Promise<{ ok: boolean; syncedCount: number; message: string }> {
   const config = { ...getSanityConfig(), ...configOverride };
   if (!config.projectId || !config.dataset) {
@@ -865,6 +888,7 @@ export async function syncAllTasksToSanity(
 
   try {
     const now = new Date().toISOString();
+    const cleanWs = workspaceId ? sanitizeSanityDocId(String(workspaceId).replace(/^workspace-/, '')) : '';
     const BATCH_SIZE = 50;
 
     for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
@@ -872,12 +896,13 @@ export async function syncAllTasksToSanity(
       let tx = client.transaction();
 
       for (const t of chunk) {
-        const safeId = sanitizeSanityDocId(t.id);
-        const docId = `task-${safeId}`;
-        const doc: SanityTestingTaskDocument = {
+        const docId = buildSanityTaskDocId(t.id, cleanWs);
+        const initialDoc: SanityTestingTaskDocument = {
           _id: docId,
           _type: 'task',
           taskId: t.id,
+          workspaceId: cleanWs || undefined,
+          workspace: cleanWs ? ({ _type: 'reference', _ref: `workspace-${cleanWs}` } as any) : undefined,
           title: t.title,
           completed: Boolean(t.completed),
           status: (t.status as any) || (t.completed ? 'done' : 'todo'),
@@ -893,7 +918,30 @@ export async function syncAllTasksToSanity(
           updatedAt: now,
         };
 
-        tx = tx.createOrReplace(doc as any);
+        // Surgical, non-destructive mutation: createIfNotExists then set fields
+        tx = tx.createIfNotExists(initialDoc as any).patch(docId, (patch) =>
+          patch.set({
+            title: t.title,
+            completed: Boolean(t.completed),
+            status: (t.status as any) || (t.completed ? 'done' : 'todo'),
+            priority: (t.priority as any) || 'P1',
+            groupTitle: t.groupTitle || 'General',
+            blockedBy: t.blockedBy || '',
+            tags: t.tags || [],
+            subtasks: (t.subtasks || []).map((s) => ({
+              title: s.title,
+              completed: Boolean(s.completed),
+            })),
+            ...(t.description !== undefined ? { description: t.description } : {}),
+            updatedAt: now,
+            ...(cleanWs
+              ? {
+                  workspaceId: cleanWs,
+                  workspace: { _type: 'reference', _ref: `workspace-${cleanWs}` },
+                }
+              : {}),
+          })
+        );
       }
 
       await tx.commit();
@@ -1115,14 +1163,36 @@ export async function saveSanityDocument(
       useCdn: false,
     });
 
+    const docId = doc._id;
     const docToSave = {
       ...doc,
       updatedAt: new Date().toISOString(),
     };
-    const result = await client.createOrReplace(docToSave);
-    return { ok: true, document: result, message: 'Documento publicado con éxito en Sanity' };
+    if (docId) {
+      await client.createIfNotExists(docToSave as any);
+      const patch = client.patch(docId);
+      if (doc._rev) {
+        patch.ifRevisionId(doc._rev);
+      }
+      const { _id, _type, _rev, _createdAt, _updatedAt, ...fieldsToSet } = docToSave;
+      const result = await patch.set(fieldsToSet).commit();
+      return { ok: true, document: result, message: 'Documento publicado con éxito en Sanity' };
+    } else {
+      const result = await client.create(docToSave);
+      return { ok: true, document: result, message: 'Documento creado con éxito en Sanity' };
+    }
   } catch (err: any) {
-    return { ok: false, message: err?.message || 'Error al guardar documento en Sanity' };
+    const isConflict =
+      err?.statusCode === 409 ||
+      err?.response?.statusCode === 409 ||
+      err?.message?.includes('409') ||
+      err?.message?.includes('revision');
+    return {
+      ok: false,
+      message: isConflict
+        ? 'Conflicto de concurrencia (409): El documento fue modificado en Sanity por otro usuario. Recarga la revisión más reciente.'
+        : err?.message || 'Error al guardar documento en Sanity',
+    };
   }
 }
 
@@ -1389,17 +1459,38 @@ export async function saveWorkspaceToSanity(
       useCdn: false,
     });
 
-    const result = await client.createOrReplace(docData as any);
+    await client.createIfNotExists(docData as any);
+    const patch = client.patch(docId);
+    if (workspace._rev) {
+      patch.ifRevisionId(workspace._rev);
+    }
+    const result = await patch
+      .set({
+        name: docData.name,
+        githubRepo: docData.githubRepo,
+        activeBranchName: docData.activeBranchName,
+        branches: docData.branches,
+        updatedAt: docData.updatedAt,
+      })
+      .commit();
+
     return {
       ok: true,
       message: `Workspace "${workspace.name}" sincronizado con éxito en Sanity (${config.dataset})`,
       document: result,
     };
   } catch (err: any) {
+    const isConflict =
+      err?.statusCode === 409 ||
+      err?.response?.statusCode === 409 ||
+      err?.message?.includes('409') ||
+      err?.message?.includes('revision');
     console.warn('Error saving workspace to Sanity:', err);
     return {
       ok: false,
-      message: err?.message || 'Error al persistir workspace en Sanity',
+      message: isConflict
+        ? `Conflicto de concurrencia (409): El workspace "${workspace.name}" fue modificado simultáneamente por otro usuario.`
+        : err?.message || 'Error al persistir workspace en Sanity',
     };
   }
 }

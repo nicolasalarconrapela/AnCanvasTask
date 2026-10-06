@@ -14,6 +14,9 @@ import {
 import {
   getInitialDefaultWorkspaces,
 } from '../src/services/workspaceService';
+import {
+  buildSanityTaskDocId,
+} from '../src/services/sanityService';
 
 console.log('--- Iniciando suite de pruebas de AnTaskCanvas (Core sin GitHub) ---');
 
@@ -149,6 +152,18 @@ assert.strictEqual(tasksB[0].groupTitle, 'Backend');
 assert.strictEqual(tasksA.length, 1);
 assert.strictEqual(tasksB.length, 1);
 console.log('   ✓ Consonancia de tareas y secciones por documento seleccionada verificada.');
+
+// 7. Sanity Synchronization Identity & Non-collision (INV-01, INV-06)
+console.log('7. Verificando aislamiento de IDs de Sanity por Workspace (INV-01, INV-06)...');
+const task1WsA = buildSanityTaskDocId('setup', 'workspace-project-a');
+const task1WsB = buildSanityTaskDocId('setup', 'workspace-project-b');
+assert.notStrictEqual(task1WsA, task1WsB, 'Tareas con mismo taskId en diferentes workspaces deben tener _id distintos en Sanity');
+assert.strictEqual(task1WsA, 'task-project-a-setup');
+assert.strictEqual(task1WsB, 'task-project-b-setup');
+
+const taskLegacy = buildSanityTaskDocId('setup');
+assert.strictEqual(taskLegacy, 'task-setup', 'Tareas sin workspace deben mantener formato legacy');
+console.log('   ✓ Aislamiento de IDs por workspace en Sanity verificado.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 

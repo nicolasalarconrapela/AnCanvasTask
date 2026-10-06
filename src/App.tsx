@@ -21,6 +21,8 @@ import {
   subscribeToSanityLiveChanges,
   SanityLiveChangeEvent,
   SanityConfig,
+  buildSanityTaskDocId,
+  sanitizeSanityDocId,
 } from './services/sanityService';
 import {
   CustomNoteShapeUtil,
@@ -763,6 +765,19 @@ export default function App() {
   markdownRef.current = markdownInput;
   const lastConflictNotifiedTimeRef = useRef<number>(0);
   const isAutoSavingRef = useRef<boolean>(false);
+  const [activeSanityConfig, setActiveSanityConfig] = useState<SanityConfig>(() => getSanityConfig());
+
+  // Dynamic profile / configuration sync listener (INV-02, INV-07)
+  useEffect(() => {
+    const handleConfigChange = (e: any) => {
+      const updated = e.detail || getSanityConfig();
+      setActiveSanityConfig(updated);
+    };
+    window.addEventListener('antask_sanity_config_updated', handleConfigChange);
+    return () => {
+      window.removeEventListener('antask_sanity_config_updated', handleConfigChange);
+    };
+  }, []);
 
   // Synchronize canvas shape visibility (cards, groups, and connector arrows) with active filters & search query
   useEffect(() => {
@@ -3030,7 +3045,7 @@ export default function App() {
               tags: b.detectedTags || [],
             };
           });
-          syncAllTasksToSanity(tasksToSync, newConfig).then((res) => {
+          syncAllTasksToSanity(tasksToSync, newConfig, activeWorkspace.id).then((res) => {
             if (res.ok) {
               pushToast(i18n._(msg`Sincronización activa: ${tasksToSync.length} tareas registradas en Sanity`), 'success');
             }
@@ -3042,7 +3057,7 @@ export default function App() {
         setSyncStatus('local');
       }
     },
-    [editor, markdownInput, triggerDebouncedVisualSave, pushToast]
+    [editor, markdownInput, triggerDebouncedVisualSave, pushToast, activeWorkspace.id]
   );
 
   const handleSyncAllTasksToSanity = useCallback(async () => {
@@ -3069,7 +3084,7 @@ export default function App() {
       };
     });
 
-    const res = await syncAllTasksToSanity(tasksToSync, config);
+    const res = await syncAllTasksToSanity(tasksToSync, config, activeWorkspace.id);
     if (res.ok) {
       setSyncStatus('synced');
       pushToast(res.message, 'success');
@@ -3077,12 +3092,11 @@ export default function App() {
       setSyncStatus('local');
       pushToast(res.message, 'error');
     }
-  }, [markdownInput, pushToast]);
+  }, [markdownInput, pushToast, activeWorkspace.id]);
 
   // Automatic debounced synchronization of tasks to Sanity on markdown/tasks update
   useEffect(() => {
-    const config = getSanityConfig();
-    if (!config.projectId || !config.dataset || !config.token) {
+    if (!activeSanityConfig.projectId || !activeSanityConfig.dataset || !activeSanityConfig.token) {
       return;
     }
 
@@ -3113,7 +3127,7 @@ export default function App() {
         };
       });
 
-      const res = await syncAllTasksToSanity(tasksToSync);
+      const res = await syncAllTasksToSanity(tasksToSync, activeSanityConfig, activeWorkspace.id);
       if (res.ok) {
         setSyncStatus('synced');
       }
@@ -3124,12 +3138,11 @@ export default function App() {
         clearTimeout(debouncedSanityTasksRef.current);
       }
     };
-  }, [markdownInput]);
+  }, [markdownInput, activeSanityConfig, activeWorkspace.id]);
 
   // Sanity Live Bidirectional Listener: receives mutations from Sanity Content Lake
   useEffect(() => {
-    const config = getSanityConfig();
-    if (!config.projectId || !config.dataset) {
+    if (!activeSanityConfig.projectId || !activeSanityConfig.dataset) {
       setIsLiveSyncActive(false);
       return;
     }
@@ -3141,7 +3154,14 @@ export default function App() {
 
       if (event.type === 'task' && event.document) {
         const taskDoc = event.document;
-        const targetId = taskDoc.taskId || (taskDoc._id ? taskDoc._id.replace(/^task-/, '') : null);
+
+        // Verify workspace context: only apply to current active markdown if workspace matches or is unspecified (INV-01)
+        const currentWsClean = sanitizeSanityDocId(activeWorkspace.id.replace(/^workspace-/, ''));
+        if (taskDoc.workspaceId && sanitizeSanityDocId(taskDoc.workspaceId) !== currentWsClean) {
+          return;
+        }
+
+        const targetId = taskDoc.taskId || (taskDoc._id ? taskDoc._id.replace(/^task-([^_]+-)?/, '') : null);
         if (!targetId) return;
 
         const currentMd = markdownRef.current;
@@ -3186,18 +3206,49 @@ export default function App() {
           );
         }
       } else if (event.type === 'workspace' && event.document) {
+        // Reconcile remote workspace updates into local workspaceStore (INV-03, INV-11)
+        const remoteWs = event.document;
+        const remoteCleanId = remoteWs.workspaceId || (remoteWs._id ? remoteWs._id.replace(/^workspace-/, '') : null);
+        if (remoteCleanId) {
+          setWorkspaceStore((prevStore) => {
+            const idx = prevStore.workspaces.findIndex(
+              (w) =>
+                w.id === remoteCleanId ||
+                w.id === `workspace-${remoteCleanId}` ||
+                w.id.replace(/^workspace-/, '') === remoteCleanId
+            );
+            if (idx >= 0) {
+              const existingWs = prevStore.workspaces[idx];
+              const updatedList = [...prevStore.workspaces];
+              updatedList[idx] = {
+                ...existingWs,
+                name: remoteWs.name || existingWs.name,
+                activeBranchName: remoteWs.activeBranchName || existingWs.activeBranchName,
+                branches:
+                  remoteWs.branches && Array.isArray(remoteWs.branches) && remoteWs.branches.length > 0
+                    ? remoteWs.branches
+                    : existingWs.branches,
+                updatedAt: remoteWs.updatedAt || new Date().toISOString(),
+              };
+              const nextStore = { ...prevStore, workspaces: updatedList };
+              saveWorkspaceStore(nextStore);
+              return nextStore;
+            }
+            return prevStore;
+          });
+        }
         pushToast(
           `Sanity: Espacio de trabajo "${event.document.name || 'Workspace'}" sincronizado`,
           'info'
         );
       }
-    });
+    }, activeSanityConfig);
 
     return () => {
       unsubscribe();
       setIsLiveSyncActive(false);
     };
-  }, [pushToast]);
+  }, [activeSanityConfig.projectId, activeSanityConfig.dataset, activeSanityConfig.token, activeWorkspace.id, pushToast]);
 
   const handleImportTaskFromSanity = useCallback(
     (taskDoc: any) => {
