@@ -1215,7 +1215,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         </div>
 
         {/* Diff List */}
-        <div id="div-syncoverridemodal-16" className="p-3 sm:p-4 overflow-y-auto flex-1 min-h-0 flex flex-col gap-3 overscroll-contain">
+        <div id="div-syncoverridemodal-16" className="p-3 sm:p-4 overflow-y-auto flex-1 min-h-0 flex flex-col gap-3 overscroll-contain custom-modal-scrollbar pr-2 sm:pr-3">
           {filteredItems.length === 0 ? (
             <div id="div-syncoverridemodal-17" className="p-8 text-center text-[var(--on-surface-variant)] flex flex-col items-center justify-center gap-2">
               <span className="material-symbols-outlined text-4xl text-emerald-400">check_circle</span>
