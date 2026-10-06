@@ -120,7 +120,6 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
     };
 
     onCreateWorkspace(newWorkspace);
-    onShowToast(i18n._(msg`Workspace "${name.trim()}" creado y activado`), 'success');
     setName('');
     setRepoInput('');
     setDefaultBranch('main');
@@ -172,7 +171,6 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
     };
 
     onUpdateWorkspace?.(updatedWorkspace);
-    onShowToast(i18n._(msg`Workspace "${updatedWorkspace.name}" actualizado`), 'success');
     setActiveTab('list');
     setEditingWorkspace(null);
   };

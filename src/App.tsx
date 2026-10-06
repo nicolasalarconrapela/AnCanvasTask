@@ -501,8 +501,10 @@ export default function App() {
   // Undo history stack for destructive task deletions
   const undoStackRef = useRef<Array<{ markdown: string; label: string }>>([]);
 
-  // Toast System State
+  // Toast System State with Deduplication and Debounce
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const lastToastTimestampsRef = useRef<Map<string, number>>(new Map());
+  const lastLocalWorkspaceMutationTimeRef = useRef<number>(0);
 
   // Sanity Live Bidirectional Synchronization State
   const [isLiveSyncActive, setIsLiveSyncActive] = useState<boolean>(false);
@@ -511,8 +513,35 @@ export default function App() {
 
   const pushToast = useCallback(
     (message: string, type: ToastType = 'info', action?: { label: string; onClick: () => void }) => {
-      const id = 'toast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
-      setToasts((prev) => [...prev.slice(-3), { id, message, type, action }]);
+      const trimmed = message ? message.trim() : '';
+      if (!trimmed) return;
+
+      const now = Date.now();
+      const lastTime = lastToastTimestampsRef.current.get(trimmed) || 0;
+      // Deduplicate identical messages sent within 2.5 seconds
+      if (now - lastTime < 2500) {
+        return;
+      }
+      lastToastTimestampsRef.current.set(trimmed, now);
+
+      // Clean up ref map to prevent memory leak
+      if (lastToastTimestampsRef.current.size > 50) {
+        const threshold = now - 10000;
+        for (const [key, timestamp] of lastToastTimestampsRef.current.entries()) {
+          if (timestamp < threshold) {
+            lastToastTimestampsRef.current.delete(key);
+          }
+        }
+      }
+
+      const id = 'toast_' + now + '_' + Math.random().toString(36).substring(2, 6);
+      setToasts((prev) => {
+        // Prevent adding duplicate message if one is already visible
+        if (prev.some((t) => t.message === trimmed)) {
+          return prev;
+        }
+        return [...prev.slice(-2), { id, message: trimmed, type, action }];
+      });
     },
     []
   );
@@ -741,6 +770,10 @@ export default function App() {
 
   // Computed active entities
   const activeWorkspace = useMemo(() => getActiveWorkspace(workspaceStore), [workspaceStore]);
+  const activeWorkspaceRef = useRef<Workspace>(activeWorkspace);
+  useEffect(() => {
+    activeWorkspaceRef.current = activeWorkspace;
+  }, [activeWorkspace]);
   const activeBranch = useMemo(() => getActiveBranch(activeWorkspace), [activeWorkspace]);
   const activeDocument = useMemo(() => getActiveDocument(activeBranch), [activeBranch]);
 
@@ -1305,6 +1338,7 @@ export default function App() {
 
   const handleCreateWorkspace = useCallback(
     (newWs: Workspace) => {
+      lastLocalWorkspaceMutationTimeRef.current = Date.now();
       setWorkspaceStore((prev) => {
         const nextStore = {
           ...prev,
@@ -1332,12 +1366,14 @@ export default function App() {
 
         return nextStore;
       });
+      pushToast(i18n._(msg`Workspace "${newWs.name}" creado y activado`), 'success');
     },
-    [editor, triggerDebouncedVisualSave]
+    [editor, triggerDebouncedVisualSave, pushToast, i18n]
   );
 
   const handleUpdateWorkspace = useCallback(
     (updatedWs: Workspace) => {
+      lastLocalWorkspaceMutationTimeRef.current = Date.now();
       setWorkspaceStore((prev) => {
         const nextWorkspaces = prev.workspaces.map((w) =>
           w.id === updatedWs.id ? updatedWs : w
@@ -1353,9 +1389,7 @@ export default function App() {
         if (config.projectId && config.dataset && config.token) {
           saveWorkspaceToSanity(updatedWs, config)
             .then((res) => {
-              if (res.ok) {
-                pushToast(i18n._(msg`Workspace "${updatedWs.name}" sincronizado con Sanity`), 'success');
-              } else {
+              if (!res.ok) {
                 pushToast(res.message, 'warning');
               }
             })
@@ -1368,11 +1402,12 @@ export default function App() {
       });
       pushToast(i18n._(msg`Workspace "${updatedWs.name}" actualizado`), 'success');
     },
-    [pushToast]
+    [pushToast, i18n]
   );
 
   const handleDeleteWorkspace = useCallback(
     (wsId: string, deleteRemote: boolean = false) => {
+      lastLocalWorkspaceMutationTimeRef.current = Date.now();
       setWorkspaceStore((prev) => {
         const filtered = prev.workspaces.filter((w) => w.id !== wsId);
         let nextWorkspaces = filtered;
@@ -3198,7 +3233,7 @@ export default function App() {
         const taskDoc = event.document;
 
         // Verify workspace context: only apply to current active markdown if workspace matches or is unspecified (INV-01)
-        const currentWsClean = sanitizeSanityDocId(activeWorkspace.id.replace(/^workspace-/, ''));
+        const currentWsClean = sanitizeSanityDocId(activeWorkspaceRef.current.id.replace(/^workspace-/, ''));
         if (taskDoc.workspaceId && sanitizeSanityDocId(taskDoc.workspaceId) !== currentWsClean) {
           return;
         }
@@ -3280,7 +3315,11 @@ export default function App() {
               saveWorkspaceStore(nextStore);
               return nextStore;
             });
-            pushToast(i18n._(msg`Sanity: Espacio de trabajo eliminado remotamente`), 'info');
+            const isRecentLocalMutation =
+              Date.now() - lastLocalWorkspaceMutationTimeRef.current < 4000;
+            if (!isRecentLocalMutation) {
+              pushToast(i18n._(msg`Sanity: Espacio de trabajo eliminado remotamente`), 'info');
+            }
           }
         } else if (event.document) {
           // Reconcile remote workspace updates into local workspaceStore (INV-03, INV-11)
@@ -3334,10 +3373,14 @@ export default function App() {
                 return nextStore;
               }
             });
-            pushToast(
-              i18n._(msg`Sanity: Espacio de trabajo "${event.document.name || 'Workspace'}" sincronizado en tiempo real`),
-              'info'
-            );
+            const isRecentLocalMutation =
+              Date.now() - lastLocalWorkspaceMutationTimeRef.current < 4000;
+            if (!isRecentLocalMutation) {
+              pushToast(
+                i18n._(msg`Sanity: Espacio de trabajo "${event.document.name || 'Workspace'}" sincronizado en tiempo real`),
+                'info'
+              );
+            }
           }
         }
       }
@@ -3347,7 +3390,7 @@ export default function App() {
       unsubscribe();
       setIsLiveSyncActive(false);
     };
-  }, [activeSanityConfig.projectId, activeSanityConfig.dataset, activeSanityConfig.token, activeWorkspace.id, pushToast]);
+  }, [activeSanityConfig.projectId, activeSanityConfig.dataset, activeSanityConfig.token, pushToast, i18n]);
 
   const handleImportTaskFromSanity = useCallback(
     (taskDoc: any) => {
