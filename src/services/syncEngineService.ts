@@ -20,7 +20,12 @@ import {
   SanityConfig,
 } from './sanityService';
 import { parseTasksMarkdown, ParsedGroup } from '../shapes/TaskShapeUtil';
-import { deleteTaskFromMarkdown } from '../utils/markdownSync';
+import {
+  deleteTaskFromMarkdown,
+  updateTaskInMarkdown,
+  addTaskToMarkdown,
+  scanTaskBlocks,
+} from '../utils/markdownSync';
 
 export type SyncDifferenceType =
   | 'synced'
@@ -305,9 +310,14 @@ export async function analyzeSyncDifferences(
           if (rt._id) remoteTasksMap.set(rt._id.replace(/^task-/, '').toLowerCase(), rt);
         }
 
-        for (const lt of allLocalTasks.slice(0, 15)) {
+        const processedRemoteTaskIds = new Set<string>();
+
+        for (const lt of allLocalTasks) {
           const resTaskId = lt.taskId || lt.temporaryId || 'task';
-          const matchedRemote = remoteTasksMap.get(resTaskId.toLowerCase());
+          const matchedRemote =
+            remoteTasksMap.get(resTaskId.toLowerCase()) ||
+            (lt.title ? remoteTasks.find((rt) => (rt.title || '').trim().toLowerCase() === (lt.title || '').trim().toLowerCase()) : undefined);
+
           if (!matchedRemote) {
             items.push({
               id: `task_${resTaskId}`,
@@ -317,8 +327,77 @@ export async function analyzeSyncDifferences(
               diffType: 'only_local',
               localTimestamp: activeDoc.updatedAt,
               localData: lt,
-              summaryChanges: ['Tarea creada localmente, no publicada en Sanity'],
+              summaryChanges: ['Tarea creada localmente, no publicada en Sanity Cloud'],
               resolutionStrategy: 'keep_local',
+            });
+          } else {
+            const remoteKey = (matchedRemote.taskId || matchedRemote._id?.replace(/^task-/, '') || '').toLowerCase();
+            processedRemoteTaskIds.add(remoteKey);
+
+            const titleDiff = lt.title !== matchedRemote.title;
+            const completedDiff = Boolean(lt.completed) !== Boolean(matchedRemote.completed);
+            const priorityDiff = (lt.priority || 'P1') !== (matchedRemote.priority || 'P1');
+
+            if (!titleDiff && !completedDiff && !priorityDiff) {
+              items.push({
+                id: `task_${resTaskId}`,
+                entityType: 'task',
+                title: `Tarea: [${resTaskId}] ${lt.title}`,
+                subtitle: `Sección "${lt.groupTitle}" • Sincronizada`,
+                diffType: 'synced',
+                localTimestamp: activeDoc.updatedAt,
+                remoteTimestamp: matchedRemote.updatedAt || matchedRemote._updatedAt,
+                localData: lt,
+                remoteData: matchedRemote,
+                summaryChanges: ['Tarea idéntica en local y Sanity Cloud'],
+                resolutionStrategy: 'keep_local',
+              });
+            } else {
+              const localTime = new Date(activeDoc.updatedAt || 0).getTime();
+              const remoteTime = new Date(matchedRemote.updatedAt || matchedRemote._updatedAt || 0).getTime();
+              let diffType: SyncDifferenceType = 'conflict';
+              if (localTime > remoteTime + 2000) {
+                diffType = 'local_override';
+              } else if (remoteTime > localTime + 2000) {
+                diffType = 'remote_override';
+              }
+
+              const changes: string[] = [];
+              if (titleDiff) changes.push(`Título: "${matchedRemote.title}" vs "${lt.title}"`);
+              if (completedDiff) changes.push(`Estado completado: Remoto (${Boolean(matchedRemote.completed)}) vs Local (${Boolean(lt.completed)})`);
+              if (priorityDiff) changes.push(`Prioridad: Remoto (${matchedRemote.priority || 'P1'}) vs Local (${lt.priority || 'P1'})`);
+
+              items.push({
+                id: `task_${resTaskId}`,
+                entityType: 'task',
+                title: `Tarea: [${resTaskId}] ${lt.title}`,
+                subtitle: `Sección "${lt.groupTitle}" • Discrepancia detectada`,
+                diffType,
+                localTimestamp: activeDoc.updatedAt,
+                remoteTimestamp: matchedRemote.updatedAt || matchedRemote._updatedAt,
+                localData: lt,
+                remoteData: matchedRemote,
+                summaryChanges: changes,
+                resolutionStrategy: diffType === 'remote_override' ? 'keep_remote' : 'keep_local',
+              });
+            }
+          }
+        }
+
+        // Remote tasks not present locally
+        for (const rt of remoteTasks) {
+          const remoteKey = (rt.taskId || rt._id?.replace(/^task-/, '') || '').toLowerCase();
+          if (!processedRemoteTaskIds.has(remoteKey)) {
+            items.push({
+              id: `task_${rt.taskId || rt._id}`,
+              entityType: 'task',
+              title: `Tarea: [${rt.taskId || 'Cloud'}] ${rt.title || 'Sin título'}`,
+              subtitle: `Sanity Cloud • Sección "${rt.groupTitle || 'General'}"`,
+              diffType: 'only_remote',
+              remoteTimestamp: rt.updatedAt || rt._updatedAt,
+              remoteData: rt,
+              summaryChanges: ['Tarea existente en Sanity Cloud, no descargada localmente'],
+              resolutionStrategy: 'keep_remote',
             });
           }
         }
@@ -430,6 +509,91 @@ export async function resolveSyncItem(
       return {
         success: res.ok,
         message: res.ok ? `Tarea "${taskDoc.title}" sincronizada con Sanity` : res.message,
+      };
+    } else if (strategy === 'keep_remote') {
+      if (!item.remoteData) {
+        return { success: false, message: 'No hay datos remotos de la tarea para importar' };
+      }
+      const remoteTask = item.remoteData;
+      const taskId = remoteTask.taskId || remoteTask._id?.replace(/^task-/, '') || item.id.replace(/^task_/, '');
+
+      const activeWs =
+        workspaceStore.workspaces.find((w) => w.id === workspaceStore.activeWorkspaceId) ||
+        workspaceStore.workspaces[0];
+      if (!activeWs) {
+        return { success: false, message: 'No hay workspace activo para importar la tarea' };
+      }
+      const activeBranch =
+        activeWs.branches.find((b) => b.name === activeWs.activeBranchName) ||
+        activeWs.branches[0];
+      if (!activeBranch) {
+        return { success: false, message: 'No hay rama activa para importar la tarea' };
+      }
+      const activeDoc =
+        activeBranch.taskDocuments.find((d) => d.id === activeBranch.activeDocumentId) ||
+        activeBranch.taskDocuments[0];
+      if (!activeDoc) {
+        return { success: false, message: 'No hay documento de tareas activo para importar' };
+      }
+
+      let updatedMd = activeDoc.content;
+      const { taskBlocks } = scanTaskBlocks(activeDoc.content);
+      const exists = taskBlocks.some(
+        (b) =>
+          (b.detectedId && b.detectedId.toLowerCase() === taskId.toLowerCase()) ||
+          (b.detectedTitle && remoteTask.title && b.detectedTitle.trim().toLowerCase() === remoteTask.title.trim().toLowerCase())
+      );
+
+      if (exists) {
+        updatedMd = updateTaskInMarkdown(
+          activeDoc.content,
+          taskId,
+          {
+            title: remoteTask.title,
+            completed: Boolean(remoteTask.completed),
+            priority: remoteTask.priority,
+            status: remoteTask.status,
+          },
+          remoteTask.title
+        );
+      } else {
+        const addRes = addTaskToMarkdown(activeDoc.content, {
+          title: remoteTask.title || 'Nueva tarea',
+          priority: remoteTask.priority || 'P1',
+          groupTitle: remoteTask.groupTitle || 'General',
+          customId: taskId,
+          blockedBy: remoteTask.blockedBy,
+          tags: remoteTask.tags,
+        });
+        updatedMd = addRes.updatedMarkdown;
+      }
+
+      const updatedDocs = activeBranch.taskDocuments.map((d) =>
+        d.id === activeDoc.id
+          ? {
+              ...d,
+              content: updatedMd,
+              lastSavedContent: updatedMd,
+              updatedAt: new Date().toISOString(),
+            }
+          : d
+      );
+      const updatedBranches = activeWs.branches.map((b) =>
+        b.name === activeBranch.name ? { ...b, taskDocuments: updatedDocs } : b
+      );
+      const updatedWorkspaces = workspaceStore.workspaces.map((w) =>
+        w.id === activeWs.id ? { ...w, branches: updatedBranches } : w
+      );
+      const updatedStore: WorkspaceStoreState = {
+        ...workspaceStore,
+        workspaces: updatedWorkspaces,
+      };
+      saveWorkspaceStore(updatedStore);
+
+      return {
+        success: true,
+        message: `Tarea "${remoteTask.title || taskId}" actualizada desde Sanity`,
+        updatedStore,
       };
     }
   }
@@ -610,6 +774,8 @@ export async function deleteSyncItem(
     const taskId =
       item.localData?.taskId ||
       item.localData?.temporaryId ||
+      item.remoteData?.taskId ||
+      item.remoteData?._id?.replace(/^task-/, '') ||
       item.id.replace(/^task_/, '');
     let updatedStore: WorkspaceStoreState | undefined;
 
