@@ -45,6 +45,15 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   const [resolvingItemId, setResolvingItemId] = useState<string | null>(null);
   const [confirmDeleteItemId, setConfirmDeleteItemId] = useState<string | null>(null);
   const [deleteScope, setDeleteScope] = useState<'local' | 'remote' | 'both'>('local');
+  const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<Set<string>>(new Set());
+  const toggleWorkspaceCollapse = (wsId: string) => {
+    setCollapsedWorkspaceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(wsId)) next.delete(wsId);
+      else next.add(wsId);
+      return next;
+    });
+  };
 
   const [sanityConfig, setSanityConfig] = useState(getSanityConfig());
   const isSanityConfigured = Boolean(sanityConfig.projectId && sanityConfig.dataset);
@@ -891,7 +900,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     >
       <div
         id="modal-sync-override-dialog"
-        className="w-full max-w-4xl bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-md flex flex-col overflow-hidden max-h-[92vh]"
+        className="w-full max-w-4xl bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-md flex flex-col overflow-hidden max-h-[92vh] min-h-0"
         role="dialog"
         aria-modal="true"
         aria-labelledby="sync-modal-title"
@@ -1206,7 +1215,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         </div>
 
         {/* Diff List */}
-        <div id="div-syncoverridemodal-16" className="p-4 overflow-y-auto flex-1 flex flex-col gap-3">
+        <div id="div-syncoverridemodal-16" className="p-3 sm:p-4 overflow-y-auto flex-1 min-h-0 flex flex-col gap-3 overscroll-contain">
           {filteredItems.length === 0 ? (
             <div id="div-syncoverridemodal-17" className="p-8 text-center text-[var(--on-surface-variant)] flex flex-col items-center justify-center gap-2">
               <span className="material-symbols-outlined text-4xl text-emerald-400">check_circle</span>
@@ -1270,25 +1279,44 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                   )}
 
                   {/* Child Tasks Hanging Directly Under Workspace */}
-                  {group.tasks.length > 0 && (
-                    <div
-                      id={`div-sync-tasks-container-${group.workspaceId}`}
-                      className="bg-[var(--surface-container-low)]/40 p-2.5 sm:p-3 flex flex-col gap-2 border-t border-[var(--outline)]/60"
-                    >
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--on-surface-variant)] px-1">
-                        <span className="material-symbols-outlined text-[15px] text-indigo-400">
-                          subdirectory_arrow_right
-                        </span>
-                        <span className="text-[var(--on-surface)]">{i18n._(msg`Tareas del Workspace`)}</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] border border-[var(--outline)]">
-                          {group.tasks.length}
-                        </span>
+                  {group.tasks.length > 0 && (() => {
+                    const isCollapsed = collapsedWorkspaceIds.has(group.workspaceId);
+                    return (
+                      <div
+                        id={`div-sync-tasks-container-${group.workspaceId}`}
+                        className="bg-[var(--surface-container-low)]/40 p-2.5 sm:p-3 flex flex-col gap-2 border-t border-[var(--outline)]/60"
+                      >
+                        <button
+                          type="button"
+                          id={`btn-toggle-tasks-group-${group.workspaceId}`}
+                          onClick={() => toggleWorkspaceCollapse(group.workspaceId)}
+                          className="flex items-center justify-between w-full text-xs font-semibold text-[var(--on-surface-variant)] px-1 py-1 rounded hover:bg-[var(--surface-container-high)] cursor-pointer transition-colors select-none"
+                          title={isCollapsed ? i18n._(msg`Expandir tareas del workspace`) : i18n._(msg`Colapsar tareas del workspace`)}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-[15px] text-indigo-400">
+                              subdirectory_arrow_right
+                            </span>
+                            <span className="text-[var(--on-surface)]">{i18n._(msg`Tareas del Workspace`)}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] border border-[var(--outline)]">
+                              {group.tasks.length}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 text-[11px] text-[var(--on-surface-variant)] font-normal">
+                            <span>{isCollapsed ? i18n._(msg`Mostrar (${group.tasks.length})`) : i18n._(msg`Ocultar`)}</span>
+                            <span className="material-symbols-outlined text-[16px]">
+                              {isCollapsed ? 'expand_more' : 'expand_less'}
+                            </span>
+                          </div>
+                        </button>
+                        {!isCollapsed && (
+                          <div className="flex flex-col gap-2 pl-2 sm:pl-3 border-l-2 border-indigo-500/30 ml-1.5">
+                            {group.tasks.map((taskItem) => renderItemCard(taskItem, true))}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex flex-col gap-2 pl-2 sm:pl-3 border-l-2 border-indigo-500/30 ml-1.5">
-                        {group.tasks.map((taskItem) => renderItemCard(taskItem, true))}
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               );
             })
