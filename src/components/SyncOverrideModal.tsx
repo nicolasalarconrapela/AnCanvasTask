@@ -80,8 +80,6 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     }
   }, [isOpen, handleRunAnalysis]);
 
-  if (!isOpen) return null;
-
   const handleResolveSingle = async (
     item: SyncItemDiff,
     strategy: 'keep_local' | 'keep_remote' | 'merge'
@@ -856,6 +854,8 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       </div>
     );
   };
+
+  if (!isOpen) return null;
 
   return (
     <div
