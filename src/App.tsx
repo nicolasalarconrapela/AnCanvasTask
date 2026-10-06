@@ -4018,6 +4018,23 @@ export default function App() {
             </span>
           </button>
 
+          {/* Header Sync & Override Button */}
+          <button
+            id="btn-header-sync-override"
+            type="button"
+            onClick={() => setIsSyncOverrideModalOpen(true)}
+            className="px-2 sm:px-2.5 py-1 text-xs font-medium rounded border border-[var(--outline)] bg-[var(--surface)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] flex items-center gap-1.5 transition-colors cursor-pointer select-none"
+            title={i18n._(msg`Sync & Override (Detección de diferencias, overrides y resolución de conflictos)`)}
+            aria-label={i18n._(msg`Sync & Override`)}
+          >
+            <span className="material-symbols-outlined text-[16px] text-amber-500/90">
+              sync_alt
+            </span>
+            <span className="hidden sm:inline font-sans text-xs">
+              {i18n._(msg`Sync & Override`)}
+            </span>
+          </button>
+
           {/* Validation Issues Alert Chip (if any) */}
           {validationReport.issues.length > 0 && (
             <button

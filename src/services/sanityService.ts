@@ -227,6 +227,59 @@ export function activateSanityProfile(profileId: string): SanityConfig | null {
   return applied;
 }
 
+export function duplicateSanityProfile(profileId: string): SanityLocalProfile | null {
+  const profiles = getSavedSanityProfiles();
+  const source = profiles.find((p) => p.id === profileId);
+  if (!source) return null;
+
+  return saveSanityProfile({
+    alias: `${source.alias} (Copia)`,
+    projectId: source.projectId,
+    dataset: source.dataset,
+    token: source.token,
+    apiVersion: source.apiVersion,
+    useCdn: source.useCdn,
+  });
+}
+
+export function exportSanityProfilesJson(includeTokens = true): string {
+  const profiles = getSavedSanityProfiles();
+  const clean = profiles.map((p) => ({
+    ...p,
+    token: includeTokens ? p.token : '',
+  }));
+  return JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), profiles: clean }, null, 2);
+}
+
+export function importSanityProfilesJson(jsonStr: string): { importedCount: number; message: string } {
+  try {
+    const data = JSON.parse(jsonStr);
+    const list: any[] = Array.isArray(data) ? data : Array.isArray(data?.profiles) ? data.profiles : [];
+    if (list.length === 0) {
+      return { importedCount: 0, message: 'No se encontraron perfiles válidos en el archivo JSON.' };
+    }
+
+    let count = 0;
+    list.forEach((item) => {
+      if (item && typeof item.projectId === 'string' && item.projectId.trim()) {
+        saveSanityProfile({
+          alias: item.alias || `Proyecto (${item.projectId})`,
+          projectId: item.projectId,
+          dataset: item.dataset || 'production',
+          token: item.token || '',
+          apiVersion: item.apiVersion || '2024-03-01',
+          useCdn: item.useCdn,
+        });
+        count++;
+      }
+    });
+
+    return { importedCount: count, message: `Se importaron ${count} perfiles correctamente.` };
+  } catch (e: any) {
+    return { importedCount: 0, message: `Error al parsear el JSON: ${e?.message || String(e)}` };
+  }
+}
+
 export type SanityAuthType = 'user_token' | 'robot_token' | 'public_read' | 'local';
 
 export interface SanityUserProfile {

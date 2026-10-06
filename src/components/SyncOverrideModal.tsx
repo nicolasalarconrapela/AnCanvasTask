@@ -205,16 +205,18 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
           </div>
 
           <div id="div-syncoverridemodal-4" className="flex items-center gap-2">
-            {!isSanityConfigured && (
-              <button
-                id="btn-sync-configure-credentials"
-                type="button"
-                onClick={onOpenSanityConfig}
-                className="btn-m3-secondary px-2.5 py-1 text-xs cursor-pointer text-amber-300"
-              >
-                {i18n._(msg`Configurar Credenciales`)}
-              </button>
-            )}
+            <button
+              id="btn-sync-open-sanity-config"
+              type="button"
+              onClick={onOpenSanityConfig}
+              className={`btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer ${
+                !isSanityConfigured ? 'text-amber-400 border-amber-500/40 bg-amber-950/30' : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+              }`}
+              title={i18n._(msg`Configurar credenciales, proyecto y perfiles de Sanity`)}
+            >
+              <span className="material-symbols-outlined text-[15px]">settings</span>
+              <span>{i18n._(msg`Configuración`)}</span>
+            </button>
             <button
               id="btn-sync-re-analyze"
               type="button"
@@ -228,7 +230,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               </span>
               <span>{isAnalyzing ? i18n._(msg`Analizando...`) : i18n._(msg`Re-analizar`)}</span>
             </button>
-            <button id="btn-syncoverridemodal-1" type="button" onClick={onClose} className="btn-m3-icon w-7 h-7 cursor-pointer">
+            <button id="btn-syncoverridemodal-1" type="button" onClick={onClose} className="btn-m3-icon w-7 h-7 cursor-pointer" title={i18n._(msg`Cerrar`)}>
               <span className="material-symbols-outlined text-[16px]">close</span>
             </button>
           </div>
