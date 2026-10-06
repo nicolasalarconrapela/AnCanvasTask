@@ -60,6 +60,7 @@ import {
 import { SettingsModal } from './components/SettingsModal';
 import { ImportExportModal } from './components/ImportExportModal';
 import { SanityConfigModal } from './components/SanityConfigModal';
+import { SanityAccountButton } from './components/SanityAccountButton';
 import { SanityStudio } from './components/SanityStudio';
 import { SanityStudioEmbed } from './components/SanityStudioEmbed';
 import { setGlobalSearchQuery } from './utils/searchHighlight';
@@ -4034,6 +4035,13 @@ export default function App() {
               <span>{validationReport.issues.length}</span>
             </button>
           )}
+
+          {/* Sanity Account / Logo Badge (Top-Right Corner) */}
+          <SanityAccountButton
+            onOpenConfig={() => setIsSanityModalOpen(true)}
+            onOpenStudio={() => setIsNativeStudioModalOpen(true)}
+            onShowToast={pushToast}
+          />
 
           {/* Three Dots Menu Container: Configuración, el ? y el tema */}
           <div id="div-header-more-menu-container" className="relative shrink-0" ref={headerMenuRef}>

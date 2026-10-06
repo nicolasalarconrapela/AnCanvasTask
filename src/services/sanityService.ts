@@ -98,9 +98,67 @@ export function saveSanityConfig(config: Partial<SanityConfig>) {
   }
 }
 
+export interface SanityUserProfile {
+  id: string;
+  name?: string;
+  email?: string;
+  profileImage?: string;
+  role?: string;
+}
+
+const LOCAL_STORAGE_KEY_SANITY_USER = 'antask_sanity_user_profile';
+
+export function getCachedSanityUser(): SanityUserProfile | null {
+  try {
+    const stored = localStorage.getItem(LOCAL_STORAGE_KEY_SANITY_USER);
+    if (stored) return JSON.parse(stored);
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export async function fetchSanityCurrentUser(configOverride?: SanityConfig): Promise<SanityUserProfile | null> {
+  const config = configOverride || getSanityConfig();
+  const token = config.token?.trim();
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const res = await fetch('https://api.sanity.io/v2021-06-07/users/me', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const user: SanityUserProfile = {
+        id: data.id || 'user',
+        name: data.name || data.displayName || '',
+        email: data.email || '',
+        profileImage: data.profileImage || data.imageUrl || '',
+        role: data.role || '',
+      };
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY_SANITY_USER, JSON.stringify(user));
+      } catch {
+        // ignore
+      }
+      return user;
+    }
+  } catch (err) {
+    console.warn('Could not fetch current Sanity user:', err);
+  }
+
+  return getCachedSanityUser();
+}
+
 export function clearSanityConfig() {
   try {
     localStorage.removeItem(LOCAL_STORAGE_KEY_SANITY_CONFIG);
+    localStorage.removeItem(LOCAL_STORAGE_KEY_SANITY_USER);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('antask_sanity_config_updated', { detail: DEFAULT_SANITY_CONFIG }));
     }
