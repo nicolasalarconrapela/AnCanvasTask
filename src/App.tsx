@@ -60,6 +60,7 @@ import {
 import { SettingsModal } from './components/SettingsModal';
 import { ImportExportModal } from './components/ImportExportModal';
 import { SanityConfigModal } from './components/SanityConfigModal';
+import { SanityProfileManagerModal } from './components/SanityProfileManagerModal';
 import { SanityAccountButton } from './components/SanityAccountButton';
 import { SanityStudio } from './components/SanityStudio';
 import { SanityStudioEmbed } from './components/SanityStudioEmbed';
@@ -474,6 +475,7 @@ export default function App() {
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState<boolean>(false);
   const [isViewMarkdownOpen, setIsViewMarkdownOpen] = useState<boolean>(false);
   const [isSanityModalOpen, setIsSanityModalOpen] = useState<boolean>(false);
+  const [isSanityProfilesModalOpen, setIsSanityProfilesModalOpen] = useState<boolean>(false);
   const [isNativeStudioModalOpen, setIsNativeStudioModalOpen] = useState<boolean>(false);
   const [isSyncOverrideModalOpen, setIsSyncOverrideModalOpen] = useState<boolean>(false);
   const [isAutoLayoutConfirmOpen, setIsAutoLayoutConfirmOpen] = useState<boolean>(false);
@@ -4056,6 +4058,7 @@ export default function App() {
           {/* Sanity Account / Logo Badge (Top-Right Corner) */}
           <SanityAccountButton
             onOpenConfig={() => setIsSanityModalOpen(true)}
+            onOpenProfilesModal={() => setIsSanityProfilesModalOpen(true)}
             onOpenStudio={() => setIsNativeStudioModalOpen(true)}
             onShowToast={pushToast}
           />
@@ -6013,6 +6016,16 @@ export default function App() {
         onConfigSaved={handleSanityConfigSaved}
         onShowToast={pushToast}
         onSyncAllToSanity={handleSyncAllTasksToSanity}
+      />
+
+      {/* Modal: Administrador de Perfiles Sanity */}
+      <SanityProfileManagerModal
+        isOpen={isSanityProfilesModalOpen}
+        onClose={() => setIsSanityProfilesModalOpen(false)}
+        onProfileActivated={(newConfig) => {
+          handleSanityConfigSaved(newConfig);
+        }}
+        onShowToast={pushToast}
       />
 
       {/* Modal: Sanity Studio Nativo Embebido (Formularios y Esquemas en vivo) */}

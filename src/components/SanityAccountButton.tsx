@@ -51,12 +51,14 @@ function getInitials(name?: string): string {
 interface SanityAccountButtonProps {
   onOpenConfig: () => void;
   onOpenStudio?: () => void;
+  onOpenProfilesModal?: () => void;
   onShowToast?: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
 }
 
 export function SanityAccountButton({
   onOpenConfig,
   onOpenStudio,
+  onOpenProfilesModal,
   onShowToast,
 }: SanityAccountButtonProps) {
   const { i18n } = useLingui();
@@ -470,6 +472,20 @@ export function SanityAccountButton({
                   );
                 })}
               </div>
+
+              {onOpenProfilesModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    onOpenProfilesModal();
+                  }}
+                  className="mt-1 w-full text-center py-1 text-[10px] text-sky-400 hover:text-sky-300 font-medium hover:underline flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[12px]">tune</span>
+                  <span>{i18n._(msg`Administrar perfiles (Modal)...`)}</span>
+                </button>
+              )}
             </div>
           )}
 
