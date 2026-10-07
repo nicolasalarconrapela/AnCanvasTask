@@ -1,5 +1,6 @@
 import { createClient } from '@sanity/client';
 import { Editor } from 'tldraw';
+import { scanTaskBlocks, addTaskToMarkdown } from '../utils/markdownSync';
 
 export interface TaskVisualState {
   taskId: string;
@@ -1447,6 +1448,51 @@ export async function saveWorkspaceToSanity(
       })
       .commit();
 
+    // Also synchronize all child task documents to Sanity to keep both representations unified
+    try {
+      const allTasks: any[] = [];
+      for (const branch of docData.branches || []) {
+        for (const doc of branch.taskDocuments || []) {
+          const { taskBlocks } = scanTaskBlocks(doc.content || '');
+          for (const b of taskBlocks) {
+            const rawId = b.detectedId || b.temporaryId || `task_${Date.now()}`;
+            const cleanTaskId = sanitizeSanityDocId(rawId);
+            const isCompleted = b.rawTaskLine.includes('[x]') || b.rawTaskLine.includes('[X]') || b.detectedStatus === 'done';
+            allTasks.push({
+              _id: `task-${cleanTaskId}`,
+              _type: 'task',
+              taskId: rawId,
+              workspaceId: cleanId,
+              workspaceName: docData.name,
+              branchName: branch.name,
+              documentPath: doc.path,
+              title: b.detectedTitle || 'Tarea',
+              completed: isCompleted,
+              status: b.detectedStatus || (isCompleted ? 'done' : 'todo'),
+              priority: b.detectedPriority || 'P1',
+              groupTitle: b.groupTitle || 'General',
+              tags: b.detectedTags || [],
+              blockedBy: b.detectedBlockedBy || '',
+              updatedAt: now,
+            });
+          }
+        }
+      }
+
+      if (allTasks.length > 0) {
+        const BATCH = 25;
+        for (let i = 0; i < allTasks.length; i += BATCH) {
+          let taskTx = client.transaction();
+          for (const t of allTasks.slice(i, i + BATCH)) {
+            taskTx = taskTx.createOrReplace(t);
+          }
+          await taskTx.commit();
+        }
+      }
+    } catch (taskSyncErr) {
+      console.warn('Error synchronizing child task documents to Sanity:', taskSyncErr);
+    }
+
     return {
       ok: true,
       message: `Workspace "${workspace.name}" sincronizado con éxito en Sanity (${config.dataset})`,
@@ -1534,7 +1580,7 @@ export function normalizeSanityWorkspaceDoc(doc: any): any {
 }
 
 /**
- * Loads all workspaces from Sanity dataset.
+ * Loads all workspaces from Sanity dataset and hydrates them with any orphan or updated tasks.
  */
 export async function loadWorkspacesFromSanity(
   configOverride?: Partial<SanityConfig>
@@ -1553,18 +1599,87 @@ export async function loadWorkspacesFromSanity(
       useCdn: false,
     });
 
-    const query = `*[_type == "workspace" || _id match "workspace*"] | order(_updatedAt desc)`;
-    const results = await client.fetch<SanityWorkspaceDocument[]>(query);
+    const [results, rawTasks] = await Promise.all([
+      client.fetch<SanityWorkspaceDocument[]>(
+        `*[_type == "workspace" || _id match "workspace*"] | order(_updatedAt desc)`
+      ),
+      client.fetch<any[]>(
+        `*[_type == "task"] | order(_updatedAt desc)`
+      ).catch(() => []),
+    ]);
+
     if (!Array.isArray(results)) {
       logSanityTrace('Consulta de workspaces ejecutada, 0 documentos encontrados');
       return [];
     }
 
-    logSanityTrace(`Cargados ${results.length} workspace(s) desde Sanity (${config.dataset})`);
-
-    return results
+    const normalizedWorkspaces = results
       .map((doc: any) => normalizeSanityWorkspaceDoc(doc))
       .filter((w): w is NonNullable<typeof w> => Boolean(w));
+
+    // Reconcile and hydrate tasks from remote task documents into workspace markdown
+    if (Array.isArray(rawTasks) && rawTasks.length > 0) {
+      for (const ws of normalizedWorkspaces) {
+        const cleanWsId = sanitizeSanityDocId(String(ws.id).replace(/^workspace-/, ''));
+        const wsTasks = rawTasks.filter((t: any) => {
+          const tWsId = t.workspaceId ? sanitizeSanityDocId(String(t.workspaceId).replace(/^workspace-/, '')) : '';
+          return (
+            tWsId === cleanWsId ||
+            tWsId === ws.id ||
+            `ws_${tWsId}` === ws.id ||
+            tWsId === `ws_${cleanWsId}` ||
+            (t.workspaceName && ws.name && t.workspaceName.trim().toLowerCase() === ws.name.trim().toLowerCase())
+          );
+        });
+
+        if (wsTasks.length > 0 && ws.branches && ws.branches.length > 0) {
+          const activeBranch = ws.branches.find((b: any) => b.name === ws.activeBranchName) || ws.branches[0];
+          const activeDoc = activeBranch.taskDocuments?.[0];
+          if (activeDoc) {
+            let currentMd = activeDoc.content || '';
+            const { taskBlocks } = scanTaskBlocks(currentMd);
+            const existingIds = new Set(
+              taskBlocks
+                .map((b) => (b.detectedId || b.temporaryId || '').toLowerCase())
+                .filter(Boolean)
+            );
+            const existingTitles = new Set(
+              taskBlocks
+                .map((b) => (b.detectedTitle || '').trim().toLowerCase())
+                .filter(Boolean)
+            );
+
+            let modified = false;
+            for (const rt of wsTasks) {
+              const rTaskId = (rt.taskId || rt._id?.replace(/^task-/, '') || '').toLowerCase();
+              const rTitle = (rt.title || '').trim().toLowerCase();
+              if (!existingIds.has(rTaskId) && (!rTitle || !existingTitles.has(rTitle))) {
+                const addRes = addTaskToMarkdown(currentMd, {
+                  title: rt.title || 'Nueva tarea',
+                  priority: rt.priority || 'P1',
+                  groupTitle: rt.groupTitle || 'General',
+                  customId: rt.taskId || rt._id?.replace(/^task-/, ''),
+                  blockedBy: rt.blockedBy,
+                  tags: rt.tags,
+                });
+                currentMd = addRes.updatedMarkdown;
+                existingIds.add(rTaskId);
+                if (rTitle) existingTitles.add(rTitle);
+                modified = true;
+              }
+            }
+
+            if (modified) {
+              activeDoc.content = currentMd;
+              activeDoc.lastSavedContent = currentMd;
+            }
+          }
+        }
+      }
+    }
+
+    logSanityTrace(`Cargados ${normalizedWorkspaces.length} workspace(s) desde Sanity (${config.dataset})`);
+    return normalizedWorkspaces;
   } catch (err) {
     logSanityWarn('Error al cargar workspaces desde Sanity:', err);
     return [];
@@ -1572,7 +1687,7 @@ export async function loadWorkspacesFromSanity(
 }
 
 /**
- * Synchronizes a list of workspaces in batch to Sanity.
+ * Synchronizes a list of workspaces in batch to Sanity and all child tasks.
  */
 export async function syncAllWorkspacesToSanity(
   workspaces: any[],
@@ -1602,6 +1717,7 @@ export async function syncAllWorkspacesToSanity(
   try {
     const now = new Date().toISOString();
     const BATCH_SIZE = 25;
+    const allTasksToSync: any[] = [];
 
     for (let i = 0; i < workspaces.length; i += BATCH_SIZE) {
       const chunk = workspaces.slice(i, i + BATCH_SIZE);
@@ -1630,15 +1746,42 @@ export async function syncAllWorkspacesToSanity(
             isProtected: Boolean(b.isProtected),
             activeDocumentId: b.activeDocumentId,
             lastCommit: b.lastCommit,
-            taskDocuments: (b.taskDocuments || []).map((d: any) => ({
-              id: d.id,
-              name: d.name,
-              folder: d.folder || '',
-              path: d.path,
-              content: d.content || '',
-              lastSavedContent: d.lastSavedContent || d.content || '',
-              updatedAt: d.updatedAt || now,
-            })),
+            taskDocuments: (b.taskDocuments || []).map((d: any) => {
+              // Extract tasks for syncing
+              const { taskBlocks } = scanTaskBlocks(d.content || '');
+              for (const taskBlock of taskBlocks) {
+                const rawId = taskBlock.detectedId || taskBlock.temporaryId || `task_${Date.now()}`;
+                const cleanTaskId = sanitizeSanityDocId(rawId);
+                const isCompleted = taskBlock.rawTaskLine.includes('[x]') || taskBlock.rawTaskLine.includes('[X]') || taskBlock.detectedStatus === 'done';
+                allTasksToSync.push({
+                  _id: `task-${cleanTaskId}`,
+                  _type: 'task',
+                  taskId: rawId,
+                  workspaceId: cleanId,
+                  workspaceName: ws.name,
+                  branchName: b.name,
+                  documentPath: d.path,
+                  title: taskBlock.detectedTitle || 'Tarea',
+                  completed: isCompleted,
+                  status: taskBlock.detectedStatus || (isCompleted ? 'done' : 'todo'),
+                  priority: taskBlock.detectedPriority || 'P1',
+                  groupTitle: taskBlock.groupTitle || 'General',
+                  tags: taskBlock.detectedTags || [],
+                  blockedBy: taskBlock.detectedBlockedBy || '',
+                  updatedAt: now,
+                });
+              }
+
+              return {
+                id: d.id,
+                name: d.name,
+                folder: d.folder || '',
+                path: d.path,
+                content: d.content || '',
+                lastSavedContent: d.lastSavedContent || d.content || '',
+                updatedAt: d.updatedAt || now,
+              };
+            }),
           })),
           createdAt: ws.createdAt || now,
           updatedAt: now,
@@ -1648,6 +1791,17 @@ export async function syncAllWorkspacesToSanity(
       }
 
       await tx.commit();
+    }
+
+    // Sync all extracted tasks in batches
+    if (allTasksToSync.length > 0) {
+      for (let i = 0; i < allTasksToSync.length; i += BATCH_SIZE) {
+        let taskTx = client.transaction();
+        for (const t of allTasksToSync.slice(i, i + BATCH_SIZE)) {
+          taskTx = taskTx.createOrReplace(t);
+        }
+        await taskTx.commit();
+      }
     }
 
     return {

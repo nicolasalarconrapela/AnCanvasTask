@@ -415,11 +415,23 @@ export async function analyzeSyncDifferences(
   for (const rt of remoteTasks) {
     const remoteKey = (rt.taskId || rt._id?.replace(/^task-/, '') || '').toLowerCase();
     if (!processedRemoteTaskIds.has(remoteKey)) {
+      const cleanRtWsId = rt.workspaceId ? sanitizeSanityDocId(String(rt.workspaceId).replace(/^workspace-/, '')) : '';
+      const cleanRtWsName = (rt.workspaceName || '').trim().toLowerCase();
+
+      const matchingWs = workspaceStore.workspaces?.find((w) => {
+        const cleanLocalId = sanitizeSanityDocId(String(w.id).replace(/^workspace-/, ''));
+        const cleanLocalName = (w.name || '').trim().toLowerCase();
+        return (
+          (cleanRtWsId && (cleanLocalId === cleanRtWsId || w.id === rt.workspaceId || `ws_${cleanLocalId}` === rt.workspaceId)) ||
+          (cleanRtWsName && cleanLocalName === cleanRtWsName)
+        );
+      }) || defaultWs;
+
       items.push({
         id: `task_${rt.taskId || rt._id}`,
         entityType: 'task',
-        workspaceId: rt.workspaceId || defaultWs?.id,
-        workspaceName: rt.workspaceName || defaultWs?.name,
+        workspaceId: matchingWs?.id || rt.workspaceId || defaultWs?.id,
+        workspaceName: matchingWs?.name || rt.workspaceName || defaultWs?.name,
         title: `Tarea: [${rt.taskId || 'Cloud'}] ${rt.title || 'Sin título'}`,
         subtitle: `Sanity Cloud • Sección "${rt.groupTitle || 'General'}"`,
         diffType: 'only_remote',

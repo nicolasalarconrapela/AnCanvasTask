@@ -602,7 +602,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     }
     const wsMap = new Map<string, WorkspaceGroup>();
 
-    // Identify all unique workspaces from filteredItems
+    // 1. Identify all workspace items first
     for (const item of filteredItems) {
       if (item.entityType === 'workspace') {
         const wsId = item.workspaceId || item.id.replace(/^ws_/, '');
@@ -616,15 +616,39 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
           existing.workspaceName = item.localData?.name || item.remoteData?.name;
         }
         wsMap.set(wsId, existing);
-      } else if (item.entityType === 'task') {
-        const wsId = item.workspaceId || 'unassigned';
-        const existing: WorkspaceGroup = wsMap.get(wsId) || {
-          workspaceId: wsId,
-          workspaceName: item.workspaceName || (wsId === 'unassigned' ? i18n._(msg`Sanity Cloud (Sin Workspace local)`) : wsId),
+      }
+    }
+
+    // 2. Map all task items into matching workspace groups
+    for (const item of filteredItems) {
+      if (item.entityType === 'task') {
+        const rawWsId = item.workspaceId || 'unassigned';
+        const cleanWsId = rawWsId.replace(/^ws_/, '').replace(/^workspace-/, '');
+        const cleanWsName = (item.workspaceName || '').trim().toLowerCase();
+
+        let targetKey = rawWsId;
+        for (const [key, group] of wsMap.entries()) {
+          const groupCleanKey = key.replace(/^ws_/, '').replace(/^workspace-/, '');
+          const groupCleanName = (group.workspaceName || '').trim().toLowerCase();
+          if (
+            key === rawWsId ||
+            groupCleanKey === cleanWsId ||
+            (cleanWsName && groupCleanName === cleanWsName)
+          ) {
+            targetKey = key;
+            break;
+          }
+        }
+
+        const existing: WorkspaceGroup = wsMap.get(targetKey) || {
+          workspaceId: targetKey,
+          workspaceName:
+            item.workspaceName ||
+            (targetKey === 'unassigned' ? i18n._(msg`Sanity Cloud (Sin Workspace local)`) : targetKey),
           tasks: [],
         };
         existing.tasks.push(item);
-        wsMap.set(wsId, existing);
+        wsMap.set(targetKey, existing);
       }
     }
 
