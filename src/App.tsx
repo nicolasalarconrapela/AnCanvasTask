@@ -1428,12 +1428,28 @@ export default function App() {
 
   const handleUndoDeleteWorkspace = useCallback(
     (wsId: string) => {
-      const pending = pendingWorkspaceDeletionsRef.current.get(wsId);
+      const cleanTargetId = wsId.replace(/^ws_/, '').replace(/^workspace-/, '');
+      const pending =
+        pendingWorkspaceDeletionsRef.current.get(wsId) ||
+        pendingWorkspaceDeletionsRef.current.get(cleanTargetId);
       if (!pending) return;
 
       clearTimeout(pending.timeoutId);
       pendingWorkspaceDeletionsRef.current.delete(wsId);
+      pendingWorkspaceDeletionsRef.current.delete(cleanTargetId);
+      if (pending.workspace?.id) {
+        pendingWorkspaceDeletionsRef.current.delete(pending.workspace.id);
+      }
       lastLocalWorkspaceMutationTimeRef.current = Date.now();
+
+      if (!pending.workspace?.branches) {
+        // Remote-only placeholder workspace restoration
+        pushToast(
+          i18n._(msg`Eliminación cancelada. El workspace remoto se ha conservado.`),
+          'success'
+        );
+        return;
+      }
 
       setWorkspaceStore((prev) => {
         const isOnlyFreshPlaceholder =
@@ -1484,7 +1500,43 @@ export default function App() {
           `ws_${w.id}` === wsId ||
           w.id.replace(/^workspace-/, '') === cleanTargetId
       );
-      if (!targetWs) return;
+
+      if (!targetWs) {
+        if (deleteRemote) {
+          const timeoutId = setTimeout(() => {
+            pendingWorkspaceDeletionsRef.current.delete(wsId);
+            pendingWorkspaceDeletionsRef.current.delete(cleanTargetId);
+            const config = getSanityConfig();
+            if (config.projectId && config.dataset && config.token) {
+              deleteWorkspaceFromSanity(cleanTargetId, config).catch((e) => {
+                console.warn('Error deleting remote workspace permanently from Sanity:', e);
+              });
+            }
+          }, 30000);
+
+          const pendingRecord = {
+            timeoutId,
+            workspace: { id: wsId, name: wsId } as any,
+            deleteRemote: true,
+            deletedAt: Date.now(),
+          };
+          pendingWorkspaceDeletionsRef.current.set(wsId, pendingRecord);
+          pendingWorkspaceDeletionsRef.current.set(cleanTargetId, pendingRecord);
+
+          pushToast(
+            i18n._(
+              msg`Workspace remoto "${wsId}" marcado para eliminar. Destrucción total en Sanity en 30s.`
+            ),
+            'warning',
+            {
+              label: i18n._(msg`Deshacer (30s)`),
+              onClick: () => handleUndoDeleteWorkspace(wsId),
+            },
+            30000
+          );
+        }
+        return;
+      }
 
       const actualWsId = targetWs.id;
       lastLocalWorkspaceMutationTimeRef.current = Date.now();

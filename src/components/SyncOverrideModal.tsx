@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import {
@@ -11,6 +11,7 @@ import {
   deleteSyncItem,
   formatRelativeTime,
 } from '../services/syncEngineService';
+import { deleteTaskFromMarkdown } from '../utils/markdownSync';
 import { WorkspaceStoreState } from '../services/workspaceService';
 import { getSanityConfig } from '../services/sanityService';
 
@@ -19,7 +20,12 @@ interface SyncOverrideModalProps {
   onClose: () => void;
   workspaceStore: WorkspaceStoreState;
   onUpdateWorkspaceStore: (store: WorkspaceStoreState) => void;
-  onShowToast: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
+  onShowToast: (
+    message: string,
+    type?: 'info' | 'success' | 'warning' | 'error',
+    action?: { label: string; onClick: () => void },
+    duration?: number
+  ) => void;
   onOpenSanityConfig: () => void;
   onDeleteWorkspace?: (id: string, deleteRemote?: boolean) => void;
 }
@@ -46,6 +52,23 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   const [deleteScope, setDeleteScope] = useState<'local' | 'remote' | 'both'>('local');
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<Set<string>>(new Set());
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+
+  const pendingDeletionsRef = useRef<
+    Map<
+      string,
+      {
+        timeoutId: NodeJS.Timeout;
+        item: SyncItemDiff;
+        scope: 'local' | 'remote' | 'both';
+        priorStore?: WorkspaceStoreState;
+      }
+    >
+  >(new Map());
+
+  const workspaceStoreRef = useRef(workspaceStore);
+  useEffect(() => {
+    workspaceStoreRef.current = workspaceStore;
+  }, [workspaceStore]);
 
   const toggleWorkspaceCollapse = (wsId: string) => {
     setCollapsedWorkspaceIds((prev) => {
@@ -127,97 +150,162 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     }
   };
 
+  const handleUndoDeletion = useCallback(
+    (itemId: string) => {
+      const pending = pendingDeletionsRef.current.get(itemId);
+      if (!pending) return;
+
+      clearTimeout(pending.timeoutId);
+      pendingDeletionsRef.current.delete(itemId);
+
+      if (pending.priorStore) {
+        onUpdateWorkspaceStore(pending.priorStore);
+      }
+
+      setResult((prev) => {
+        if (!prev) return prev;
+        if (prev.items.some((i) => i.id === itemId)) return prev;
+        return {
+          ...prev,
+          items: [pending.item, ...prev.items],
+        };
+      });
+
+      onShowToast(
+        i18n._(msg`Eliminación deshecha. Elemento restaurado.`),
+        'success'
+      );
+    },
+    [onUpdateWorkspaceStore, onShowToast, i18n]
+  );
+
   const handleDeleteSingle = async (
     item: SyncItemDiff,
     scope: 'local' | 'remote' | 'both'
   ) => {
-    setResolvingItemId(item.id);
     setActiveMenuId(null);
-    try {
-      const cleanWsId = (
-        item.localData?.id ||
-        item.remoteData?.workspaceId ||
-        item.remoteData?.id ||
-        item.id.replace(/^ws_/, '')
-      ).toString();
+    setConfirmDeleteItemId(null);
 
-      if (item.entityType === 'workspace' && onDeleteWorkspace && (scope === 'local' || scope === 'both')) {
-        onDeleteWorkspace(cleanWsId, scope === 'both');
+    const existing = pendingDeletionsRef.current.get(item.id);
+    if (existing) {
+      clearTimeout(existing.timeoutId);
+      pendingDeletionsRef.current.delete(item.id);
+    }
 
-        // Optimistically remove from result items
-        setResult((prev) =>
-          prev
-            ? {
-                ...prev,
-                items: prev.items.filter((i) => i.id !== item.id),
-              }
-            : null
-        );
-        setConfirmDeleteItemId(null);
+    const priorStore = { ...workspaceStoreRef.current };
 
-        const nextWorkspaces = workspaceStore.workspaces.filter(
+    // Optimistically remove from result items
+    setResult((prev) =>
+      prev
+        ? {
+            ...prev,
+            items: prev.items.filter((i) => i.id !== item.id),
+          }
+        : null
+    );
+
+    // If local deletion is needed, calculate and apply immediately to workspaceStore
+    if (scope === 'local' || scope === 'both') {
+      if (item.entityType === 'workspace') {
+        const cleanWsId = (
+          item.localData?.id ||
+          item.remoteData?.workspaceId ||
+          item.remoteData?.id ||
+          item.id.replace(/^ws_/, '')
+        ).toString();
+        const nextWorkspaces = workspaceStoreRef.current.workspaces.filter(
           (w) =>
             w.id !== cleanWsId &&
             w.id !== item.id &&
             `ws_${w.id}` !== item.id &&
             w.id.replace(/^workspace-/, '') !== cleanWsId.replace(/^workspace-/, '')
         );
+        if (nextWorkspaces.length > 0 || workspaceStoreRef.current.workspaces.length > 0) {
+          const nextStore: WorkspaceStoreState = {
+            ...workspaceStoreRef.current,
+            workspaces: nextWorkspaces,
+            activeWorkspaceId:
+              nextWorkspaces.find((w) => w.id === workspaceStoreRef.current.activeWorkspaceId)?.id ||
+              nextWorkspaces[0]?.id ||
+              workspaceStoreRef.current.activeWorkspaceId,
+          };
+          onUpdateWorkspaceStore(nextStore);
+        }
+      } else if (item.entityType === 'task') {
+        const taskId =
+          item.localData?.taskId ||
+          item.localData?.temporaryId ||
+          item.remoteData?.taskId ||
+          item.remoteData?._id?.replace(/^task-/, '') ||
+          item.id.replace(/^task_/, '');
+        const updatedWorkspaces = workspaceStoreRef.current.workspaces.map((w) => ({
+          ...w,
+          branches: w.branches.map((b) => ({
+            ...b,
+            taskDocuments: b.taskDocuments.map((d) => {
+              const newContent = deleteTaskFromMarkdown(
+                d.content,
+                taskId,
+                item.localData?.title
+              );
+              return newContent !== d.content
+                ? {
+                    ...d,
+                    content: newContent,
+                    lastSavedContent: newContent,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : d;
+            }),
+          })),
+        }));
         const nextStore: WorkspaceStoreState = {
-          ...workspaceStore,
-          workspaces: nextWorkspaces,
-          activeWorkspaceId:
-            nextWorkspaces.find((w) => w.id === workspaceStore.activeWorkspaceId)?.id ||
-            nextWorkspaces[0]?.id ||
-            workspaceStore.activeWorkspaceId,
+          ...workspaceStoreRef.current,
+          workspaces: updatedWorkspaces,
         };
-
-        try {
-          const fresh = await analyzeSyncDifferences(nextStore);
-          setResult({
-            ...fresh,
-            items: fresh.items.filter((i) => i.id !== item.id),
-          });
-        } catch {
-          // ignore
-        }
-        return;
+        onUpdateWorkspaceStore(nextStore);
       }
-
-      const res = await deleteSyncItem(item, scope, workspaceStore);
-      if (res.success) {
-        onShowToast(res.message, 'info');
-        const nextStore = res.updatedStore || workspaceStore;
-        if (res.updatedStore) {
-          onUpdateWorkspaceStore(res.updatedStore);
-        }
-
-        setResult((prev) =>
-          prev
-            ? {
-                ...prev,
-                items: prev.items.filter((i) => i.id !== item.id),
-              }
-            : null
-        );
-        setConfirmDeleteItemId(null);
-
-        try {
-          const fresh = await analyzeSyncDifferences(nextStore);
-          setResult({
-            ...fresh,
-            items: fresh.items.filter((i) => i.id !== item.id),
-          });
-        } catch {
-          // ignore
-        }
-      } else {
-        onShowToast(res.message, 'error');
-      }
-    } catch (err: any) {
-      onShowToast(err?.message || 'Error al eliminar elemento', 'error');
-    } finally {
-      setResolvingItemId(null);
     }
+
+    // Schedule permanent execution after 30 seconds
+    const timeoutId = setTimeout(async () => {
+      pendingDeletionsRef.current.delete(item.id);
+      try {
+        if (scope === 'remote' || scope === 'both') {
+          const res = await deleteSyncItem(item, scope, workspaceStoreRef.current);
+          if (!res.success) {
+            console.warn('Permanent remote deletion failed:', res.message);
+          }
+        }
+      } catch (err) {
+        console.warn('Error executing permanent deletion from Sanity:', err);
+      }
+    }, 30000);
+
+    pendingDeletionsRef.current.set(item.id, {
+      timeoutId,
+      item,
+      scope,
+      priorStore,
+    });
+
+    const itemCleanName = item.title.replace(/^(Workspace:\s*|Tarea:\s*)/, '');
+    const scopeLabel =
+      scope === 'both'
+        ? i18n._(msg`localmente y en Sanity Cloud`)
+        : scope === 'remote'
+        ? i18n._(msg`en Sanity Cloud`)
+        : i18n._(msg`en local`);
+
+    onShowToast(
+      i18n._(msg`"${itemCleanName}" marcado para eliminar ${scopeLabel}. Tienes 30s para deshacer.`),
+      'warning',
+      {
+        label: i18n._(msg`Deshacer (30s)`),
+        onClick: () => handleUndoDeletion(item.id),
+      },
+      30000
+    );
   };
 
   const handleBatchSyncAction = async (mode: 'smart' | 'push_all' | 'pull_all') => {

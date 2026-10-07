@@ -1076,33 +1076,6 @@ export async function writeTestingTaskToSanity(
   }
 }
 
-/**
- * Deletes a test document from Sanity.
- */
-export async function deleteDocumentFromSanity(
-  docId: string,
-  configOverride?: Partial<SanityConfig>
-): Promise<{ ok: boolean; message: string }> {
-  const config = { ...getSanityConfig(), ...configOverride };
-  if (!config.projectId || !config.dataset || !config.token) {
-    return { ok: false, message: 'Falta token de autenticación para eliminar' };
-  }
-
-  try {
-    const client = createClient({
-      projectId: config.projectId,
-      dataset: config.dataset,
-      apiVersion: config.apiVersion || '2024-03-01',
-      token: config.token,
-      useCdn: false,
-    });
-
-    await client.delete(docId);
-    return { ok: true, message: `Documento ${docId} eliminado con éxito` };
-  } catch (err: any) {
-    return { ok: false, message: err?.message || 'Error al eliminar documento' };
-  }
-}
 
 /**
  * Fetches recent documents stored in Sanity dataset (task, canvasVisualState, and workspace).
@@ -1541,6 +1514,7 @@ export function normalizeSanityWorkspaceDoc(doc: any): any {
   const cleanId = sanitizeSanityDocId(String(rawId).replace(/^workspace-/, ''));
 
   return {
+    _id: doc._id,
     id: cleanId,
     name: doc.name || doc.title || 'Workspace',
     githubRepo: {
@@ -1692,18 +1666,86 @@ export async function syncAllWorkspacesToSanity(
 }
 
 /**
- * Deletes a workspace document from Sanity.
+ * Deletes any single document from Sanity Content Lake by its exact or partial _id.
+ */
+export async function deleteDocumentFromSanity(
+  docId: string,
+  configOverride?: Partial<SanityConfig>
+): Promise<{ ok: boolean; message: string }> {
+  const config = { ...getSanityConfig(), ...configOverride };
+  if (!config.projectId || !config.dataset) {
+    return { ok: false, message: 'Falta configuración de Sanity (Project ID y Dataset)' };
+  }
+  if (!config.token) {
+    return { ok: false, message: 'Se requiere API Token con rol Editor para eliminar en Sanity' };
+  }
+
+  const client = createClient({
+    projectId: config.projectId,
+    dataset: config.dataset,
+    apiVersion: config.apiVersion || '2024-03-01',
+    token: config.token,
+    useCdn: false,
+  });
+
+  try {
+    await client.delete(docId);
+    logSanityTrace(`Documento "${docId}" eliminado con éxito de Sanity`);
+    return { ok: true, message: `Documento "${docId}" eliminado de Sanity Cloud` };
+  } catch (err: any) {
+    logSanityWarn(`Error al eliminar documento "${docId}" de Sanity:`, err);
+    return { ok: false, message: err?.message || `Error al eliminar documento "${docId}" de Sanity` };
+  }
+}
+
+/**
+ * Deletes a workspace document and its associated tasks from Sanity.
  */
 export async function deleteWorkspaceFromSanity(
   workspaceId: string,
   configOverride?: Partial<SanityConfig>
 ): Promise<{ ok: boolean; message: string }> {
+  const config = { ...getSanityConfig(), ...configOverride };
+  if (!config.projectId || !config.dataset || !config.token) {
+    return { ok: false, message: 'Se requiere API Token para eliminar en Sanity' };
+  }
+
   const cleanId = sanitizeSanityDocId(String(workspaceId).replace(/^workspace-/, ''));
   const docId = `workspace-${cleanId}`;
-  const res = await deleteDocumentFromSanity(docId, configOverride);
-  if (!res.ok && workspaceId && workspaceId !== docId) {
-    return deleteDocumentFromSanity(workspaceId, configOverride);
+
+  const client = createClient({
+    projectId: config.projectId,
+    dataset: config.dataset,
+    apiVersion: config.apiVersion || '2024-03-01',
+    token: config.token,
+    useCdn: false,
+  });
+
+  try {
+    // 1. Delete workspace document using all identifier variants
+    const targets = Array.from(new Set([docId, workspaceId, `ws_${cleanId}`, cleanId].filter(Boolean)));
+    await Promise.allSettled(targets.map((t) => client.delete(t)));
+
+    // 2. Also delete any orphan child tasks linked to this workspace
+    try {
+      const taskQuery = `*[_type == "task" && (workspaceId == $cleanId || workspaceId == $wsId || workspaceId == $docId)]._id`;
+      const taskIds = await client.fetch<string[]>(taskQuery, { cleanId, wsId: workspaceId, docId });
+      if (Array.isArray(taskIds) && taskIds.length > 0) {
+        let tx = client.transaction();
+        for (const tId of taskIds) {
+          tx = tx.delete(tId);
+        }
+        await tx.commit();
+      }
+    } catch (e) {
+      console.warn('Could not batch delete workspace child tasks:', e);
+    }
+
+    logSanityTrace(`Workspace "${workspaceId}" eliminado con éxito de Sanity`);
+    return { ok: true, message: `Workspace eliminado con éxito de Sanity Cloud` };
+  } catch (err: any) {
+    logSanityWarn(`Error al eliminar workspace "${workspaceId}" de Sanity:`, err);
+    return { ok: false, message: err?.message || 'Error al eliminar workspace de Sanity' };
   }
-  return res;
 }
 
