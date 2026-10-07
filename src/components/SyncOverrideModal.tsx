@@ -52,6 +52,9 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   const [deleteScope, setDeleteScope] = useState<'local' | 'remote' | 'both'>('local');
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<Set<string>>(new Set());
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState<boolean>(false);
+  const [bulkDeleteScope, setBulkDeleteScope] = useState<'local' | 'remote' | 'both'>('local');
 
   const pendingDeletionsRef = useRef<
     Map<
@@ -77,6 +80,30 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       else next.add(wsId);
       return next;
     });
+  };
+
+  const toggleSelectItem = (id: string) => {
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedItemIds(new Set());
+    setConfirmBulkDelete(false);
+  };
+
+  const toggleSelectAll = () => {
+    if (filteredItems.length === 0) return;
+    const allSelected = filteredItems.every((item) => selectedItemIds.has(item.id));
+    if (allSelected) {
+      clearSelection();
+    } else {
+      setSelectedItemIds(new Set(filteredItems.map((item) => item.id)));
+    }
   };
 
   const [sanityConfig, setSanityConfig] = useState(getSanityConfig());
@@ -178,6 +205,176 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     },
     [onUpdateWorkspaceStore, onShowToast, i18n]
   );
+
+  const handleUndoBatchDeletion = useCallback(
+    (itemIds: string[], priorStore?: WorkspaceStoreState, itemsToRestore?: SyncItemDiff[]) => {
+      for (const id of itemIds) {
+        const pending = pendingDeletionsRef.current.get(id);
+        if (pending) {
+          clearTimeout(pending.timeoutId);
+          pendingDeletionsRef.current.delete(id);
+        }
+      }
+
+      if (priorStore) {
+        onUpdateWorkspaceStore(priorStore);
+      }
+
+      setResult((prev) => {
+        if (!prev) return prev;
+        const existingIds = new Set(prev.items.map((i) => i.id));
+        const toAdd = (itemsToRestore || []).filter((i) => !existingIds.has(i.id));
+        return {
+          ...prev,
+          items: [...toAdd, ...prev.items],
+        };
+      });
+
+      onShowToast(
+        i18n._(msg`Eliminación múltiple cancelada. Elementos restaurados.`),
+        'success'
+      );
+    },
+    [onUpdateWorkspaceStore, onShowToast, i18n]
+  );
+
+  const handleDeleteSelected = async () => {
+    if (selectedItemIds.size === 0 || !result) return;
+    const itemsToDelete = result.items.filter((item) => selectedItemIds.has(item.id));
+    if (itemsToDelete.length === 0) return;
+
+    setConfirmBulkDelete(false);
+    const itemIdsArray = Array.from(selectedItemIds);
+    const currentSelectedSet = new Set(selectedItemIds);
+    clearSelection();
+
+    const priorStore = { ...workspaceStoreRef.current };
+
+    // Optimistically remove from result
+    setResult((prev) =>
+      prev
+        ? {
+            ...prev,
+            items: prev.items.filter((i) => !currentSelectedSet.has(i.id)),
+          }
+        : null
+    );
+
+    // If local deletion is needed
+    if (bulkDeleteScope === 'local' || bulkDeleteScope === 'both') {
+      let currentWorkspaces = [...workspaceStoreRef.current.workspaces];
+      const wsIdsToRemove = new Set<string>();
+
+      for (const item of itemsToDelete) {
+        if (item.entityType === 'workspace') {
+          const cleanWsId = (
+            item.localData?.id ||
+            item.remoteData?.workspaceId ||
+            item.remoteData?.id ||
+            item.id.replace(/^ws_/, '')
+          ).toString();
+          wsIdsToRemove.add(cleanWsId);
+          wsIdsToRemove.add(item.id);
+          wsIdsToRemove.add(`ws_${cleanWsId}`);
+          wsIdsToRemove.add(cleanWsId.replace(/^workspace-/, ''));
+        }
+      }
+
+      if (wsIdsToRemove.size > 0) {
+        currentWorkspaces = currentWorkspaces.filter(
+          (w) =>
+            !wsIdsToRemove.has(w.id) &&
+            !wsIdsToRemove.has(`ws_${w.id}`) &&
+            !wsIdsToRemove.has(w.id.replace(/^workspace-/, ''))
+        );
+      }
+
+      // Also remove any task items locally from markdown
+      const tasksToDelete = itemsToDelete.filter((i) => i.entityType === 'task');
+      if (tasksToDelete.length > 0) {
+        currentWorkspaces = currentWorkspaces.map((w) => ({
+          ...w,
+          branches: w.branches.map((b) => ({
+            ...b,
+            taskDocuments: b.taskDocuments.map((d) => {
+              let md = d.content;
+              for (const taskItem of tasksToDelete) {
+                const taskId =
+                  taskItem.localData?.taskId ||
+                  taskItem.localData?.temporaryId ||
+                  taskItem.remoteData?.taskId ||
+                  taskItem.remoteData?._id?.replace(/^task-/, '') ||
+                  taskItem.id.replace(/^task_/, '');
+                md = deleteTaskFromMarkdown(md, taskId, taskItem.localData?.title);
+              }
+              return md !== d.content
+                ? {
+                    ...d,
+                    content: md,
+                    lastSavedContent: md,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : d;
+            }),
+          })),
+        }));
+      }
+
+      const nextStore: WorkspaceStoreState = {
+        ...workspaceStoreRef.current,
+        workspaces: currentWorkspaces,
+        activeWorkspaceId:
+          currentWorkspaces.find((w) => w.id === workspaceStoreRef.current.activeWorkspaceId)?.id ||
+          currentWorkspaces[0]?.id ||
+          workspaceStoreRef.current.activeWorkspaceId,
+      };
+      onUpdateWorkspaceStore(nextStore);
+    }
+
+    // Schedule delayed permanent deletion for all items
+    const timeoutId = setTimeout(async () => {
+      for (const id of itemIdsArray) {
+        pendingDeletionsRef.current.delete(id);
+      }
+      try {
+        if (bulkDeleteScope === 'remote' || bulkDeleteScope === 'both') {
+          for (const item of itemsToDelete) {
+            await deleteSyncItem(item, bulkDeleteScope, workspaceStoreRef.current);
+          }
+        }
+      } catch (err) {
+        console.warn('Error executing bulk permanent deletion from Sanity:', err);
+      }
+    }, 30000);
+
+    for (const item of itemsToDelete) {
+      pendingDeletionsRef.current.set(item.id, {
+        timeoutId,
+        item,
+        scope: bulkDeleteScope,
+        priorStore,
+      });
+    }
+
+    const scopeLabel =
+      bulkDeleteScope === 'both'
+        ? i18n._(msg`localmente y en Sanity Cloud`)
+        : bulkDeleteScope === 'remote'
+        ? i18n._(msg`en Sanity Cloud`)
+        : i18n._(msg`en local`);
+
+    onShowToast(
+      i18n._(
+        msg`${itemsToDelete.length} elemento(s) marcados para eliminar ${scopeLabel}. Tienes 30s para deshacer.`
+      ),
+      'warning',
+      {
+        label: i18n._(msg`Deshacer (30s)`),
+        onClick: () => handleUndoBatchDeletion(itemIdsArray, priorStore, itemsToDelete),
+      },
+      30000
+    );
+  };
 
   const handleDeleteSingle = async (
     item: SyncItemDiff,
@@ -449,11 +646,23 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         {/* Main Row */}
         <div
           className={`flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-[var(--surface-container-high)]/40 ${
-            isChildTask ? 'pl-10 bg-[var(--surface-container-low)]/30' : ''
-          }`}
+            selectedItemIds.has(item.id) ? 'bg-indigo-950/20' : ''
+          } ${isChildTask ? 'pl-10 bg-[var(--surface-container-low)]/30' : ''}`}
         >
-          {/* Left: Icon + Title + Metadata */}
-          <div className="flex items-center gap-3 min-w-0 flex-1">
+          {/* Left: Checkbox + Icon + Title + Metadata */}
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <input
+              type="checkbox"
+              id={`sync-select-item-${item.id}`}
+              checked={selectedItemIds.has(item.id)}
+              onChange={(e) => {
+                e.stopPropagation();
+                toggleSelectItem(item.id);
+              }}
+              className="w-4 h-4 rounded border-[var(--outline)] accent-indigo-500 cursor-pointer shrink-0"
+              title={i18n._(msg`Seleccionar para acciones en lote`)}
+            />
+
             <span className="material-symbols-outlined text-[17px] text-[var(--on-surface-variant)] shrink-0 opacity-80">
               {item.entityType === 'workspace' ? 'folder' : 'task_alt'}
             </span>
@@ -869,8 +1078,24 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
           id="sync-modal-toolbar"
           className="px-4 py-2 bg-[var(--surface)] border-b border-[var(--outline)]/50 flex flex-wrap items-center justify-between gap-3 shrink-0"
         >
-          {/* Filters */}
-          <div className="flex items-center gap-1 text-xs overflow-x-auto max-w-full py-0.5">
+          {/* Select All & Filters */}
+          <div className="flex items-center gap-2 text-xs overflow-x-auto max-w-full py-0.5">
+            {filteredItems.length > 0 && (
+              <label
+                className="flex items-center gap-1.5 text-xs text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer select-none pr-2 border-r border-[var(--outline)]/40 shrink-0"
+                title={i18n._(msg`Seleccionar o deseleccionar todos los elementos visibles`)}
+              >
+                <input
+                  type="checkbox"
+                  id="sync-select-all-checkbox"
+                  checked={filteredItems.length > 0 && filteredItems.every((item) => selectedItemIds.has(item.id))}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 rounded border-[var(--outline)] accent-indigo-500 cursor-pointer"
+                />
+                <span className="font-medium text-[11px]">{i18n._(msg`Todos`)}</span>
+              </label>
+            )}
+
             <button
               id="btn-sync-filter-all"
               type="button"
@@ -881,7 +1106,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                   : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
               }`}
             >
-              <span>{i18n._(msg`Todos`)}</span>
+              <span>{i18n._(msg`Filtro: Todos`)}</span>
               <span className="font-mono text-[11px] opacity-70">{result?.counts.total || 0}</span>
             </button>
 
@@ -985,6 +1210,86 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* 2.1 SELECTION ACTION BAR */}
+        {selectedItemIds.size > 0 && (
+          <div
+            id="sync-modal-selection-bar"
+            className="px-4 py-2 bg-indigo-950/40 border-b border-indigo-900/50 flex flex-wrap items-center justify-between gap-3 text-xs animate-fade-in shrink-0"
+          >
+            <div className="flex items-center gap-2 text-indigo-200 font-medium">
+              <span className="material-symbols-outlined text-[16px] text-indigo-400">check_circle</span>
+              <span>{i18n._(msg`${selectedItemIds.size} elemento(s) seleccionado(s)`)}</span>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="text-xs text-indigo-300 hover:text-white underline ml-2 cursor-pointer"
+              >
+                {i18n._(msg`Deseleccionar todo`)}
+              </button>
+            </div>
+
+            {!confirmBulkDelete ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmBulkDelete(true)}
+                  className="px-2.5 py-1 text-xs rounded font-medium bg-rose-600 hover:bg-rose-500 text-white transition cursor-pointer flex items-center gap-1 shadow-sm"
+                >
+                  <span className="material-symbols-outlined text-[14px]">delete</span>
+                  <span>{i18n._(msg`Eliminar seleccionados (${selectedItemIds.size})`)}</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-rose-300 font-medium">{i18n._(msg`Eliminar en:`)}</span>
+                <div className="flex items-center gap-1 bg-[var(--surface)] p-0.5 rounded border border-[var(--outline)] text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setBulkDeleteScope('local')}
+                    className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                      bulkDeleteScope === 'local' ? 'bg-sky-600 text-white font-medium' : 'text-[var(--on-surface-variant)]'
+                    }`}
+                  >
+                    {i18n._(msg`Local`)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkDeleteScope('remote')}
+                    className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                      bulkDeleteScope === 'remote' ? 'bg-amber-600 text-white font-medium' : 'text-[var(--on-surface-variant)]'
+                    }`}
+                  >
+                    {i18n._(msg`Sanity`)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkDeleteScope('both')}
+                    className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                      bulkDeleteScope === 'both' ? 'bg-rose-600 text-white font-medium' : 'text-[var(--on-surface-variant)]'
+                    }`}
+                  >
+                    {i18n._(msg`Ambos`)}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setConfirmBulkDelete(false)}
+                  className="btn-m3-secondary px-2 py-1 text-xs cursor-pointer"
+                >
+                  {i18n._(msg`Cancelar`)}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSelected}
+                  className="px-2.5 py-1 text-xs rounded font-medium bg-rose-600 hover:bg-rose-500 text-white transition cursor-pointer flex items-center gap-1 shadow-sm"
+                >
+                  {i18n._(msg`Confirmar Eliminación (${selectedItemIds.size})`)}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 3. CONTENT (Main Scrollable Divider List) */}
         <div
