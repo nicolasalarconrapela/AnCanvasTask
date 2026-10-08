@@ -1,6 +1,6 @@
 import { createClient } from '@sanity/client';
-import { Editor } from 'tldraw';
 import { scanTaskBlocks, addTaskToMarkdown } from '../utils/markdownSync';
+import { extractVisualStateFromExcalidrawElements } from '../excalidraw/excalidrawManager';
 
 export interface TaskVisualState {
   taskId: string;
@@ -1274,45 +1274,64 @@ export function subscribeToSanityLiveChanges(
 }
 
 /**
- * Extracts current visual positions and dimensions of all task cards and groups from tldraw editor.
+ * Extracts current visual positions and dimensions of all task cards and groups from Excalidraw canvas or elements.
  */
-export function extractVisualStateFromEditor(editor: Editor): {
+export function extractVisualStateFromEditor(canvasOrElements: any): {
   tasks: TaskVisualState[];
   groups: GroupVisualState[];
 } {
-  const shapes = editor.getCurrentPageShapes();
-  const tasks: TaskVisualState[] = [];
-  const groups: GroupVisualState[] = [];
-
-  for (const rawShape of shapes) {
-    const s = rawShape as any;
-    if (s.type === 'task') {
-      const taskId = s.props?.taskId;
-      if (taskId) {
-        tasks.push({
-          taskId,
-          x: s.x,
-          y: s.y,
-          width: s.props?.w || 320,
-          height: s.props?.h || 110,
-          groupTitle: s.props?.groupTitle,
-        });
-      }
-    } else if (s.type === 'task-group') {
-      const groupTitle = s.props?.title;
-      if (groupTitle) {
-        groups.push({
-          groupTitle,
-          x: s.x,
-          y: s.y,
-          width: s.props?.w || 360,
-          height: s.props?.h || 200,
-        });
-      }
-    }
+  if (!canvasOrElements) {
+    return { tasks: [], groups: [] };
   }
 
-  return { tasks, groups };
+  // Array of Excalidraw elements
+  if (Array.isArray(canvasOrElements)) {
+    return extractVisualStateFromExcalidrawElements(canvasOrElements);
+  }
+
+  // Excalidraw Imperative API
+  if (typeof canvasOrElements.getSceneElements === 'function') {
+    return extractVisualStateFromExcalidrawElements(canvasOrElements.getSceneElements());
+  }
+
+  // Fallback for legacy shape API
+  if (typeof canvasOrElements.getCurrentPageShapes === 'function') {
+    const shapes = canvasOrElements.getCurrentPageShapes();
+    const tasks: TaskVisualState[] = [];
+    const groups: GroupVisualState[] = [];
+
+    for (const rawShape of shapes) {
+      const s = rawShape as any;
+      if (s.type === 'task') {
+        const taskId = s.props?.taskId;
+        if (taskId) {
+          tasks.push({
+            taskId,
+            x: s.x,
+            y: s.y,
+            width: s.props?.w || 320,
+            height: s.props?.h || 110,
+            groupTitle: s.props?.groupTitle,
+          });
+        }
+      } else if (s.type === 'task-group') {
+        const groupTitle = s.props?.title;
+        if (groupTitle) {
+          groups.push({
+            groupTitle,
+            x: s.x,
+            y: s.y,
+            width: s.props?.w || 360,
+            height: s.props?.h || 200,
+          });
+        }
+      }
+    }
+
+    return { tasks, groups };
+  }
+
+  return { tasks: [], groups: [] };
 }
 
 export interface SanityWorkspaceDocument {

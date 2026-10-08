@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "tldraw/tldraw.css";
 
 /* Design Tokens - Professional Technical Desktop Tool (GitHub Projects / Linear / VS Code style) */
 @theme {
@@ -492,31 +491,22 @@ textarea:focus-visible,
   background: rgba(129, 140, 248, 0.95);
 }
 
-/* Tldraw Canvas M3 Theme Integration (DESIGN.md Section 4 & 14) */
-.tl-container {
-  --color-background: var(--surface) !important;
-  --color-low: var(--surface-container) !important;
-  --color-mid: var(--surface-container-high) !important;
-  --color-high: var(--surface-container-highest) !important;
-  --color-text: var(--on-surface) !important;
-  --color-muted: var(--on-surface-variant) !important;
-  --color-selection-stroke: var(--primary) !important;
-  --color-selection-fill: rgba(59, 130, 246, 0.08) !important;
-  --color-grid: var(--outline-variant) !important;
-  --color-laser: var(--primary) !important;
+/* Excalidraw Canvas Professional Theme Integration (UNIVERSAL_WEB_DESIGN_GUIDELINES.md) */
+.excalidraw {
+  --color-primary: var(--primary) !important;
+  --color-surface: var(--surface) !important;
+  --color-surface-container: var(--surface-container) !important;
   font-family: var(--font-sans) !important;
 }
 
-[data-theme="light"] .tl-container {
-  --color-selection-fill: rgba(37, 99, 235, 0.08) !important;
+.excalidraw.theme--dark {
+  --color-bg-app: var(--surface) !important;
+  --color-surface-primary: var(--surface-container) !important;
 }
 
-.tl-canvas {
-  background-color: var(--surface) !important;
-}
-
-.tl-grid {
-  opacity: 0.25 !important;
+.excalidraw.theme--light {
+  --color-bg-app: #ffffff !important;
+  --color-surface-primary: #f8fafc !important;
 }
 
 /* High Contrast & Reduced Motion Accessibility Tokens */
@@ -546,61 +536,10 @@ textarea:focus-visible,
   transition-duration: 0.001ms !important;
 }
 
-/* Subtle selection box styling */
-.tl-selection__box {
-  border-color: var(--primary) !important;
-  background-color: rgba(59, 130, 246, 0.08) !important;
-  border-radius: 4px !important;
-  pointer-events: none !important;
-}
-
-.tl-selection__bg {
-  pointer-events: none !important;
-}
-
-.tl-selection__corner,
-.tl-selection__edge {
-  border-color: var(--primary) !important;
-  background-color: var(--surface) !important;
-}
-
-/* Hide unneeded tldraw chrome to eliminate button superposition and maximize canvas view */
-.tlui-page-menu,
-.tlui-help-menu,
-.tlui-menu-zone,
-.tlui-navigation-zone,
-.tlui-toolbar,
-.tl-toolbar,
-.tlui-layout__bottom,
-.tl-layout__bottom {
-  display: none !important;
-}
-
-/* Ensure filtered-out shapes and their background wrappers are completely hidden and ignore all pointer events */
-.tl-shape[data-task-hidden="true"],
-.tl-shape-background[data-task-hidden="true"],
-.tl-shape:has([data-task-hidden="true"]),
-.tl-shape-background:has([data-task-hidden="true"]) {
-  display: none !important;
-  pointer-events: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-}
-
-/* Suction / Magnetic snap effect styling for task-group containers */
-[data-suction-active="true"] {
-  border-color: var(--primary) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 40%, transparent) !important;
-  background-color: color-mix(in srgb, var(--primary) 8%, var(--surface-container)) !important;
-  transition: all 120ms ease-out !important;
-}
-
-.suction-indicator {
-  display: none;
-}
-
-[data-suction-active="true"] .suction-indicator {
-  display: inline-flex;
+/* Hide unneeded Excalidraw promotional banners or external links */
+.excalidraw .welcome-screen,
+.excalidraw .layer-ui__wrapper .dropdown-menu {
+  font-family: var(--font-sans) !important;
 }
 
 

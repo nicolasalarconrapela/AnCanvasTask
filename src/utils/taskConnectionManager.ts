@@ -1,6 +1,3 @@
-import { createShapeId, Editor } from 'tldraw';
-import { ITaskShape } from '../shapes/TaskShapeUtil';
-
 export interface ConnectionPointAnchor {
   x: number;
   y: number;
@@ -42,102 +39,131 @@ export function subscribeToConnectionSource(listener: ConnectionListener): () =>
 }
 
 /**
- * Connects two task shapes via an arrow shape with bindings to the specified central anchors.
- * Returns the created arrow shape ID, or null if connection was not possible.
+ * Creates an Excalidraw arrow element between two task cards.
  */
-export function connectTasksWithArrow(
-  editor: Editor,
-  source: ActiveConnectionSource,
-  target: {
-    shapeId: string;
-    taskId?: string;
-    anchor: ConnectionPointAnchor;
-  },
+export function connectExcalidrawTasksWithArrow(
+  elements: readonly any[],
+  sourceTaskId: string,
+  targetTaskId: string,
   onDependencyCreated?: (blockerTaskId: string, blockedTaskId: string) => void
-): string | null {
-  if (source.shapeId === target.shapeId) {
-    return null;
+): { updatedElements: any[]; arrowId: string | null } {
+  if (sourceTaskId.toLowerCase() === targetTaskId.toLowerCase()) {
+    return { updatedElements: [...elements], arrowId: null };
   }
 
-  const sourceShape = editor.getShape(source.shapeId as any) as ITaskShape | undefined;
-  const targetShape = editor.getShape(target.shapeId as any) as ITaskShape | undefined;
+  const sourceElem = elements.find(
+    (e) => !e.isDeleted && e.type === 'rectangle' && e.customData?.type === 'task' && e.customData.taskId?.toLowerCase() === sourceTaskId.toLowerCase()
+  );
+  const targetElem = elements.find(
+    (e) => !e.isDeleted && e.type === 'rectangle' && e.customData?.type === 'task' && e.customData.taskId?.toLowerCase() === targetTaskId.toLowerCase()
+  );
 
-  if (!sourceShape || !targetShape) {
-    return null;
+  if (!sourceElem || !targetElem) {
+    return { updatedElements: [...elements], arrowId: null };
   }
 
-  // Create an arrow connecting the two tasks at their central points
-  const arrowId = createShapeId();
+  const startX = sourceElem.x + sourceElem.width / 2;
+  const startY = sourceElem.y + sourceElem.height;
+  const endX = targetElem.x + targetElem.width / 2;
+  const endY = targetElem.y;
 
-  (editor.createShapes as any)([
-    {
-      id: arrowId,
-      type: 'arrow',
-      props: {
-        color: 'grey',
-        size: 's',
-        arrowheadEnd: 'arrow',
-        arrowheadStart: 'none',
-        bend: 0,
-      },
+  const dx = endX - startX;
+  const dy = endY - startY;
+
+  const arrowId = `arrow_${sourceTaskId}_to_${targetTaskId}_${Date.now()}`;
+
+  const newArrow = {
+    id: arrowId,
+    type: 'arrow',
+    x: startX,
+    y: startY,
+    width: Math.abs(dx) || 1,
+    height: Math.abs(dy) || 1,
+    angle: 0,
+    strokeColor: '#94a3b8',
+    backgroundColor: 'transparent',
+    fillStyle: 'solid',
+    strokeWidth: 1.5,
+    strokeStyle: 'solid',
+    roughness: 0,
+    opacity: 90,
+    groupIds: [],
+    frameId: null,
+    roundness: { type: 2 },
+    seed: Math.floor(Math.random() * 100000),
+    version: 1,
+    versionNonce: Date.now(),
+    isDeleted: false,
+    boundElements: null,
+    updated: Date.now(),
+    link: null,
+    locked: false,
+    points: [
+      [0, 0],
+      [dx, dy],
+    ],
+    lastCommittedPoint: [dx, dy],
+    startBinding: {
+      elementId: sourceElem.id,
+      focus: 0,
+      gap: 4,
     },
-  ]);
-
-  (editor.createBindings as any)([
-    {
-      fromId: arrowId,
-      toId: source.shapeId,
-      type: 'arrow',
-      props: {
-        terminal: 'start',
-        normalizedAnchor: { x: source.anchor.x, y: source.anchor.y },
-        isExact: true,
-        isPrecise: true,
-      },
+    endBinding: {
+      elementId: targetElem.id,
+      focus: 0,
+      gap: 4,
     },
-    {
-      fromId: arrowId,
-      toId: target.shapeId,
-      type: 'arrow',
-      props: {
-        terminal: 'end',
-        normalizedAnchor: { x: target.anchor.x, y: target.anchor.y },
-        isExact: true,
-        isPrecise: true,
-      },
+    startArrowhead: null,
+    endArrowhead: 'arrow',
+    elbowed: true,
+    customData: {
+      type: 'dependency_arrow',
+      fromTaskId: sourceTaskId,
+      toTaskId: targetTaskId,
     },
-  ]);
+  };
 
-  // Update target task's dependency (blockedBy)
-  const blockerTaskId = source.taskId || sourceShape.props.taskId;
-  const blockedTaskId = target.taskId || targetShape.props.taskId;
+  // Update target element's blockedBy metadata
+  const existingBlockedBy = targetElem.customData?.blockedBy || '';
+  const currentList = existingBlockedBy
+    .split(',')
+    .map((s: string) => s.trim().toLowerCase())
+    .filter(Boolean);
 
-  if (blockerTaskId && blockedTaskId && blockerTaskId !== blockedTaskId) {
-    const existingBlockedBy = targetShape.props.blockedBy || '';
-    const currentList = existingBlockedBy
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean);
+  let updatedTarget = targetElem;
+  if (!currentList.includes(sourceTaskId.toLowerCase())) {
+    const updatedBlockedBy = existingBlockedBy
+      ? `${existingBlockedBy}, ${sourceTaskId}`
+      : sourceTaskId;
 
-    if (!currentList.includes(blockerTaskId.toLowerCase())) {
-      const updatedBlockedBy = existingBlockedBy
-        ? `${existingBlockedBy}, ${blockerTaskId}`
-        : blockerTaskId;
+    updatedTarget = {
+      ...targetElem,
+      customData: {
+        ...targetElem.customData,
+        blockedBy: updatedBlockedBy,
+        status: targetElem.customData.status === 'done' ? 'done' : 'blocked',
+      },
+      version: (targetElem.version || 1) + 1,
+      versionNonce: Date.now(),
+    };
 
-      editor.updateShape({
-        id: target.shapeId,
-        type: 'task',
-        props: {
-          blockedBy: updatedBlockedBy,
-          status: targetShape.props.status === 'done' ? 'done' : 'blocked',
-        },
-      } as any);
-
-      if (onDependencyCreated) {
-        onDependencyCreated(blockerTaskId, blockedTaskId);
-      }
+    if (onDependencyCreated) {
+      onDependencyCreated(sourceTaskId, targetTaskId);
     }
   }
 
-  return arrowId;
+  const updatedElements = elements
+    .map((el) => (el.id === targetElem.id ? updatedTarget : el))
+    .concat(newArrow);
+
+  return { updatedElements, arrowId };
+}
+
+export function connectTasksWithArrow(
+  _editor: any,
+  _source: any,
+  _target: any,
+  _onDependencyCreated?: any
+): string | null {
+  return null;
 }

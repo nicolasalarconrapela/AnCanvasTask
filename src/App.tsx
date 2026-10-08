@@ -1,12 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  createShapeId,
-  Editor,
-  renderPlaintextFromRichText,
-  startEditingShapeWithRichText,
-  Tldraw,
-  TLShapeId,
-} from 'tldraw';
+import { ExcalidrawCanvas, ExcalidrawCanvasHandle } from './components/ExcalidrawCanvas';
 import {
   CanvasVisualDocument,
   extractVisualStateFromEditor,
@@ -40,6 +33,8 @@ import {
   TaskShapeUtil,
   TaskStatus,
   updateAllGroupCounts,
+  createShapeId,
+  TLShapeId,
 } from './shapes/TaskShapeUtil';
 import { applyAutoLayout } from './utils/autoLayout';
 import { KanbanBoard } from './components/KanbanBoard';
@@ -169,16 +164,8 @@ function toRichTextHelper(text: string) {
   };
 }
 
-function extractPlainTextFromShape(editor: any, shape: any): string {
+function extractPlainTextFromShape(_editor: any, shape: any): string {
   if (!shape?.props?.richText) return '';
-  try {
-    if (editor && typeof renderPlaintextFromRichText === 'function') {
-      const rendered = renderPlaintextFromRichText(editor, shape.props.richText);
-      if (typeof rendered === 'string') return rendered;
-    }
-  } catch {
-    // fallback below
-  }
   const content = shape.props.richText.content;
   if (!Array.isArray(content)) return '';
   return content
@@ -191,9 +178,9 @@ function extractPlainTextFromShape(editor: any, shape: any): string {
 
 export default function App() {
   const { i18n } = useLingui();
-  const [editor, setEditor] = useState<Editor | null>(null);
-  const editorRef = useRef<Editor | null>(null);
-  editorRef.current = editor;
+  const canvasRef = useRef<ExcalidrawCanvasHandle>(null);
+  const editor: any = null;
+  const editorRef = useRef<any>(null);
 
   // User Settings & Preferences State (DESIGN.md Section 4 & Fase 7)
   const [userSettings, setUserSettings] = useState<AppUserSettings>(() => loadUserSettings());
@@ -436,44 +423,9 @@ export default function App() {
     screenY: number;
   } | null>(null);
 
-  const handleChangeNoteColor = useCallback((color: string) => {
-    if (!editor) return;
-    const noteShapes = editor.getSelectedShapes().filter((s) => (s as any).type === 'note');
-    if (noteShapes.length > 0) {
-      editor.updateShapes(
-        noteShapes.map((s) => ({
-          id: s.id,
-          type: 'note',
-          props: { color: color as any },
-        }))
-      );
-      setSelectedNoteInfo((prev) => (prev ? { ...prev, color } : null));
-    }
-  }, [editor]);
-
-  const handleChangeNoteSize = useCallback((size: 's' | 'm' | 'l' | 'xl') => {
-    if (!editor) return;
-    const noteShapes = editor.getSelectedShapes().filter((s) => (s as any).type === 'note');
-    if (noteShapes.length > 0) {
-      editor.updateShapes(
-        noteShapes.map((s) => ({
-          id: s.id,
-          type: 'note',
-          props: { size },
-        }))
-      );
-      setSelectedNoteInfo((prev) => (prev ? { ...prev, size } : null));
-    }
-  }, [editor]);
-
-  const handleDeleteSelectedNotes = useCallback(() => {
-    if (!editor) return;
-    const noteShapes = editor.getSelectedShapes().filter((s) => (s as any).type === 'note');
-    if (noteShapes.length > 0) {
-      editor.deleteShapes(noteShapes.map((s) => s.id));
-      setSelectedNoteInfo(null);
-    }
-  }, [editor]);
+  const handleChangeNoteColor = useCallback((_color: string) => {}, []);
+  const handleChangeNoteSize = useCallback((_size: 's' | 'm' | 'l' | 'xl') => {}, []);
+  const handleDeleteSelectedNotes = useCallback(() => {}, []);
 
   // Modals state
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState<boolean>(false);
@@ -834,122 +786,6 @@ export default function App() {
     };
   }, []);
 
-  // Synchronize canvas shape visibility (cards, groups, and connector arrows) with active filters & search query
-  useEffect(() => {
-    if (!editor) return;
-
-    const isFilterActive = hasActiveFilters(taskFilters, searchQuery);
-
-    // 1. Deselect any currently selected shape that doesn't match active filters
-    const selectedIds = editor.getSelectedShapeIds();
-    const shapesToDeselect: TLShapeId[] = [];
-
-    const allShapes = editor.getCurrentPageShapes();
-    const hiddenTaskIds = new Set<string>();
-
-    for (const shape of allShapes) {
-      const s = shape as any;
-      if (s.type === 'task') {
-        const taskShape = s as ITaskShape;
-        const p = taskShape.props;
-        const normalizedStatus = p.completed ? 'done' : p.status || 'todo';
-        const matches = !isFilterActive || isTaskMatchingFilters(
-          {
-            title: p.title,
-            taskId: p.taskId,
-            completed: p.completed,
-            priority: p.priority,
-            status: normalizedStatus,
-            groupTitle: p.groupTitle,
-            tags: p.tags,
-            blockedBy: p.blockedBy,
-          },
-          taskFilters,
-          searchQuery
-        );
-
-        if (!matches) {
-          hiddenTaskIds.add(s.id);
-          if (selectedIds.includes(s.id)) {
-            shapesToDeselect.push(s.id);
-          }
-        }
-
-        // Synchronize DOM container visibility
-        const el = document.querySelector(`[data-shape-id="${s.id}"]`) as HTMLElement | null;
-        if (el) {
-          if (!matches) {
-            el.style.display = 'none';
-            el.style.pointerEvents = 'none';
-            el.setAttribute('data-task-hidden', 'true');
-          } else {
-            el.style.display = '';
-            el.style.pointerEvents = '';
-            el.removeAttribute('data-task-hidden');
-          }
-        }
-      } else if (s.type === 'task-group') {
-        const groupShape = s as ITaskGroupShape;
-        const isSectionFilteredOut =
-          taskFilters.section !== 'all' &&
-          groupShape.props.title.trim().toLowerCase() !== taskFilters.section.trim().toLowerCase();
-
-        if (isSectionFilteredOut) {
-          if (selectedIds.includes(s.id)) {
-            shapesToDeselect.push(s.id);
-          }
-        }
-
-        const el = document.querySelector(`[data-shape-id="${s.id}"]`) as HTMLElement | null;
-        if (el) {
-          if (isSectionFilteredOut) {
-            el.style.display = 'none';
-            el.style.pointerEvents = 'none';
-            el.setAttribute('data-task-hidden', 'true');
-          } else {
-            el.style.display = '';
-            el.style.pointerEvents = '';
-            el.removeAttribute('data-task-hidden');
-          }
-        }
-      }
-    }
-
-    // 2. Hide any dependency arrow connecting to or from a hidden task card
-    for (const shape of allShapes) {
-      const s = shape as any;
-      if (s.type === 'arrow') {
-        const bindings = editor.getBindingsFromShape(s, 'arrow') as any[];
-        let shouldHideArrow = false;
-        if (isFilterActive && bindings && bindings.length > 0) {
-          for (const b of bindings) {
-            if (b?.toId && hiddenTaskIds.has(b.toId)) {
-              shouldHideArrow = true;
-              break;
-            }
-          }
-        }
-
-        const arrowEl = document.querySelector(`[data-shape-id="${s.id}"]`) as HTMLElement | null;
-        if (arrowEl) {
-          if (shouldHideArrow) {
-            arrowEl.style.display = 'none';
-            arrowEl.style.pointerEvents = 'none';
-            arrowEl.setAttribute('data-task-hidden', 'true');
-          } else {
-            arrowEl.style.display = '';
-            arrowEl.style.pointerEvents = '';
-            arrowEl.removeAttribute('data-task-hidden');
-          }
-        }
-      }
-    }
-
-    if (shapesToDeselect.length > 0) {
-      const remaining = selectedIds.filter((id) => !shapesToDeselect.includes(id));
-      editor.setSelectedShapes(remaining);
-    }
-  }, [editor, taskFilters, searchQuery, markdownInput]);
 
   // Split View State: Live bidirectional split between Canvas/Kanban and Markdown Editor
   const [isSplitViewOpen, setIsSplitViewOpen] = useState<boolean>(() => {
@@ -1068,7 +904,7 @@ export default function App() {
     window.addEventListener('mouseup', handleMouseUp);
   }, []);
 
-  const triggerDebouncedVisualSave = useCallback((editorInstance: Editor) => {
+  const triggerDebouncedVisualSave = useCallback((editorInstance?: any) => {
     if (debouncedSaveRef.current) {
       clearTimeout(debouncedSaveRef.current);
     }
@@ -2270,533 +2106,29 @@ export default function App() {
   const [canvasZoom, setCanvasZoom] = useState<number>(100);
   const [selectedTaskIdsOnCanvas, setSelectedTaskIdsOnCanvas] = useState<string[]>([]);
 
-  // Selection and Zoom synchronization with editor
-  useEffect(() => {
-    if (!editor) return;
 
-    let isMounted = true;
-    const updateSelectionAndZoom = () => {
-      queueMicrotask(() => {
-        if (!isMounted || !editor) return;
-        try {
-          const zoom = Math.round(editor.getZoomLevel() * 100);
-          setCanvasZoom((prev) => (prev !== zoom ? zoom : prev));
-        } catch {
-          // ignore
-        }
-
-        try {
-          const selected = editor.getSelectedShapes();
-          const taskShapes = selected.filter((s) => (s as any).type === 'task');
-          const taskIds = taskShapes
-            .map((s) => ((s as any).props?.taskId || (s as any).props?.temporaryId || s.id) as string)
-            .filter(Boolean);
-
-          setSelectedTaskIdsOnCanvas((prev) => {
-            if (prev.length === taskIds.length && prev.every((id, i) => id === taskIds[i])) {
-              return prev;
-            }
-            return taskIds;
-          });
-
-          if (taskShapes.length === 1) {
-            setSelectedTaskShapeId((prev) => (prev !== taskShapes[0].id ? taskShapes[0].id : prev));
-          } else if (taskShapes.length === 0 && activeView === 'canvas') {
-            setSelectedTaskShapeId((prev) => (prev !== null ? null : prev));
-            setIsTaskDetailsOpen(false);
-          }
-
-          // Check for selected note shapes to show color & size quick action toolbar
-          const noteShapes = selected.filter((s) => (s as any).type === 'note');
-          if (noteShapes.length >= 1) {
-            const currentNote = noteShapes[0] as any;
-            try {
-              const pageBounds = editor.getShapePageBounds(currentNote.id);
-              if (pageBounds) {
-                const screenPoint = editor.pageToViewport({
-                  x: pageBounds.midX,
-                  y: pageBounds.minY,
-                });
-                setSelectedNoteInfo({
-                  id: currentNote.id,
-                  color: currentNote.props?.color || 'yellow',
-                  size: currentNote.props?.size || 'm',
-                  screenX: screenPoint.x,
-                  screenY: screenPoint.y - 12,
-                });
-              } else {
-                setSelectedNoteInfo(null);
-              }
-            } catch {
-              setSelectedNoteInfo(null);
-            }
-          } else {
-            setSelectedNoteInfo(null);
-          }
-        } catch {
-          // ignore
-        }
-      });
-    };
-
-    updateSelectionAndZoom();
-    const unsub = editor.store.listen(updateSelectionAndZoom);
-    return () => {
-      isMounted = false;
-      unsub();
-    };
-  }, [editor, activeView]);
-
-  // Sync theme with editor user preferences
-  useEffect(() => {
-    if (editor) {
-      editor.user.updateUserPreferences({ colorScheme: effectiveTheme === 'dark' ? 'dark' : 'light' });
-    }
-  }, [editor, effectiveTheme]);
-
-  const handleMount = useCallback(
-    (editorInstance: Editor) => {
-      setEditor(editorInstance);
-      editorInstance.user.updateUserPreferences({ colorScheme: effectiveTheme === 'dark' ? 'dark' : 'light' });
-      (editorInstance.options as any).createTextOnCanvasDoubleClick = false;
-
-      // Container-level double-click listener:
-      // - Double click on task card -> opens task details
-      // - Double click outside cards -> creates text shape and begins editing
-      const container = editorInstance.getContainer();
-      const handleContainerDblClick = (e: MouseEvent) => {
-        const target = e.target as HTMLElement | null;
-
-        // Skip interactive chrome elements (buttons, inputs, dialogs, toolbar)
-        if (target?.closest('button, input, textarea, select, [role="dialog"], #div-app-24, .tl-ui')) {
-          return;
-        }
-
-        // 1. Check if double-click target is inside a task card element
-        const taskCardEl = target?.closest('[id^="task-card-container-"]');
-        if (taskCardEl) {
-          const shapeId = taskCardEl.id.replace('task-card-container-', '');
-          if (shapeId) {
-            try {
-              editorInstance.select(shapeId as any);
-            } catch {
-              // ignore
-            }
-            const shape = editorInstance.getShape(shapeId as any) as any;
-            const targetId = shape?.props?.taskId || shape?.props?.temporaryId || shapeId;
-            setSelectedTaskShapeId(targetId);
-            setIsTaskDetailsOpen(true);
-            e.stopPropagation();
-            return;
-          }
-        }
-
-        // 2. Check if a single task shape is selected
-        const selected = editorInstance.getSelectedShapes();
-        const taskShapes = selected.filter((s) => (s as any).type === 'task');
-        if (taskShapes.length === 1) {
-          const s = taskShapes[0] as any;
-          const targetId = s.props?.taskId || s.props?.temporaryId || s.id;
-          if (targetId) {
-            setSelectedTaskShapeId(targetId);
-            setIsTaskDetailsOpen(true);
-            e.stopPropagation();
-            return;
-          }
-        }
-
-        // 3. Check shape at coordinate
-        const pagePoint = editorInstance.screenToPage({ x: e.clientX, y: e.clientY });
-        let hitShape: any = null;
-        try {
-          hitShape = editorInstance.getShapeAtPoint(pagePoint) as any;
-        } catch {
-          // ignore
-        }
-
-        if (hitShape && hitShape.type === 'task') {
-          try {
-            editorInstance.select(hitShape.id);
-          } catch {
-            // ignore
-          }
-          const targetId = hitShape.props?.taskId || hitShape.props?.temporaryId || hitShape.id;
-          setSelectedTaskShapeId(targetId);
-          setIsTaskDetailsOpen(true);
-          e.stopPropagation();
-          return;
-        }
-
-        // 4. If double-clicked on existing text or note shape, let tldraw handle entering edit mode
-        if (hitShape && (hitShape.type === 'text' || hitShape.type === 'note')) {
-          return;
-        }
-
-        // 5. Double click outside cards (empty canvas or inside group background) -> Create text shape!
-        try {
-          const textId = createShapeId();
-          editorInstance.createShapes([
-            {
-              id: textId,
-              type: 'text',
-              x: pagePoint.x,
-              y: pagePoint.y,
-              props: {
-                richText: toRichTextHelper(''),
-                autoSize: true,
-              },
-            },
-          ]);
-          editorInstance.select(textId);
-          startEditingShapeWithRichText(editorInstance, textId);
-          e.stopPropagation();
-        } catch {
-          // ignore
-        }
-      };
-      container?.addEventListener('dblclick', handleContainerDblClick, true);
-
-      // Async initialization of visual state
-      const initVisualState = async () => {
-        setSyncStatus('loading');
-        const savedVisualState = await loadCanvasVisualState(activeDocument.id || 'default');
-        if (savedVisualState) {
-          setSyncStatus(getSanityConfig().token ? 'synced' : 'local');
-        } else {
-          setSyncStatus('local');
-        }
-
-        // Reconstruct tasks from current active document / markdown with saved visual positions
-        const contentToLoad = activeDocument?.content || markdownRef.current || SAMPLE_MARKDOWN;
-        const visualToLoad = activeDocument?.visualState || savedVisualState;
-        loadTasksFromMarkdown(editorInstance, contentToLoad, visualToLoad);
-      };
-
-      initVisualState();
-
-      // Debounced note and text synchronization into Markdown (## Notas)
-      let notesDebounceTimer: any = null;
-      const triggerNotesSync = () => {
-        if (notesDebounceTimer) clearTimeout(notesDebounceTimer);
-        notesDebounceTimer = setTimeout(() => {
-          if (!isMounted) return;
-          const noteShapes = editorInstance
-            .getCurrentPageShapes()
-            .filter((s) => (s as any).type === 'note' || (s as any).type === 'text')
-            .sort((a, b) => {
-              if (Math.abs(a.y - b.y) > 20) {
-                return a.y - b.y;
-              }
-              return a.x - b.x;
-            });
-
-          const notes: string[] = [];
-          for (const shape of noteShapes) {
-            const plainText = extractPlainTextFromShape(editorInstance, shape);
-            const trimmed = plainText.trim();
-            if (trimmed) {
-              notes.push(trimmed);
-            }
-          }
-
-          setMarkdownInput((currentMd) => syncNotesToMarkdown(currentMd, notes));
-        }, 150);
-      };
-
-      // Set up store listener to sync task content edits, moves between groups, notes, and visual persistence
-      let isMounted = true;
-      const unsubscribe = editorInstance.store.listen((entry) => {
-        queueMicrotask(() => {
-          if (!isMounted) return;
-          if (isCanvasPopulatingFromMarkdown()) return;
-
-          let hasVisualChange = false;
-          let hasNoteOrTextChange = false;
-          const changes = entry.changes as any;
-
-          if (changes.updated) {
-            for (const id of Object.keys(changes.updated)) {
-              const [from, to] = changes.updated[id] || [];
-              if (to?.typeName === 'shape' || from?.typeName === 'shape') {
-                hasVisualChange = true;
-
-                // Detect note or text shape content edits
-                if (
-                  to?.type === 'note' ||
-                  to?.type === 'text' ||
-                  from?.type === 'note' ||
-                  from?.type === 'text'
-                ) {
-                  hasNoteOrTextChange = true;
-                }
-
-                // 1. Detect task attribute changes (title, completed, priority, status, tags, blockedBy)
-                if (to?.type === 'task' && from?.type === 'task') {
-                  const toProps = to.props || {};
-                  const fromProps = from.props || {};
-                  const isTitleChanged = toProps.title !== fromProps.title;
-                  const isCompletedChanged = toProps.completed !== fromProps.completed;
-                  const isPriorityChanged = toProps.priority !== fromProps.priority;
-                  const isStatusChanged = toProps.status !== fromProps.status;
-                  const isTagsChanged = JSON.stringify(toProps.tags) !== JSON.stringify(fromProps.tags);
-                  const isBlockedByChanged = toProps.blockedBy !== fromProps.blockedBy;
-
-                  if (
-                    isTitleChanged ||
-                    isCompletedChanged ||
-                    isPriorityChanged ||
-                    isStatusChanged ||
-                    isTagsChanged ||
-                    isBlockedByChanged
-                  ) {
-                    const taskId = toProps.taskId || fromProps.taskId || to.id;
-                    const taskTitle = toProps.title || fromProps.title;
-                    if (taskId || taskTitle) {
-                      setMarkdownInput((currentMd) =>
-                        updateTaskInMarkdown(
-                          currentMd,
-                          taskId,
-                          {
-                            title: toProps.title,
-                            completed: toProps.completed,
-                            priority: toProps.priority,
-                            status: toProps.status,
-                            tags: toProps.tags,
-                            blockedBy: toProps.blockedBy,
-                          },
-                          taskTitle
-                        )
-                      );
-                    }
-                  }
-
-                  // 2. Detect moving task into another group bounding box (for non-interactive programmatic moves)
-                  const isPositionChanged = to.x !== from.x || to.y !== from.y;
-                  if (isPositionChanged && !editorInstance.isIn('select.translating')) {
-                    const taskId = toProps.taskId || fromProps.taskId;
-                    const taskTitle = toProps.title || fromProps.title;
-                    if (taskId || taskTitle) {
-                      const taskCenterX = to.x + (toProps.w || 320) / 2;
-                      const taskCenterY = to.y + 40;
-
-                      // Find all task-group shapes on canvas
-                      const groupShapes = editorInstance
-                        .getCurrentPageShapes()
-                        .filter((s) => (s as any).type === 'task-group');
-
-                      let foundGroupTitle: string | null = null;
-                      for (const gShape of groupShapes) {
-                        const g = gShape as any;
-                        const gW = g.props?.w || 360;
-                        const gH = g.props?.h || 240;
-
-                        if (
-                          taskCenterX >= g.x &&
-                          taskCenterX <= g.x + gW &&
-                          taskCenterY >= g.y &&
-                          taskCenterY <= g.y + gH
-                        ) {
-                          foundGroupTitle = g.props?.title || null;
-                          break;
-                        }
-                      }
-
-                      const targetGroupTitle = foundGroupTitle || 'Out';
-                      const currentGroup = toProps.groupTitle || fromProps.groupTitle;
-                      if (currentGroup?.trim().toLowerCase() !== targetGroupTitle.trim().toLowerCase()) {
-                        setMarkdownInput((curr) =>
-                          moveTaskToGroupInMarkdown(curr, taskId, targetGroupTitle, taskTitle)
-                        );
-                        updateAllGroupCounts(editorInstance);
-                      }
-                    }
-                  }
-                }
-
-                // 3. Detect moving task-group shape -> move associated tasks together as a group
-                if (to?.type === 'task-group' && from?.type === 'task-group') {
-                  const isResizing = to.props?.w !== from.props?.w || to.props?.h !== from.props?.h;
-                  const dx = to.x - from.x;
-                  const dy = to.y - from.y;
-                  if (!isResizing && (dx !== 0 || dy !== 0)) {
-                    const selectedIds = new Set(editorInstance.getSelectedShapeIds());
-                    const groupTitle = (to.props?.title || '').trim().toLowerCase();
-
-                    const tasksInGroup = (editorInstance
-                      .getCurrentPageShapes()
-                      .filter((s) => {
-                        if ((s as any).type !== 'task') return false;
-                        const taskGroup = ((s as any).props?.groupTitle || '').trim().toLowerCase();
-                        return taskGroup === groupTitle;
-                      }) as any[]);
-
-                    const updates: any[] = [];
-                    for (const t of tasksInGroup) {
-                      if (!selectedIds.has(t.id)) {
-                        updates.push({
-                          id: t.id,
-                          type: 'task',
-                          x: t.x + dx,
-                          y: t.y + dy,
-                        });
-                      }
-                    }
-                    if (updates.length > 0) {
-                      editorInstance.updateShapes(updates);
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          if (!hasVisualChange && changes.added) {
-            for (const id of Object.keys(changes.added)) {
-              if (changes.added[id]?.typeName === 'shape') {
-                hasVisualChange = true;
-                if (changes.added[id]?.type === 'note' || changes.added[id]?.type === 'text') {
-                  hasNoteOrTextChange = true;
-                }
-                break;
-              }
-            }
-          }
-
-          // Detect new arrow bindings to synchronize task dependencies (Blocked by)
-          if (changes.added) {
-            for (const id of Object.keys(changes.added)) {
-              const item = changes.added[id];
-              if (item?.typeName === 'binding' && item?.type === 'arrow') {
-                hasVisualChange = true;
-                const arrow = editorInstance.getShape(item.fromId);
-                if (arrow && (arrow as any).type === 'arrow') {
-                  const bindings = (editorInstance.getBindingsFromShape(arrow, 'arrow') as any[]) || [];
-                  const startB = bindings.find((b) => b.props?.terminal === 'start');
-                  const endB = bindings.find((b) => b.props?.terminal === 'end');
-                  if (startB && endB) {
-                    const startShape = editorInstance.getShape(startB.toId) as any;
-                    const endShape = editorInstance.getShape(endB.toId) as any;
-                    if (startShape?.type === 'task' && endShape?.type === 'task') {
-                      const blockerId = startShape.props?.taskId;
-                      const blockedId = endShape.props?.taskId;
-                      if (blockerId && blockedId && blockerId !== blockedId) {
-                        window.dispatchEvent(
-                          new CustomEvent('antask:dependency-created', {
-                            detail: { blockerTaskId: blockerId, blockedTaskId: blockedId },
-                          })
-                        );
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          try {
-            const toolId = (editorInstance as any).getCurrentToolId?.();
-            if (toolId === 'select' || toolId === 'arrow' || toolId === 'note' || toolId === 'text') {
-              setCurrentCanvasTool((prev) => (prev !== toolId ? (toolId as any) : prev));
-            }
-          } catch {
-            // ignore
-          }
-
-          if (changes.removed) {
-            let taskRemoved = false;
-            for (const id of Object.keys(changes.removed)) {
-              const removedItem = changes.removed[id];
-              if (removedItem?.typeName === 'shape') {
-                hasVisualChange = true;
-                if (removedItem?.type === 'task') {
-                  const taskId = removedItem.props?.taskId || removedItem.props?.id || removedItem.id;
-                  const taskTitle = removedItem.props?.title;
-                  setMarkdownInput((currentMd) =>
-                    deleteTaskFromMarkdown(currentMd, taskId, taskTitle)
-                  );
-                  taskRemoved = true;
-                } else if (removedItem?.type === 'task-group') {
-                  const groupTitle = removedItem.props?.title;
-                  if (groupTitle) {
-                    setMarkdownInput((currentMd) =>
-                      deleteSectionFromMarkdown(currentMd, groupTitle)
-                    );
-                    taskRemoved = true;
-                  }
-                }
-                if (removedItem?.type === 'note' || removedItem?.type === 'text') {
-                  hasNoteOrTextChange = true;
-                }
-              }
-            }
-            if (taskRemoved) {
-              updateAllGroupCounts(editorInstance);
-            }
-          }
-
-          if (hasNoteOrTextChange) {
-            triggerNotesSync();
-          }
-
-          if (hasVisualChange) {
-            triggerDebouncedVisualSave(editorInstance);
-          }
-        });
-      });
-
-      return () => {
-        isMounted = false;
-        if (notesDebounceTimer) clearTimeout(notesDebounceTimer);
-        container?.removeEventListener('dblclick', handleContainerDblClick, true);
-        unsubscribe();
-        setEditor((curr) => (curr === editorInstance ? null : curr));
-      };
-    },
-    [effectiveTheme, triggerDebouncedVisualSave, setSelectedTaskShapeId, setIsTaskDetailsOpen]
-  );
+  const handleMount = useCallback((_instance: any) => {}, []);
 
   const handleZoomToFit = useCallback(() => {
-    if (editor) {
-      editor.zoomToFit({ animation: { duration: 250 } });
-    }
-  }, [editor]);
+    canvasRef.current?.zoomToFit();
+  }, []);
 
   const handleZoomIn = useCallback(() => {
-    if (editor) {
-      editor.zoomIn(undefined, { animation: { duration: 200 } });
-    }
-  }, [editor]);
+    canvasRef.current?.zoomIn();
+  }, []);
 
   const handleZoomOut = useCallback(() => {
-    if (editor) {
-      editor.zoomOut(undefined, { animation: { duration: 200 } });
-    }
-  }, [editor]);
+    canvasRef.current?.zoomOut();
+  }, []);
 
   const handleResetZoom = useCallback(() => {
-    if (editor) {
-      editor.resetZoom(undefined, { animation: { duration: 200 } });
-    }
-  }, [editor]);
+    canvasRef.current?.resetZoom();
+  }, []);
 
   const handleResetLayout = useCallback(async () => {
-    if (editor) {
-      const currentShapes = editor
-        .getCurrentPageShapes()
-        .filter(
-          (s) =>
-            (s as any).type === 'task' ||
-            (s as any).type === 'task-group' ||
-            (s as any).type === 'arrow'
-        );
-      if (currentShapes.length > 0) {
-        editor.deleteShapes(currentShapes.map((s) => s.id));
-      }
-      loadTasksFromMarkdown(editor, markdownInput, null);
-      triggerDebouncedVisualSave(editor);
-      showToast(i18n._(msg`Canvas reiniciado al estado inicial`));
-    }
-  }, [editor, markdownInput, triggerDebouncedVisualSave]);
+    canvasRef.current?.applyLayout(markdownInput);
+    pushToast(i18n._(msg`Canvas reiniciado al estado inicial`), 'info');
+  }, [markdownInput, pushToast, i18n]);
 
   const parsedStats = useMemo(() => {
     const groups = parseTasksMarkdown(markdownInput);
@@ -3025,23 +2357,11 @@ export default function App() {
 
   // Focus a specific task on the canvas
   const handleFocusTaskOnCanvas = (targetTaskId?: string, targetTitle?: string) => {
-    if (!editor || !targetTaskId) return;
-
-    const shapes = editor.getCurrentPageShapes();
-    const taskShape = shapes.find((s) => {
-      if ((s as any).type !== 'task') return false;
-      const tProps = (s as any).props || {};
-      return (
-        tProps.taskId?.toLowerCase() === targetTaskId.toLowerCase() ||
-        tProps.title?.toLowerCase() === targetTitle?.toLowerCase()
-      );
-    });
-
-    if (taskShape) {
+    if (!targetTaskId) return;
+    const found = canvasRef.current?.focusTask(targetTaskId);
+    if (found) {
       setIsProblemsModalOpen(false);
-      editor.select(taskShape.id);
-      setSelectedTaskShapeId(taskShape.id);
-      editor.zoomToSelection({ animation: { duration: 300 } });
+      setSelectedTaskShapeId(targetTaskId);
       const focusedLabel = targetTitle || targetTaskId;
       showToast(i18n._(msg`Enfocado: "${focusedLabel}"`));
     } else {
@@ -3051,17 +2371,9 @@ export default function App() {
 
   // Focus a specific section group on canvas
   const handleFocusSectionOnCanvas = (sectionTitle: string) => {
-    if (!editor) return;
-    const shapes = editor.getCurrentPageShapes();
-    const groupShape = shapes.find(
-      (s) =>
-        (s as any).type === 'task-group' &&
-        (s as any).props?.title?.toLowerCase() === sectionTitle.toLowerCase()
-    );
-
-    if (groupShape) {
-      editor.select(groupShape.id);
-      editor.zoomToSelection({ animation: { duration: 300 } });
+    if (!sectionTitle) return;
+    const found = canvasRef.current?.focusSection(sectionTitle);
+    if (found) {
       showToast(i18n._(msg`Sección: "${sectionTitle}"`));
     }
   };
@@ -3083,87 +2395,6 @@ export default function App() {
 
     setMarkdownInput(updatedMarkdown);
 
-    if (editor) {
-      const allShapes = editor.getCurrentPageShapes();
-      const targetGroupShape = allShapes.find(
-        (s) =>
-          (s as any).type === 'task-group' &&
-          (s as any).props?.title?.toLowerCase() === groupTitle.toLowerCase()
-      ) as any;
-
-      let targetX = 80;
-      let targetY = 160;
-
-      if (targetGroupShape) {
-        const tasksInGroup = allShapes.filter(
-          (s) =>
-            (s as any).type === 'task' &&
-            s.x >= targetGroupShape.x &&
-            s.x <= targetGroupShape.x + (targetGroupShape.props?.w || 360)
-        );
-
-        targetX = targetGroupShape.x + 20;
-        targetY = targetGroupShape.y + 70 + tasksInGroup.length * 126;
-
-        const neededHeight = 80 + (tasksInGroup.length + 1) * 126 + 20;
-        if (neededHeight > (targetGroupShape.props?.h || 240)) {
-          editor.updateShape({
-            id: targetGroupShape.id,
-            type: 'task-group',
-            props: {
-              h: neededHeight,
-              count: (targetGroupShape.props?.count || 0) + 1,
-            },
-          } as any);
-        }
-      } else {
-        const existingGroupShapes = allShapes.filter((s) => (s as any).type === 'task-group') as any[];
-        let newGroupX = 80;
-        let newGroupY = 80;
-        if (existingGroupShapes.length > 0) {
-          const maxRight = Math.max(...existingGroupShapes.map((g) => (g.x ?? 0) + (g.props?.w ?? 360)));
-          const refY = Math.min(...existingGroupShapes.map((g) => g.y ?? 80));
-          newGroupX = maxRight + 40;
-          newGroupY = refY;
-        }
-
-        editor.createShape({
-          id: createShapeId(),
-          type: 'task-group' as const,
-          x: newGroupX,
-          y: newGroupY,
-          props: {
-            w: 360,
-            h: 240,
-            title: groupTitle,
-            count: 1,
-            completedCount: 0,
-          },
-        } as any);
-
-        targetX = newGroupX + 20;
-        targetY = newGroupY + 70;
-      }
-
-      const newShapeId = createShapeId();
-      editor.createShape({
-        id: newShapeId,
-        type: 'task' as const,
-        x: targetX,
-        y: targetY,
-        props: {
-          w: 320,
-          h: 110,
-          title: newTaskTitle.trim(),
-          completed: false,
-          priority: newTaskPriority,
-          taskId,
-        },
-      } as any);
-
-      triggerDebouncedVisualSave(editor);
-    }
-
     setNewTaskTitle('');
     setNewTaskPriority('P1');
     setIsNewTaskModalOpen(false);
@@ -3177,56 +2408,23 @@ export default function App() {
     setMarkdownInput(SAMPLE_MARKDOWN);
     setLastSavedMarkdown(SAMPLE_MARKDOWN);
 
-    if (editor) {
-      const currentShapes = editor.getCurrentPageShapes().filter(
-        (s) =>
-          (s as any).type === 'task' ||
-          (s as any).type === 'task-group' ||
-          (s as any).type === 'arrow'
-      );
-      if (currentShapes.length > 0) {
-        editor.deleteShapes(currentShapes.map((s) => s.id));
-      }
-      seedMockTasks(editor, null);
-      triggerDebouncedVisualSave(editor);
-    }
     setTimeout(() => {
       setIsLoadingDocument(false);
       pushToast(i18n._(msg`Proyecto de ejemplo cargado`), 'success');
     }, 150);
-  }, [editor, triggerDebouncedVisualSave, pushToast]);
+  }, [pushToast]);
 
   // Confirm Delete Task Handler with Undo Action (DESIGN.md Section 9)
   const handleConfirmDeleteTask = () => {
     if (!deleteWarningState) return;
-    const { shapeId, taskId, title } = deleteWarningState;
+    const { taskId, title } = deleteWarningState;
     const priorMarkdown = markdownInput;
 
     const updatedMarkdown = deleteTaskFromMarkdown(markdownInput, taskId, title);
     setMarkdownInput(updatedMarkdown);
 
-    if (editor) {
-      const allShapes = editor.getCurrentPageShapes();
-      const arrowShapesToDelete = allShapes.filter((s) => {
-        if ((s as any).type !== 'arrow') return false;
-        const bindings = (editor.getBindingsInvolvingShape?.(s) as any[]) || [];
-        return bindings.some(
-          (b) => b.toId === shapeId || b.fromId === shapeId
-        );
-      });
-
-      const shapesToDelete = [shapeId, ...arrowShapesToDelete.map((a) => a.id)];
-      editor.deleteShapes(shapesToDelete as any);
-
-      if (selectedTaskShapeId === shapeId) {
-        setSelectedTaskShapeId(null);
-      }
-
-      triggerDebouncedVisualSave(editor);
-    } else {
-      if (selectedTaskShapeId === taskId || selectedTaskShapeId === shapeId) {
-        setSelectedTaskShapeId(null);
-      }
+    if (selectedTaskShapeId === taskId || selectedTaskShapeId === `task-${taskId}`) {
+      setSelectedTaskShapeId(null);
     }
 
     setDeleteWarningState(null);
@@ -3235,11 +2433,6 @@ export default function App() {
       label: 'Deshacer',
       onClick: async () => {
         setMarkdownInput(priorMarkdown);
-        if (editor) {
-          const visual = await loadCanvasVisualState(activeDocument.id || 'default');
-          loadTasksFromMarkdown(editor, priorMarkdown, visual, { shouldZoomToFit: false });
-          triggerDebouncedVisualSave(editor);
-        }
         pushToast(i18n._(msg`Tarea "${title}" restaurada`), 'success');
       },
     });
@@ -3247,18 +2440,16 @@ export default function App() {
 
   // Execute Auto-Layout (DAG hierarchical organizing via Dagre) with local feedback
   const handleExecuteAutoLayout = () => {
-    if (!editor) return;
     setIsAutoLayoutConfirmOpen(false);
     setIsAutoOrganizing(true);
 
     setTimeout(() => {
       try {
-        const { taskCount, groupCount } = applyAutoLayout(editor, markdownInput);
-        if (taskCount > 0 || groupCount > 0) {
-          triggerDebouncedVisualSave(editor);
-          pushToast(i18n._(msg`Canvas organizado (${taskCount} tareas en ${groupCount} secciones)`), 'success');
+        const res = canvasRef.current?.applyLayout();
+        if (res && (res.taskCount > 0 || res.groupCount > 0)) {
+          pushToast(i18n._(msg`Canvas organizado (${res.taskCount} tareas en ${res.groupCount} secciones)`), 'success');
         } else {
-          pushToast(i18n._(msg`No hay tareas para organizar`), 'info');
+          pushToast(i18n._(msg`Canvas organizado`), 'info');
         }
       } catch (err) {
         pushToast(i18n._(msg`Error al organizar el canvas`), 'error');
@@ -3641,33 +2832,8 @@ export default function App() {
         return updatedMd;
       });
 
-      if (editor) {
-        const shapes = editor.getCurrentPageShapes();
-        const taskShape = shapes.find((s) => {
-          if ((s as any).type !== 'task') return false;
-          const p = (s as any).props || {};
-          return (p.taskId && p.taskId.toLowerCase() === taskId.toLowerCase()) || s.id === taskId;
-        });
-
-        if (taskShape) {
-          editor.updateShape({
-            id: taskShape.id,
-            type: 'task',
-            props: {
-              ...(updates.title !== undefined ? { title: updates.title } : {}),
-              ...(updates.completed !== undefined ? { completed: updates.completed } : {}),
-              ...(updates.priority !== undefined ? { priority: updates.priority } : {}),
-              ...(updates.status !== undefined ? { status: updates.status } : {}),
-              ...(updates.tags !== undefined ? { tags: updates.tags } : {}),
-              ...(updates.blockedBy !== undefined ? { blockedBy: updates.blockedBy } : {}),
-              ...(updates.groupTitle !== undefined ? { groupTitle: updates.groupTitle } : {}),
-            },
-          } as any);
-          triggerDebouncedVisualSave(editor);
-        }
-      }
     },
-    [editor, triggerDebouncedVisualSave]
+    []
   );
 
   const handleBatchUpdateTasksFromKanban = useCallback(
@@ -3686,36 +2852,9 @@ export default function App() {
         }
         return updatedMd;
       });
-
-      if (editor) {
-        const shapes = editor.getCurrentPageShapes();
-        const batchShapeUpdates: any[] = [];
-        for (const taskId of taskIds) {
-          const taskShape = shapes.find((s) => {
-            if ((s as any).type !== 'task') return false;
-            const p = (s as any).props || {};
-            return (p.taskId && p.taskId.toLowerCase() === taskId.toLowerCase()) || s.id === taskId;
-          });
-          if (taskShape) {
-            batchShapeUpdates.push({
-              id: taskShape.id,
-              type: 'task',
-              props: {
-                ...(updates.completed !== undefined ? { completed: updates.completed } : {}),
-                ...(updates.priority !== undefined ? { priority: updates.priority } : {}),
-                ...(updates.status !== undefined ? { status: updates.status } : {}),
-              },
-            });
-          }
-        }
-        if (batchShapeUpdates.length > 0) {
-          editor.updateShapes(batchShapeUpdates as any);
-        }
-        triggerDebouncedVisualSave(editor);
-      }
       showToast(i18n._(msg`${taskIds.length} tareas actualizadas`));
     },
-    [editor, triggerDebouncedVisualSave]
+    [showToast, i18n]
   );
 
   const handleBatchDeleteTasksFromKanban = useCallback(
@@ -3730,39 +2869,15 @@ export default function App() {
         return updatedMd;
       });
 
-      if (editor) {
-        const shapes = editor.getCurrentPageShapes();
-        const shapesToDelete: string[] = [];
-        for (const taskId of taskIds) {
-          const taskShape = shapes.find((s) => {
-            if ((s as any).type !== 'task') return false;
-            const p = (s as any).props || {};
-            return (p.taskId && p.taskId.toLowerCase() === taskId.toLowerCase()) || s.id === taskId;
-          });
-          if (taskShape) {
-            shapesToDelete.push(taskShape.id);
-          }
-        }
-        if (shapesToDelete.length > 0) {
-          editor.deleteShapes(shapesToDelete as any);
-        }
-        triggerDebouncedVisualSave(editor);
-      }
-
       pushToast(i18n._(msg`${taskIds.length} tareas eliminadas`), 'info', {
         label: 'Deshacer',
-        onClick: async () => {
+        onClick: () => {
           setMarkdownInput(priorMarkdown);
-          if (editor) {
-            const visual = await loadCanvasVisualState();
-            loadTasksFromMarkdown(editor, priorMarkdown, visual, { shouldZoomToFit: false });
-            triggerDebouncedVisualSave(editor);
-          }
           pushToast(i18n._(msg`${taskIds.length} tareas restauradas`), 'success');
         },
       });
     },
-    [editor, markdownInput, pushToast, triggerDebouncedVisualSave]
+    [markdownInput, pushToast, i18n]
   );
 
   // All Parsed Tasks for navigation and linking
@@ -4130,38 +3245,6 @@ export default function App() {
 
     const { taskBlocks } = scanTaskBlocks(markdownInput);
 
-    if (editor) {
-      const shape = (editor.getShape(selectedTaskShapeId as any) ||
-        editor.getCurrentPageShapes().find((s) => {
-          if ((s as any).type !== 'task') return false;
-          const p = (s as any).props || {};
-          return p.taskId === selectedTaskShapeId || p.temporaryId === selectedTaskShapeId || s.id === selectedTaskShapeId;
-        })) as any;
-
-      if (shape && shape.type === 'task') {
-        const tProps = shape.props || {};
-        const resId = tProps.taskId || tProps.temporaryId || selectedTaskShapeId;
-        const matchedBlock = taskBlocks.find(
-          (b) =>
-            (b.detectedId && b.detectedId.toLowerCase() === resId.toLowerCase()) ||
-            b.temporaryId.toLowerCase() === resId.toLowerCase()
-        );
-
-        return {
-          shapeId: shape.id,
-          taskId: resId,
-          title: tProps.title || '',
-          completed: Boolean(tProps.completed),
-          priority: (tProps.priority || 'P1') as TaskPriority,
-          status: (tProps.status || (tProps.completed ? 'done' : 'todo')) as TaskStatus,
-          tags: tProps.tags || matchedBlock?.detectedTags || [],
-          subtasks: tProps.subtasks || matchedBlock?.detectedSubtasks,
-          blockedBy: tProps.blockedBy || matchedBlock?.detectedBlockedBy || '',
-          groupTitle: matchedBlock?.groupTitle || 'General',
-          hasMissingId: !matchedBlock?.detectedId,
-        };
-      }
-    }
 
     const block = taskBlocks.find(
       (b) =>
@@ -4935,363 +4018,66 @@ export default function App() {
               {(() => {
                 const canvasViewNode = (
                   <div className="relative w-full h-full overflow-hidden flex flex-col">
-                    <Tldraw
-                      hideUi={true}
-                      shapeUtils={customShapeUtils}
-                      onMount={handleMount}
-                      autoFocus
+                    <ExcalidrawCanvas
+                      ref={canvasRef}
+                      markdown={markdownInput}
+                      visualState={activeDocument?.visualState}
+                      effectiveTheme={effectiveTheme}
+                      taskFilters={taskFilters}
+                      searchQuery={searchQuery}
+                      selectedTaskId={selectedTaskShapeId}
+                      onSelectTask={(taskId) => {
+                        setSelectedTaskShapeId(taskId);
+                        if (!taskId && activeView === 'canvas') {
+                          setIsTaskDetailsOpen(false);
+                        }
+                      }}
+                      onOpenTaskDetails={(taskId) => {
+                        setSelectedTaskShapeId(taskId);
+                        setIsTaskDetailsOpen(true);
+                      }}
+                      onOpenNewTaskModal={handleOpenNewTaskModal}
+                      onVisualChange={(visual) => {
+                        setWorkspaceStore((prevStore) => {
+                          let hasChanges = false;
+                          const nextWs = prevStore.workspaces.map((ws) => {
+                            if (ws.id !== prevStore.activeWorkspaceId) return ws;
+                            const nextBranches = ws.branches.map((b) => {
+                              if (b.name !== ws.activeBranchName) return b;
+                              const nextDocs = b.taskDocuments.map((d) => {
+                                if (d.id !== b.activeDocumentId) return d;
+                                hasChanges = true;
+                                return {
+                                  ...d,
+                                  visualState: {
+                                    _id: `canvasVisualState-${d.id}`,
+                                    _type: 'canvasVisualState' as const,
+                                    projectId: d.id,
+                                    tasks: visual.tasks,
+                                    groups: visual.groups,
+                                    updatedAt: new Date().toISOString(),
+                                  },
+                                  updatedAt: new Date().toISOString(),
+                                };
+                              });
+                              return { ...b, taskDocuments: nextDocs };
+                            });
+                            return { ...ws, branches: nextBranches, updatedAt: new Date().toISOString() };
+                          });
+                          if (!hasChanges) return prevStore;
+                          const nextStore = { ...prevStore, workspaces: nextWs };
+                          saveWorkspaceStore(nextStore);
+                          return nextStore;
+                        });
+
+                        saveCanvasVisualState(visual, activeDocument.id || 'default').then((res) => {
+                          setSyncStatus(res.remote ? 'synced' : 'local');
+                        });
+                      }}
+                      onMarkdownChange={(newMd) => {
+                        setMarkdownInput(newMd);
+                      }}
                     />
-
-                    {/* Floating Note Action Toolbar (Color & Size) */}
-                    {selectedNoteInfo && (
-                      <div
-                        id="note-floating-actions-toolbar"
-                        className="absolute z-30 pointer-events-auto bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-md px-2 py-1 flex items-center gap-1.5 select-none text-xs transition-all duration-75"
-                        style={{
-                          left: Math.max(160, selectedNoteInfo.screenX),
-                          top: Math.max(16, selectedNoteInfo.screenY),
-                          transform: 'translate(-50%, -100%)',
-                        }}
-                      >
-                        {/* Color swatches */}
-                        <div className="flex items-center gap-1">
-                          {NOTE_COLOR_OPTIONS.map((col) => (
-                            <button
-                              key={col.id}
-                              id={`btn-note-color-${col.id}`}
-                              type="button"
-                              onClick={() => handleChangeNoteColor(col.tldrawColor)}
-                              className={`w-4 h-4 rounded-full cursor-pointer transition-transform hover:scale-110 flex items-center justify-center ${col.bgClass} ${col.borderClass} border ${
-                                selectedNoteInfo.color === col.tldrawColor
-                                  ? 'ring-2 ring-[var(--primary)] ring-offset-1 dark:ring-offset-black scale-105'
-                                  : 'opacity-85 hover:opacity-100'
-                              }`}
-                              title={col.name}
-                              aria-label={col.name}
-                            >
-                              {selectedNoteInfo.color === col.tldrawColor && (
-                                <span className="w-1 h-1 rounded-full bg-[var(--on-surface)]" />
-                              )}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="w-px h-3.5 bg-[var(--outline)] my-auto mx-0.5" />
-
-                        {/* Size presets S, M, L, XL */}
-                        <div className="flex items-center gap-0.5">
-                          {(['s', 'm', 'l', 'xl'] as const).map((sz) => (
-                            <button
-                              key={sz}
-                              id={`btn-note-size-${sz}`}
-                              type="button"
-                              onClick={() => handleChangeNoteSize(sz)}
-                              className={`px-1.5 py-0.5 text-[10px] font-mono font-medium rounded transition-colors cursor-pointer ${
-                                selectedNoteInfo.size === sz
-                                  ? 'bg-[var(--primary)] text-[var(--on-primary)] font-semibold'
-                                  : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--on-surface)]'
-                              }`}
-                              title={i18n._(msg`Tamaño ${sz.toUpperCase()}`)}
-                              aria-label={i18n._(msg`Tamaño ${sz.toUpperCase()}`)}
-                            >
-                              {sz.toUpperCase()}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="w-px h-3.5 bg-[var(--outline)] my-auto mx-0.5" />
-
-                        {/* Delete note button */}
-                        <button
-                          id="btn-delete-selected-note"
-                          type="button"
-                          onClick={handleDeleteSelectedNotes}
-                          className="btn-m3-icon w-5 h-5 text-[var(--error)] hover:bg-[var(--surface-container-high)] cursor-pointer"
-                          title={i18n._(msg`Eliminar nota`)}
-                          aria-label={i18n._(msg`Eliminar nota`)}
-                        >
-                          <span className="material-symbols-outlined text-[14px]">delete</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Floating Canvas Navigation Controls (DESIGN.md Section 3 & 14) */}
-                    <div id="div-app-24" className="absolute bottom-3 left-3 z-10 flex items-center gap-0.5 sm:gap-1 bg-[var(--surface-container)] border border-[var(--outline)] rounded-md p-1 shadow-sm select-none">
-                      <button
-                        id="btn-canvas-zoom-out"
-                        type="button"
-                        onClick={handleZoomOut}
-                        className="btn-m3-icon w-7 h-7 cursor-pointer"
-                        title={i18n._(msg`Alejar zoom (Zoom Out)`)}
-                        aria-label={i18n._(msg`Alejar zoom`)}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">remove</span>
-                      </button>
-
-                      <button
-                        id="btn-canvas-zoom-reset"
-                        type="button"
-                        onClick={handleResetZoom}
-                        className="px-2 py-0.5 text-xs font-mono font-medium text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] rounded-full transition-colors cursor-pointer"
-                        title={i18n._(msg`Clic para restablecer zoom al 100%`)}
-                      >
-                        {canvasZoom}%
-                      </button>
-
-                      <button
-                        id="btn-canvas-zoom-in"
-                        type="button"
-                        onClick={handleZoomIn}
-                        className="btn-m3-icon w-7 h-7 cursor-pointer"
-                        title={i18n._(msg`Acercar zoom (Zoom In)`)}
-                        aria-label={i18n._(msg`Acercar zoom`)}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">add</span>
-                      </button>
-
-                      <div id="div-app-25" className="w-px h-4 bg-[var(--outline)] my-auto mx-0.5" />
-
-                      <button
-                        id="btn-canvas-zoom-fit"
-                        type="button"
-                        onClick={handleZoomToFit}
-                        className="btn-m3-icon w-7 h-7 cursor-pointer"
-                        title={i18n._(msg`Ajustar zoom al contenido (Zoom to Fit)`)}
-                        aria-label={i18n._(msg`Ajustar zoom`)}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">fit_screen</span>
-                      </button>
-
-                      <div id="div-app-25-tools" className="w-px h-4 bg-[var(--outline)] my-auto mx-0.5" />
-
-                      {/* Mode: Selection Tool (V) */}
-                      <button
-                        id="btn-canvas-tool-select"
-                        type="button"
-                        onClick={() => handleSelectCanvasTool('select')}
-                        className={`btn-m3-icon w-7 h-7 cursor-pointer transition-colors ${
-                          currentCanvasTool === 'select'
-                            ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
-                            : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--on-surface)]'
-                        }`}
-                        title={i18n._(msg`Modo Selección (V)`)}
-                        aria-label={i18n._(msg`Modo Selección`)}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">near_me</span>
-                      </button>
-
-                      {/* Mode: Sticky Note / Posit Tool (N) */}
-                      <button
-                        id="btn-canvas-tool-note"
-                        type="button"
-                        onClick={() => handleSelectCanvasTool('note')}
-                        className={`btn-m3-icon w-7 h-7 cursor-pointer transition-colors ${
-                          currentCanvasTool === 'note'
-                            ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
-                            : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--on-surface)]'
-                        }`}
-                        title={i18n._(msg`Crear posit / nota adhesiva (N)`)}
-                        aria-label={i18n._(msg`Crear posit`)}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">sticky_note_2</span>
-                      </button>
-
-                      {/* Mode: Text Tool (T) */}
-                      <button
-                        id="btn-canvas-tool-text"
-                        type="button"
-                        onClick={() => handleSelectCanvasTool('text')}
-                        className={`btn-m3-icon w-7 h-7 cursor-pointer transition-colors ${
-                          currentCanvasTool === 'text'
-                            ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
-                            : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--on-surface)]'
-                        }`}
-                        title={i18n._(msg`Crear texto (T)`)}
-                        aria-label={i18n._(msg`Crear texto`)}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">title</span>
-                      </button>
-
-                      {/* Mode: Arrow Tool for Joining Tasks at Central Points (A) */}
-                      <button
-                        id="btn-canvas-tool-arrow"
-                        type="button"
-                        onClick={() => handleSelectCanvasTool('arrow')}
-                        className={`btn-m3-icon w-7 h-7 cursor-pointer transition-colors ${
-                          currentCanvasTool === 'arrow'
-                            ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
-                            : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--on-surface)]'
-                        }`}
-                        title={i18n._(msg`Unir tareas con flechas en puntos centrales (A)`)}
-                        aria-label={i18n._(msg`Unir tareas con flechas`)}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">timeline</span>
-                      </button>
-                    </div>
-
-                    {/* Active Connection Source Helper Banner */}
-                    {activeConnectionSource && (
-                      <div
-                        id="canvas-active-connection-banner"
-                        className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-[var(--surface-container-high)] border border-[var(--primary)] text-[var(--on-surface)] rounded-md px-3 py-1.5 shadow-md flex items-center gap-2.5 text-xs select-none"
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)]" />
-                        <span className="font-medium">
-                          {i18n._(msg`Uniendo desde #${activeConnectionSource.taskId || 'tarea'}`)} ·{' '}
-                          <span className="text-[var(--on-surface-variant)] font-normal">
-                            {i18n._(msg`Haz clic en el punto central de otra tarea para unirlas`)}
-                          </span>
-                        </span>
-                        <button
-                          id="btn-cancel-task-connection"
-                          type="button"
-                          onClick={() => setActiveConnectionSource(null)}
-                          className="px-2 py-0.5 rounded bg-[var(--surface)] hover:bg-[var(--surface-container)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] text-[11px] font-mono border border-[var(--outline)] cursor-pointer transition-colors"
-                        >
-                          {i18n._(msg`Cancelar (Esc)`)}
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Canvas Empty State Overlay */}
-                    {allParsedTasks.length === 0 && !isCanvasEmptyDismissed && (
-                      <div id="div-app-26" className="absolute inset-0 pointer-events-none flex items-center justify-center p-6 z-10">
-                        <div id="div-app-27" className="pointer-events-auto bg-[var(--surface-container)] border border-[var(--outline)] rounded-lg p-6 max-w-md text-center shadow-lg flex flex-col items-center relative animate-fade-in">
-                          <button
-                            id="btn-dismiss-empty-canvas"
-                            type="button"
-                            onClick={() => setIsCanvasEmptyDismissed(true)}
-                            className="absolute top-2.5 right-2.5 w-6 h-6 rounded flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] cursor-pointer transition-colors"
-                            title={i18n._(msg`Cerrar`)}
-                            aria-label={i18n._(msg`Cerrar`)}
-                          >
-                            <span className="material-symbols-outlined text-[16px]">close</span>
-                          </button>
-                          <div id="div-app-28" className="w-10 h-10 rounded bg-[var(--primary-container)]/30 border border-[var(--primary)]/30 flex items-center justify-center text-[var(--primary)] mb-3">
-                            <span className="material-symbols-outlined text-[22px]">grid_view</span>
-                          </div>
-                          <h3 className="text-sm font-semibold text-[var(--on-surface)] font-sans mb-1">
-                            {i18n._(msg`Lienzo vacío`)}
-                          </h3>
-                          <p className="text-xs text-[var(--on-surface-variant)] mb-4 leading-relaxed">
-                            {i18n._(msg`No hay tareas en este archivo TASKS.md. Comienza añadiendo una tarea o carga un proyecto de ejemplo.`)}
-                          </p>
-                          <div id="div-app-29" className="flex items-center gap-2 flex-wrap justify-center">
-                            <button
-                              id="btn-empty-create-task"
-                              type="button"
-                              onClick={() => {
-                                handleOpenNewTaskModal();
-                              }}
-                              className="btn-m3-primary px-3.5 py-1.5 text-xs cursor-pointer shadow-sm"
-                            >
-                              <span className="material-symbols-outlined text-[15px]">add</span>
-                              <span>{i18n._(msg`Crear primera tarea`)}</span>
-                            </button>
-                            <button
-                              id="btn-empty-load-sample"
-                              type="button"
-                              onClick={handleLoadSampleProject}
-                              className="btn-m3-secondary px-3.5 py-1.5 text-xs cursor-pointer"
-                            >
-                              <span className="material-symbols-outlined text-[15px]">refresh</span>
-                              <span>{i18n._(msg`Cargar ejemplo`)}</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Floating Canvas Multi-Selection Action Bar (DESIGN.md Section 14) */}
-                    {selectedTaskIdsOnCanvas.length > 1 && (
-                      <div id="div-app-30" className="absolute bottom-12 left-1/2 -translate-x-1/2 z-20 bg-[var(--surface-container-high)] border border-[var(--outline)] rounded-md px-2.5 sm:px-3 py-1 shadow-md flex items-center gap-1.5 sm:gap-2 select-none max-w-[96vw] overflow-x-auto">
-                        <div id="div-app-31" className="flex items-center gap-1.5 pr-2 border-r border-[var(--outline)] shrink-0">
-                          <span className="w-2 h-2 rounded bg-[var(--primary)]" />
-                          <span className="text-xs font-mono font-medium text-[var(--on-surface)]">
-                            {selectedTaskIdsOnCanvas.length} {i18n._(msg`seleccionadas`)}
-                          </span>
-                        </div>
-
-                        <button
-                          id="btn-selection-batch-complete"
-                          type="button"
-                          onClick={() =>
-                            handleBatchUpdateTasksFromKanban(selectedTaskIdsOnCanvas, {
-                              completed: true,
-                              status: 'done',
-                            })
-                          }
-                          className="btn-m3-secondary px-2 py-1 text-xs text-emerald-400 border-emerald-800/60 bg-emerald-950/30 cursor-pointer shrink-0"
-                          title={i18n._(msg`Marcar seleccionadas como completadas`)}
-                        >
-                          <span className="material-symbols-outlined text-[15px]">check_circle</span>
-                          <span className="hidden sm:inline">{i18n._(msg`Completar`)}</span>
-                        </button>
-
-                        <button
-                          id="btn-selection-batch-pending"
-                          type="button"
-                          onClick={() =>
-                            handleBatchUpdateTasksFromKanban(selectedTaskIdsOnCanvas, {
-                              completed: false,
-                              status: 'todo',
-                            })
-                          }
-                          className="btn-m3-secondary px-2 py-1 text-xs text-amber-400 border-amber-800/60 bg-amber-950/30 cursor-pointer shrink-0"
-                          title={i18n._(msg`Marcar seleccionadas como pendientes`)}
-                        >
-                          <span className="material-symbols-outlined text-[15px]">pending</span>
-                          <span className="hidden sm:inline">{i18n._(msg`Pendiente`)}</span>
-                        </button>
-
-                        {/* Quick Priorities */}
-                        <div id="div-app-32" className="flex items-center gap-1 shrink-0 border-l border-r border-[var(--outline)] px-1.5">
-                          {(['P0', 'P1', 'P2', 'P3'] as TaskPriority[]).map((p) => (
-                            <button
-                              id={`btn-selection-priority-${p}`}
-                              key={p}
-                              type="button"
-                              onClick={() =>
-                                handleBatchUpdateTasksFromKanban(selectedTaskIdsOnCanvas, { priority: p })
-                              }
-                              className="px-1.5 py-0.5 text-[10px] font-mono font-medium rounded border border-[var(--outline)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] cursor-pointer"
-                              title={i18n._(msg`Establecer prioridad ${p}`)}
-                            >
-                              {p}
-                            </button>
-                          ))}
-                        </div>
-
-                        <button
-                          id="btn-selection-batch-delete"
-                          type="button"
-                          onClick={() => {
-                            handleBatchDeleteTasksFromKanban(selectedTaskIdsOnCanvas);
-                          }}
-                          className="btn-m3-secondary px-2 py-1 text-xs text-[var(--error)] border-rose-800/60 bg-rose-950/30 cursor-pointer shrink-0"
-                          title={i18n._(msg`Eliminar tareas seleccionadas`)}
-                        >
-                          <span className="material-symbols-outlined text-[15px]">delete</span>
-                          <span className="hidden sm:inline">{i18n._(msg`Eliminar`)}</span>
-                        </button>
-
-                        <button
-                          id="btn-selection-deselect"
-                          type="button"
-                          onClick={() => {
-                            if (editor) {
-                              editor.selectNone();
-                            }
-                            setSelectedTaskIdsOnCanvas([]);
-                            setSelectedTaskShapeId(null);
-                          }}
-                          className="btn-m3-icon w-6 h-6 shrink-0 cursor-pointer"
-                          title={i18n._(msg`Deseleccionar`)}
-                        >
-                          <span className="material-symbols-outlined text-[14px]">close</span>
-                        </button>
-                      </div>
-                    )}
                   </div>
                 );
 
