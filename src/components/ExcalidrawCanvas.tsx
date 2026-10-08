@@ -41,6 +41,7 @@ interface ExcalidrawCanvasProps {
   onOpenNewTaskModal?: (groupTitle?: string) => void;
   onVisualChange?: (visualState: { tasks: TaskVisualState[]; groups: GroupVisualState[] }) => void;
   onMarkdownChange?: (newMarkdown: string) => void;
+  onToggleTaskCompletion?: (taskId: string) => void;
 }
 
 export const ExcalidrawCanvas = forwardRef<ExcalidrawCanvasHandle, ExcalidrawCanvasProps>(
@@ -57,6 +58,7 @@ export const ExcalidrawCanvas = forwardRef<ExcalidrawCanvasHandle, ExcalidrawCan
       onOpenNewTaskModal,
       onVisualChange,
       onMarkdownChange,
+      onToggleTaskCompletion,
     },
     ref
   ) => {
@@ -132,18 +134,27 @@ export const ExcalidrawCanvas = forwardRef<ExcalidrawCanvasHandle, ExcalidrawCan
           setZoomLevel((prev) => (prev !== z ? z : prev));
         }
 
-        // Selection detection
+        // Selection & Checkbox click detection
         const selectedElementIds = appState?.selectedElementIds || {};
         const selectedIds = Object.keys(selectedElementIds).filter((id) => selectedElementIds[id]);
 
         if (selectedIds.length === 1) {
           const selId = selectedIds[0];
           const elem = sceneElements.find((e) => e.id === selId);
-          if (elem?.customData?.type === 'task') {
-            const tId = elem.customData.taskId || elem.customData.temporaryId;
-            if (tId) {
-              onSelectTask(tId);
-            }
+
+          // If user clicked the checkbox or checkmark icon
+          if (
+            (elem?.customData?.type === 'task_checkbox' || elem?.customData?.type === 'task_check_icon') &&
+            elem.customData.taskId &&
+            onToggleTaskCompletion
+          ) {
+            onToggleTaskCompletion(elem.customData.taskId);
+            return;
+          }
+
+          const tId = elem?.customData?.taskId || elem?.customData?.temporaryId;
+          if (tId) {
+            onSelectTask(tId);
           }
         } else if (selectedIds.length === 0) {
           onSelectTask(null);
@@ -160,7 +171,7 @@ export const ExcalidrawCanvas = forwardRef<ExcalidrawCanvasHandle, ExcalidrawCan
           }, 300);
         }
       },
-      [onSelectTask, onVisualChange]
+      [onSelectTask, onVisualChange, onToggleTaskCompletion]
     );
 
     // 3. Expose imperative commands via forwardRef
@@ -255,7 +266,7 @@ export const ExcalidrawCanvas = forwardRef<ExcalidrawCanvasHandle, ExcalidrawCan
         },
         getImperativeAPI: () => excalidrawAPI,
       }),
-      [excalidrawAPI]
+      [excalidrawAPI, markdown]
     );
 
     // Double-click handler on canvas
@@ -271,11 +282,9 @@ export const ExcalidrawCanvas = forwardRef<ExcalidrawCanvasHandle, ExcalidrawCan
           const target = excalidrawAPI
             .getSceneElements()
             .find((el: any) => el.id === selectedIds[0]);
-          if (target?.customData?.type === 'task') {
-            const tid = target.customData.taskId || target.customData.temporaryId;
-            if (tid) {
-              onOpenTaskDetails(tid);
-            }
+          const tid = target?.customData?.taskId || target?.customData?.temporaryId;
+          if (tid) {
+            onOpenTaskDetails(tid);
           }
         }
       },

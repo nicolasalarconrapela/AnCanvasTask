@@ -42,56 +42,85 @@ export interface ExcalidrawNoteMetadata {
 }
 
 export const CARD_WIDTH = 320;
-export const CARD_HEIGHT = 110;
-export const GROUP_PADDING_X = 24;
+export const CARD_HEIGHT = 92;
+export const GROUP_PADDING_X = 20;
 export const GROUP_PADDING_TOP = 64;
-export const GROUP_PADDING_BOTTOM = 24;
+export const GROUP_PADDING_BOTTOM = 20;
 export const GROUP_GAP_X = 48;
+export const TASK_GAP_Y = 14;
 
-export function getPriorityStrokeColor(priority?: TaskPriority, isDark = true): string {
+export function getPriorityTextColor(priority?: TaskPriority): string {
   switch (priority) {
     case 'P0':
-      return '#ef4444'; // Red
+      return '#f85149'; // Red
     case 'P1':
-      return '#f59e0b'; // Amber / Orange
+      return '#e3b341'; // Amber / Orange
     case 'P2':
-      return '#3b82f6'; // Blue
+      return '#58a6ff'; // Blue
     case 'P3':
     default:
-      return isDark ? '#475569' : '#94a3b8'; // Slate
+      return '#8b949e'; // Gray
+  }
+}
+
+export function getPriorityStrokeColor(priority?: TaskPriority, isDark = true): string {
+  if (isDark) {
+    switch (priority) {
+      case 'P0':
+        return '#f85149';
+      case 'P1':
+        return '#d29922';
+      case 'P2':
+        return '#388bfd';
+      case 'P3':
+      default:
+        return '#30363d';
+    }
+  } else {
+    switch (priority) {
+      case 'P0':
+        return '#cf222e';
+      case 'P1':
+        return '#9a6700';
+      case 'P2':
+        return '#0969da';
+      case 'P3':
+      default:
+        return '#d0d7de';
+    }
   }
 }
 
 export function getPriorityBgColor(priority?: TaskPriority, isDark = true): string {
   if (isDark) {
-    switch (priority) {
-      case 'P0':
-        return '#261214';
-      case 'P1':
-        return '#271b0e';
-      case 'P2':
-        return '#132137';
-      case 'P3':
-      default:
-        return '#161b22';
-    }
+    return '#161b22';
   } else {
-    switch (priority) {
-      case 'P0':
-        return '#fef2f2';
-      case 'P1':
-        return '#fffbeb';
-      case 'P2':
-        return '#eff6ff';
-      case 'P3':
-      default:
-        return '#f8fafc';
-    }
+    return '#ffffff';
+  }
+}
+
+export function getStatusColor(task: ParsedMarkdownTask): string {
+  if (task.completed) return '#3fb950'; // Green
+  const st = (task.status || 'todo').toLowerCase();
+  switch (st) {
+    case 'done':
+      return '#3fb950';
+    case 'in_progress':
+    case 'in-progress':
+      return '#58a6ff';
+    case 'blocked':
+      return '#f85149';
+    case 'review':
+      return '#a371f7';
+    case 'todo':
+    case 'backlog':
+    default:
+      return '#e3b341';
   }
 }
 
 /**
- * Creates formatted label text for a task card in Excalidraw.
+ * Creates formatted label text for fallback representation.
  */
 export function formatTaskCardText(task: ParsedMarkdownTask): string {
   const check = task.completed ? '[x]' : '[ ]';
@@ -106,7 +135,7 @@ export function formatTaskCardText(task: ParsedMarkdownTask): string {
 }
 
 /**
- * Builds full Excalidraw scene elements from parsed groups and tasks.
+ * Builds full Excalidraw scene elements matching the professional sober dark/light cards design.
  */
 export function buildExcalidrawElementsFromTasks(
   groups: ParsedGroup[],
@@ -120,7 +149,7 @@ export function buildExcalidrawElementsFromTasks(
   const missingIdTaskIds = validationReport?.missingIdTaskIds || new Set<string>();
   const unresolvedBlockerMap = validationReport?.unresolvedBlockerMap || new Map<string, string[]>();
 
-  // Map from normalized taskId -> elementId
+  // Map from normalized taskId -> elementId (cardId)
   const taskIdToElementId = new Map<string, string>();
   const tasksWithDependencies: Array<{
     blockedTaskId: string;
@@ -147,19 +176,20 @@ export function buildExcalidrawElementsFromTasks(
     }
   }
 
-  let currentGroupX = 80;
-  const GROUP_START_Y = 80;
+  let currentGroupX = 60;
+  const GROUP_START_Y = 60;
   let seedCounter = 1000;
 
   groups.forEach((group, gIdx) => {
     const groupTitle = group.title;
     const taskCount = group.tasks.length;
+    const completedCount = group.tasks.filter((t) => t.completed).length;
     const groupSaved = savedGroupMap.get(groupTitle.toLowerCase());
 
     const groupWidth = groupSaved?.width || 360;
     const defaultCalculatedHeight = Math.max(
-      220,
-      GROUP_PADDING_TOP + taskCount * CARD_HEIGHT + Math.max(0, taskCount - 1) * 16 + GROUP_PADDING_BOTTOM
+      200,
+      GROUP_PADDING_TOP + taskCount * CARD_HEIGHT + Math.max(0, taskCount - 1) * TASK_GAP_Y + GROUP_PADDING_BOTTOM
     );
     const groupHeight = groupSaved?.height || defaultCalculatedHeight;
     const groupX = groupSaved?.x !== undefined ? groupSaved.x : currentGroupX;
@@ -167,8 +197,9 @@ export function buildExcalidrawElementsFromTasks(
 
     const groupElementId = `group_${gIdx}_${groupTitle.replace(/\s+/g, '_')}`;
     const groupHeaderId = `header_${groupElementId}`;
+    const groupStatsId = `stats_${groupElementId}`;
 
-    // 1. Group Container Rectangle
+    // 1. Group Container Rectangle (Sleek dark card frame)
     elements.push({
       id: groupElementId,
       type: 'rectangle',
@@ -177,8 +208,8 @@ export function buildExcalidrawElementsFromTasks(
       width: groupWidth,
       height: groupHeight,
       angle: 0,
-      strokeColor: isDark ? '#30363d' : '#cbd5e1',
-      backgroundColor: isDark ? '#0d1117' : '#f8fafc',
+      strokeColor: isDark ? '#21262d' : '#d0d7de',
+      backgroundColor: isDark ? '#0d1117' : '#f6f8fa',
       fillStyle: 'solid',
       strokeWidth: 1.5,
       strokeStyle: 'solid',
@@ -201,16 +232,16 @@ export function buildExcalidrawElementsFromTasks(
       } as ExcalidrawGroupMetadata,
     });
 
-    // 2. Group Header Text
+    // 2. Group Header Title Text (## Section Title)
     elements.push({
       id: groupHeaderId,
       type: 'text',
-      x: groupX + 16,
-      y: groupY + 16,
-      width: groupWidth - 32,
-      height: 28,
+      x: groupX + 20,
+      y: groupY + 20,
+      width: 190,
+      height: 24,
       angle: 0,
-      strokeColor: isDark ? '#e6edf3' : '#0f172a',
+      strokeColor: isDark ? '#f0f6fc' : '#1f2328',
       backgroundColor: 'transparent',
       fillStyle: 'solid',
       strokeWidth: 1,
@@ -228,13 +259,13 @@ export function buildExcalidrawElementsFromTasks(
       updated: Date.now(),
       link: null,
       locked: false,
-      text: `## ${groupTitle} (${taskCount})`,
-      fontSize: 16,
+      text: `## ${groupTitle}`,
+      fontSize: 15,
       fontFamily: 2, // Helvetica / Sans-serif
       textAlign: 'left',
       verticalAlign: 'top',
       containerId: null,
-      originalText: `## ${groupTitle} (${taskCount})`,
+      originalText: `## ${groupTitle}`,
       lineHeight: 1.25,
       customData: {
         type: 'group_header',
@@ -242,7 +273,49 @@ export function buildExcalidrawElementsFromTasks(
       },
     });
 
-    // 3. Task Cards within Group
+    // 3. Group Header Stats Text (1/3 completed or 3 tasks)
+    const statsText = completedCount > 0 ? `${completedCount}/${taskCount} completed` : `${taskCount} tasks`;
+    elements.push({
+      id: groupStatsId,
+      type: 'text',
+      x: groupX + groupWidth - 145,
+      y: groupY + 22,
+      width: 125,
+      height: 20,
+      angle: 0,
+      strokeColor: isDark ? '#8b949e' : '#656d76',
+      backgroundColor: 'transparent',
+      fillStyle: 'solid',
+      strokeWidth: 1,
+      strokeStyle: 'solid',
+      roughness: 0,
+      opacity: 100,
+      groupIds: [groupElementId],
+      frameId: null,
+      roundness: null,
+      seed: seedCounter++,
+      version: 1,
+      versionNonce: seedCounter++,
+      isDeleted: false,
+      boundElements: null,
+      updated: Date.now(),
+      link: null,
+      locked: false,
+      text: statsText,
+      fontSize: 13,
+      fontFamily: 2,
+      textAlign: 'right',
+      verticalAlign: 'top',
+      containerId: null,
+      originalText: statsText,
+      lineHeight: 1.25,
+      customData: {
+        type: 'group_stats',
+        groupTitle,
+      },
+    });
+
+    // 4. Task Cards within Group
     let currentTaskY = groupY + GROUP_PADDING_TOP;
 
     group.tasks.forEach((task, tIdx) => {
@@ -255,7 +328,12 @@ export function buildExcalidrawElementsFromTasks(
       const taskH = savedTask?.height || CARD_HEIGHT;
 
       const cardId = `task_card_${normalizedTaskId}`;
-      const textId = `task_text_${normalizedTaskId}`;
+      const checkId = `task_check_${normalizedTaskId}`;
+      const checkIconId = `task_check_icon_${normalizedTaskId}`;
+      const titleId = `task_title_${normalizedTaskId}`;
+      const prioId = `task_prio_${normalizedTaskId}`;
+      const tagsId = `task_tags_${normalizedTaskId}`;
+      const statusId = `task_status_${normalizedTaskId}`;
 
       taskIdToElementId.set(normalizedTaskId, cardId);
 
@@ -278,9 +356,12 @@ export function buildExcalidrawElementsFromTasks(
       const isMissingId = Boolean(!task.taskId && task.temporaryId && missingIdTaskIds.has(task.temporaryId));
       const unresolvedBlockers = task.taskId ? unresolvedBlockerMap.get(task.taskId.toLowerCase()) : undefined;
 
-      const strokeColor = getPriorityStrokeColor(task.priority, isDark);
-      const bgColor = getPriorityBgColor(task.priority, isDark);
-      const textColor = isDark ? '#f0f6fc' : '#0f172a';
+      const strokeColor = isDark
+        ? task.completed
+          ? '#21262d'
+          : '#30363d'
+        : '#d0d7de';
+      const bgColor = isDark ? '#161b22' : '#ffffff';
 
       const taskMeta: ExcalidrawTaskMetadata = {
         type: 'task',
@@ -299,9 +380,9 @@ export function buildExcalidrawElementsFromTasks(
         unresolvedBlockers,
       };
 
-      const cardText = formatTaskCardText(task);
+      const cardGroupIds = [groupElementId, cardId];
 
-      // Task Card Box
+      // A. Task Card Background Rectangle
       elements.push({
         id: cardId,
         type: 'rectangle',
@@ -313,41 +394,119 @@ export function buildExcalidrawElementsFromTasks(
         strokeColor,
         backgroundColor: bgColor,
         fillStyle: 'solid',
-        strokeWidth: 1.5,
+        strokeWidth: 1.2,
         strokeStyle: 'solid',
         roughness: 0,
-        opacity: task.completed ? 75 : 100,
-        groupIds: [groupElementId, cardId],
+        opacity: task.completed ? 80 : 100,
+        groupIds: cardGroupIds,
         frameId: null,
         roundness: { type: 3 },
         seed: seedCounter++,
         version: 1,
         versionNonce: seedCounter++,
         isDeleted: false,
-        boundElements: [{ id: textId, type: 'text' }],
+        boundElements: null,
         updated: Date.now(),
         link: null,
         locked: false,
         customData: taskMeta,
       });
 
-      // Task Card Inner Text
+      // B. Checkbox Box
       elements.push({
-        id: textId,
-        type: 'text',
-        x: taskX + 12,
-        y: taskY + 12,
-        width: taskW - 24,
-        height: taskH - 24,
+        id: checkId,
+        type: 'rectangle',
+        x: taskX + 14,
+        y: taskY + 16,
+        width: 16,
+        height: 16,
         angle: 0,
-        strokeColor: textColor,
+        strokeColor: task.completed ? '#388bfd' : isDark ? '#3d444d' : '#8c959f',
+        backgroundColor: task.completed ? '#1f6feb' : isDark ? '#21262d' : '#f6f8fa',
+        fillStyle: 'solid',
+        strokeWidth: 1.5,
+        strokeStyle: 'solid',
+        roughness: 0,
+        opacity: task.completed ? 85 : 100,
+        groupIds: cardGroupIds,
+        frameId: null,
+        roundness: { type: 3 },
+        seed: seedCounter++,
+        version: 1,
+        versionNonce: seedCounter++,
+        isDeleted: false,
+        boundElements: null,
+        updated: Date.now(),
+        link: null,
+        locked: false,
+        customData: { type: 'task_checkbox', taskId: taskMeta.taskId },
+      });
+
+      // If completed, add checkmark text inside checkbox
+      if (task.completed) {
+        elements.push({
+          id: checkIconId,
+          type: 'text',
+          x: taskX + 16,
+          y: taskY + 16,
+          width: 12,
+          height: 14,
+          angle: 0,
+          strokeColor: '#ffffff',
+          backgroundColor: 'transparent',
+          fillStyle: 'solid',
+          strokeWidth: 1,
+          strokeStyle: 'solid',
+          roughness: 0,
+          opacity: 100,
+          groupIds: cardGroupIds,
+          frameId: null,
+          roundness: null,
+          seed: seedCounter++,
+          version: 1,
+          versionNonce: seedCounter++,
+          isDeleted: false,
+          boundElements: null,
+          updated: Date.now(),
+          link: null,
+          locked: false,
+          text: '✓',
+          fontSize: 12,
+          fontFamily: 2,
+          textAlign: 'center',
+          verticalAlign: 'middle',
+          containerId: null,
+          originalText: '✓',
+          lineHeight: 1,
+          customData: { type: 'task_check_icon', taskId: taskMeta.taskId },
+        });
+      }
+
+      // C. Task Title Text
+      const titleColor = isDark
+        ? task.completed
+          ? '#7d8590'
+          : '#e6edf3'
+        : task.completed
+        ? '#8c959f'
+        : '#1f2328';
+
+      elements.push({
+        id: titleId,
+        type: 'text',
+        x: taskX + 40,
+        y: taskY + 14,
+        width: 165,
+        height: 42,
+        angle: 0,
+        strokeColor: titleColor,
         backgroundColor: 'transparent',
         fillStyle: 'solid',
         strokeWidth: 1,
         strokeStyle: 'solid',
         roughness: 0,
-        opacity: task.completed ? 75 : 100,
-        groupIds: [groupElementId, cardId],
+        opacity: task.completed ? 80 : 100,
+        groupIds: cardGroupIds,
         frameId: null,
         roundness: null,
         seed: seedCounter++,
@@ -358,18 +517,150 @@ export function buildExcalidrawElementsFromTasks(
         updated: Date.now(),
         link: null,
         locked: false,
-        text: cardText,
-        fontSize: 14,
+        text: task.title,
+        fontSize: 13,
         fontFamily: 2, // Helvetica / Sans-serif
         textAlign: 'left',
         verticalAlign: 'top',
-        containerId: cardId,
-        originalText: cardText,
-        lineHeight: 1.35,
-        customData: taskMeta,
+        containerId: null,
+        originalText: task.title,
+        lineHeight: 1.25,
+        customData: { type: 'task_title', taskId: taskMeta.taskId },
       });
 
-      currentTaskY += taskH + 16;
+      // D. Priority Pill & Options Icons (● P0  🔗  ⋮)
+      const prioColor = getPriorityTextColor(task.priority);
+      const prioText = `● ${task.priority || 'P1'}  🔗  ⋮`;
+
+      elements.push({
+        id: prioId,
+        type: 'text',
+        x: taskX + 210,
+        y: taskY + 15,
+        width: 96,
+        height: 18,
+        angle: 0,
+        strokeColor: prioColor,
+        backgroundColor: 'transparent',
+        fillStyle: 'solid',
+        strokeWidth: 1,
+        strokeStyle: 'solid',
+        roughness: 0,
+        opacity: task.completed ? 80 : 100,
+        groupIds: cardGroupIds,
+        frameId: null,
+        roundness: null,
+        seed: seedCounter++,
+        version: 1,
+        versionNonce: seedCounter++,
+        isDeleted: false,
+        boundElements: null,
+        updated: Date.now(),
+        link: null,
+        locked: false,
+        text: prioText,
+        fontSize: 12,
+        fontFamily: 2,
+        textAlign: 'right',
+        verticalAlign: 'top',
+        containerId: null,
+        originalText: prioText,
+        lineHeight: 1.2,
+        customData: { type: 'task_prio', taskId: taskMeta.taskId },
+      });
+
+      // E. Tags / Dependencies info on bottom-left
+      let tagsText = '';
+      if (task.tags && task.tags.length > 0) {
+        tagsText = task.tags.map((t) => `#${t}`).join(' ');
+      }
+      if (task.blockedBy) {
+        const blockerTag = `🔒 #${task.blockedBy}`;
+        tagsText = tagsText ? `${tagsText}  ${blockerTag}` : blockerTag;
+      }
+      if (!tagsText) {
+        tagsText = `#${task.taskId || 'task'}`;
+      }
+
+      elements.push({
+        id: tagsId,
+        type: 'text',
+        x: taskX + 14,
+        y: taskY + 65,
+        width: 200,
+        height: 16,
+        angle: 0,
+        strokeColor: task.blockedBy ? '#e3b341' : isDark ? '#58a6ff' : '#0969da',
+        backgroundColor: 'transparent',
+        fillStyle: 'solid',
+        strokeWidth: 1,
+        strokeStyle: 'solid',
+        roughness: 0,
+        opacity: task.completed ? 75 : 100,
+        groupIds: cardGroupIds,
+        frameId: null,
+        roundness: null,
+        seed: seedCounter++,
+        version: 1,
+        versionNonce: seedCounter++,
+        isDeleted: false,
+        boundElements: null,
+        updated: Date.now(),
+        link: null,
+        locked: false,
+        text: tagsText,
+        fontSize: 11,
+        fontFamily: 3, // Cascadia / Monospace
+        textAlign: 'left',
+        verticalAlign: 'top',
+        containerId: null,
+        originalText: tagsText,
+        lineHeight: 1.2,
+        customData: { type: 'task_tags', taskId: taskMeta.taskId },
+      });
+
+      // F. Status on bottom-right (TODO / IN_PROGRESS / DONE / BLOCKED)
+      const statusText = (task.completed ? 'DONE' : task.status || 'TODO').toUpperCase();
+      const statusColor = getStatusColor(task);
+
+      elements.push({
+        id: statusId,
+        type: 'text',
+        x: taskX + 220,
+        y: taskY + 65,
+        width: 86,
+        height: 16,
+        angle: 0,
+        strokeColor: statusColor,
+        backgroundColor: 'transparent',
+        fillStyle: 'solid',
+        strokeWidth: 1,
+        strokeStyle: 'solid',
+        roughness: 0,
+        opacity: task.completed ? 75 : 100,
+        groupIds: cardGroupIds,
+        frameId: null,
+        roundness: null,
+        seed: seedCounter++,
+        version: 1,
+        versionNonce: seedCounter++,
+        isDeleted: false,
+        boundElements: null,
+        updated: Date.now(),
+        link: null,
+        locked: false,
+        text: statusText,
+        fontSize: 11,
+        fontFamily: 3, // Cascadia / Monospace
+        textAlign: 'right',
+        verticalAlign: 'top',
+        containerId: null,
+        originalText: statusText,
+        lineHeight: 1.2,
+        customData: { type: 'task_status', taskId: taskMeta.taskId },
+      });
+
+      currentTaskY += taskH + TASK_GAP_Y;
     });
 
     if (groupSaved?.x === undefined) {
@@ -377,7 +668,7 @@ export function buildExcalidrawElementsFromTasks(
     }
   });
 
-  // 4. Dependency Arrows
+  // 5. Dependency Arrows with Smart Port Routing
   tasksWithDependencies.forEach(({ blockedTaskId, blockedElementId, blockerIds }) => {
     blockerIds.forEach((blockerId) => {
       const blockerElementId = taskIdToElementId.get(blockerId);
@@ -387,10 +678,31 @@ export function buildExcalidrawElementsFromTasks(
       const blockedElem = elements.find((e) => e.id === blockedElementId);
       if (!blockerElem || !blockedElem) return;
 
-      const startX = blockerElem.x + blockerElem.width / 2;
-      const startY = blockerElem.y + blockerElem.height;
-      const endX = blockedElem.x + blockedElem.width / 2;
-      const endY = blockedElem.y;
+      let startX: number;
+      let startY: number;
+      let endX: number;
+      let endY: number;
+
+      // Smart directional anchor calculation
+      if (blockerElem.x + blockerElem.width <= blockedElem.x + 40) {
+        // Horizontal connection: Blocker (left) -> Blocked (right)
+        startX = blockerElem.x + blockerElem.width;
+        startY = blockerElem.y + blockerElem.height / 2;
+        endX = blockedElem.x;
+        endY = blockedElem.y + blockedElem.height / 2;
+      } else if (blockerElem.y + blockerElem.height <= blockedElem.y + 40) {
+        // Vertical connection: Blocker (above) -> Blocked (below)
+        startX = blockerElem.x + blockerElem.width / 2;
+        startY = blockerElem.y + blockerElem.height;
+        endX = blockedElem.x + blockedElem.width / 2;
+        endY = blockedElem.y;
+      } else {
+        // Fallback smooth routing
+        startX = blockerElem.x + blockerElem.width;
+        startY = blockerElem.y + blockerElem.height / 2;
+        endX = blockedElem.x;
+        endY = blockedElem.y + blockedElem.height / 2;
+      }
 
       const dx = endX - startX;
       const dy = endY - startY;
@@ -405,7 +717,7 @@ export function buildExcalidrawElementsFromTasks(
         width: Math.abs(dx) || 1,
         height: Math.abs(dy) || 1,
         angle: 0,
-        strokeColor: isDark ? '#94a3b8' : '#64748b',
+        strokeColor: isDark ? '#7d8590' : '#8c959f',
         backgroundColor: 'transparent',
         fillStyle: 'solid',
         strokeWidth: 1.5,
@@ -534,15 +846,16 @@ export function applyExcalidrawAutoLayout(
     tasksByGroup.get(grp)!.push(tb);
   });
 
-  let currentGroupX = 80;
-  const GROUP_START_Y = 80;
-  const positionUpdates = new Map<string, { x: number; y: number; w?: number; h?: number }>();
+  let currentGroupX = 60;
+  const GROUP_START_Y = 60;
+  const positionDeltas = new Map<string, { dx: number; dy: number }>();
+  const groupPositionUpdates = new Map<string, { x: number; y: number; w: number; h: number }>();
 
   for (const [groupTitle, tasks] of tasksByGroup.entries()) {
     if (tasks.length === 0) {
       const grpElem = groupElementsMap.get(groupTitle.toLowerCase());
       if (grpElem) {
-        positionUpdates.set(grpElem.id, {
+        groupPositionUpdates.set(grpElem.id, {
           x: currentGroupX,
           y: GROUP_START_Y,
           w: 360,
@@ -557,7 +870,7 @@ export function applyExcalidrawAutoLayout(
     g.setGraph({
       rankdir: 'TB',
       nodesep: 24,
-      ranksep: 42,
+      ranksep: 36,
       marginx: 0,
       marginy: 0,
     });
@@ -622,14 +935,14 @@ export function applyExcalidrawAutoLayout(
     const contentHeight = maxY - minY;
 
     const groupWidth = Math.max(360, contentWidth + GROUP_PADDING_X * 2);
-    const groupHeight = Math.max(220, contentHeight + GROUP_PADDING_TOP + GROUP_PADDING_BOTTOM);
+    const groupHeight = Math.max(200, contentHeight + GROUP_PADDING_TOP + GROUP_PADDING_BOTTOM);
 
     const groupX = currentGroupX;
     const groupY = GROUP_START_Y;
 
     const grpElem = groupElementsMap.get(groupTitle.toLowerCase());
     if (grpElem) {
-      positionUpdates.set(grpElem.id, {
+      groupPositionUpdates.set(grpElem.id, {
         x: groupX,
         y: groupY,
         w: groupWidth,
@@ -649,65 +962,63 @@ export function applyExcalidrawAutoLayout(
         const taskX = groupX + GROUP_PADDING_X + (nodeLeft - minX);
         const taskY = groupY + GROUP_PADDING_TOP + (nodeTop - minY);
 
-        positionUpdates.set(cardElem.id, {
-          x: taskX,
-          y: taskY,
-          w: CARD_WIDTH,
-          h: CARD_HEIGHT,
-        });
+        const dx = taskX - cardElem.x;
+        const dy = taskY - cardElem.y;
+
+        positionDeltas.set(cardElem.id, { dx, dy });
       }
     });
 
     currentGroupX += groupWidth + GROUP_GAP_X;
   }
 
-  // Clone elements and apply position changes
+  // Clone elements and apply position changes for cards, groups, and sub-elements
   const updatedElements = elements.map((el) => {
-    const pos = positionUpdates.get(el.id);
-    if (pos) {
+    // 1. Group containers
+    const grpUpdate = groupPositionUpdates.get(el.id);
+    if (grpUpdate) {
       return {
         ...el,
-        x: pos.x,
-        y: pos.y,
-        width: pos.w || el.width,
-        height: pos.h || el.height,
+        x: grpUpdate.x,
+        y: grpUpdate.y,
+        width: grpUpdate.w,
+        height: grpUpdate.h,
         version: (el.version || 1) + 1,
         versionNonce: Date.now(),
       };
     }
 
-    // If it's a child text element inside a task or group header, position with offset
-    if (el.type === 'text' && el.containerId) {
-      const containerPos = positionUpdates.get(el.containerId);
-      if (containerPos) {
-        return {
-          ...el,
-          x: containerPos.x + 12,
-          y: containerPos.y + 12,
-          width: (containerPos.w || CARD_WIDTH) - 24,
-          height: (containerPos.h || CARD_HEIGHT) - 24,
-          version: (el.version || 1) + 1,
-          versionNonce: Date.now(),
-        };
-      }
-    }
-
-    // Group header text
-    if (el.type === 'text' && el.customData?.type === 'group_header') {
+    // 2. Group headers
+    if (el.customData?.type === 'group_header' || el.customData?.type === 'group_stats') {
       const gtitle = el.customData.groupTitle?.toLowerCase();
       const grpElem = groupElementsMap.get(gtitle);
       if (grpElem) {
-        const grpPos = positionUpdates.get(grpElem.id);
+        const grpPos = groupPositionUpdates.get(grpElem.id);
         if (grpPos) {
+          const isStats = el.customData.type === 'group_stats';
           return {
             ...el,
-            x: grpPos.x + 16,
-            y: grpPos.y + 16,
-            width: (grpPos.w || 360) - 32,
+            x: isStats ? grpPos.x + grpPos.w - 145 : grpPos.x + 20,
+            y: isStats ? grpPos.y + 22 : grpPos.y + 20,
             version: (el.version || 1) + 1,
             versionNonce: Date.now(),
           };
         }
+      }
+    }
+
+    // 3. Task cards and grouped sub-elements
+    const parentCardId = el.groupIds?.find((gid: string) => gid.startsWith('task_card_'));
+    if (parentCardId) {
+      const delta = positionDeltas.get(parentCardId);
+      if (delta && (delta.dx !== 0 || delta.dy !== 0)) {
+        return {
+          ...el,
+          x: el.x + delta.dx,
+          y: el.y + delta.dy,
+          version: (el.version || 1) + 1,
+          versionNonce: Date.now(),
+        };
       }
     }
 

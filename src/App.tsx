@@ -2438,6 +2438,43 @@ export default function App() {
     });
   };
 
+  // Toggle Task Completion directly from Canvas Checkbox click
+  const handleToggleTaskCompletion = useCallback((taskId: string) => {
+    setMarkdownInput((currentMd) => {
+      const groups = parseTasksMarkdown(currentMd);
+      let targetTask: any = null;
+      for (const g of groups) {
+        const found = g.tasks.find(
+          (t) => (t.taskId && t.taskId.toLowerCase() === taskId.toLowerCase()) || t.temporaryId === taskId
+        );
+        if (found) {
+          targetTask = found;
+          break;
+        }
+      }
+      if (!targetTask) return currentMd;
+
+      const nextCompleted = !targetTask.completed;
+      const nextStatus = nextCompleted
+        ? 'done'
+        : targetTask.status === 'done'
+        ? 'todo'
+        : targetTask.status || 'todo';
+
+      const updatedMd = updateTaskInMarkdown(
+        currentMd,
+        taskId,
+        {
+          completed: nextCompleted,
+          status: nextStatus,
+        },
+        targetTask.title
+      );
+
+      return updatedMd;
+    });
+  }, []);
+
   // Execute Auto-Layout (DAG hierarchical organizing via Dagre) with local feedback
   const handleExecuteAutoLayout = () => {
     setIsAutoLayoutConfirmOpen(false);
@@ -4077,6 +4114,7 @@ export default function App() {
                       onMarkdownChange={(newMd) => {
                         setMarkdownInput(newMd);
                       }}
+                      onToggleTaskCompletion={handleToggleTaskCompletion}
                     />
                   </div>
                 );
