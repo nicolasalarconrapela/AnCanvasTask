@@ -786,6 +786,152 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     return Array.from(wsMap.values());
   }, [filteredItems, i18n]);
 
+  const renderStructuredDiff = (item: SyncItemDiff) => {
+    if (item.entityType === 'task') {
+      const local = item.localData || {};
+      const remote = item.remoteData || {};
+      const fields = [
+        {
+          label: i18n._(msg`Título`),
+          local: local.title || <span className="italic opacity-60">{i18n._(msg`Sin título`)}</span>,
+          remote: remote.title || <span className="italic opacity-60">{i18n._(msg`Sin título`)}</span>,
+          isDiff: (local.title || '') !== (remote.title || ''),
+        },
+        {
+          label: i18n._(msg`Estado`),
+          local: local.completed ? i18n._(msg`Completada`) : i18n._(msg`Pendiente`),
+          remote: remote.completed ? i18n._(msg`Completada`) : i18n._(msg`Pendiente`),
+          isDiff: Boolean(local.completed) !== Boolean(remote.completed),
+        },
+        {
+          label: i18n._(msg`Prioridad`),
+          local: local.priority || 'P1',
+          remote: remote.priority || 'P1',
+          isDiff: (local.priority || 'P1') !== (remote.priority || 'P1'),
+        },
+        {
+          label: i18n._(msg`Sección`),
+          local: local.groupTitle || 'General',
+          remote: remote.groupTitle || 'General',
+          isDiff: (local.groupTitle || 'General') !== (remote.groupTitle || 'General'),
+        },
+        {
+          label: i18n._(msg`Etiquetas`),
+          local: Array.isArray(local.tags) ? local.tags.join(', ') || '-' : local.tags || '-',
+          remote: Array.isArray(remote.tags) ? remote.tags.join(', ') || '-' : remote.tags || '-',
+          isDiff: JSON.stringify(local.tags || []) !== JSON.stringify(remote.tags || []),
+        },
+      ];
+
+      return (
+        <div className="overflow-x-auto rounded border border-[var(--outline)]/40 bg-[var(--surface)]">
+          <table className="w-full text-left text-xs border-collapse font-sans">
+            <thead>
+              <tr className="border-b border-[var(--outline)]/40 bg-[var(--surface-container-high)]/40 text-[11px] text-[var(--on-surface-variant)]">
+                <th className="py-1.5 px-3 font-semibold w-28">{i18n._(msg`Campo`)}</th>
+                <th className="py-1.5 px-3 font-semibold text-sky-400 flex-1">
+                  <div className="flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[13px]">laptop</span>
+                    <span>{i18n._(msg`Versión Local`)}</span>
+                  </div>
+                </th>
+                <th className="py-1.5 px-3 font-semibold text-amber-400 flex-1">
+                  <div className="flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[13px]">cloud</span>
+                    <span>{i18n._(msg`Versión Sanity Cloud`)}</span>
+                  </div>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--outline)]/20 text-[11px]">
+              {fields.map((f, i) => (
+                <tr key={i} className={f.isDiff ? 'bg-amber-950/10' : ''}>
+                  <td className="py-1.5 px-3 font-medium text-[var(--on-surface-variant)]">{f.label}</td>
+                  <td className={`py-1.5 px-3 font-mono ${f.isDiff ? 'text-sky-300 font-semibold' : 'text-[var(--on-surface)]'}`}>
+                    {f.local}
+                  </td>
+                  <td className={`py-1.5 px-3 font-mono ${f.isDiff ? 'text-amber-300 font-semibold' : 'text-[var(--on-surface)]'}`}>
+                    {f.remote}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    if (item.entityType === 'workspace') {
+      const local = item.localData || {};
+      const remote = item.remoteData || {};
+      const fields = [
+        {
+          label: i18n._(msg`Nombre`),
+          local: local.name || '-',
+          remote: remote.name || '-',
+          isDiff: (local.name || '') !== (remote.name || ''),
+        },
+        {
+          label: i18n._(msg`Rama activa`),
+          local: local.activeBranchName || '-',
+          remote: remote.activeBranchName || '-',
+          isDiff: (local.activeBranchName || '') !== (remote.activeBranchName || ''),
+        },
+        {
+          label: i18n._(msg`Repositorio`),
+          local: local.githubRepo?.fullName || '-',
+          remote: remote.githubRepo?.fullName || '-',
+          isDiff: (local.githubRepo?.fullName || '') !== (remote.githubRepo?.fullName || ''),
+        },
+        {
+          label: i18n._(msg`Ramas`),
+          local: `${local.branches?.length || 0} ${i18n._(msg`rama(s)`)}`,
+          remote: `${remote.branches?.length || 0} ${i18n._(msg`rama(s)`)}`,
+          isDiff: (local.branches?.length || 0) !== (remote.branches?.length || 0),
+        },
+      ];
+
+      return (
+        <div className="overflow-x-auto rounded border border-[var(--outline)]/40 bg-[var(--surface)]">
+          <table className="w-full text-left text-xs border-collapse font-sans">
+            <thead>
+              <tr className="border-b border-[var(--outline)]/40 bg-[var(--surface-container-high)]/40 text-[11px] text-[var(--on-surface-variant)]">
+                <th className="py-1.5 px-3 font-semibold w-28">{i18n._(msg`Propiedad`)}</th>
+                <th className="py-1.5 px-3 font-semibold text-sky-400 flex-1">
+                  <div className="flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[13px]">laptop</span>
+                    <span>{i18n._(msg`Versión Local`)}</span>
+                  </div>
+                </th>
+                <th className="py-1.5 px-3 font-semibold text-amber-400 flex-1">
+                  <div className="flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[13px]">cloud</span>
+                    <span>{i18n._(msg`Versión Sanity Cloud`)}</span>
+                  </div>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--outline)]/20 text-[11px]">
+              {fields.map((f, i) => (
+                <tr key={i} className={f.isDiff ? 'bg-amber-950/10' : ''}>
+                  <td className="py-1.5 px-3 font-medium text-[var(--on-surface-variant)]">{f.label}</td>
+                  <td className={`py-1.5 px-3 font-mono ${f.isDiff ? 'text-sky-300 font-semibold' : 'text-[var(--on-surface)]'}`}>
+                    {f.local}
+                  </td>
+                  <td className={`py-1.5 px-3 font-mono ${f.isDiff ? 'text-amber-300 font-semibold' : 'text-[var(--on-surface)]'}`}>
+                    {f.remote}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   const renderItemRow = (item: SyncItemDiff, isChildTask = false) => {
     if (item.entityType === 'task_document') return (
       <div key={item.id} data-document-path={item.documentPath} className="flex items-center justify-between gap-3 pl-10 pr-4 py-2 border-b border-[var(--outline)]/10">
@@ -811,7 +957,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         <div
           className={`flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-[var(--surface-container-high)]/40 ${
             selectedItemIds.has(item.id) ? 'bg-indigo-950/20' : ''
-          } ${isChildTask ? 'pl-10 bg-[var(--surface-container-low)]/30' : ''}`}
+          } ${isChildTask ? 'pl-10 sm:pl-12 bg-[var(--surface-container-low)]/20' : ''}`}
         >
           {/* Left: Checkbox + Icon + Title + Metadata */}
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -919,14 +1065,20 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
             {item.diffType === 'conflict' && (
               <button
                 type="button"
-                id={`btn-sync-action-${item.id}`}
-                disabled={isResolving || !isSanityConfigured}
-                onClick={() => handleResolveSingle(item, 'keep_local')}
-                className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium flex items-center gap-1 cursor-pointer disabled:opacity-40 text-rose-400 hover:bg-rose-950/40"
-                title={i18n._(msg`Mantener versión local`)}
+                id={`btn-sync-conflict-toggle-${item.id}`}
+                disabled={isResolving}
+                onClick={() => setExpandedItemId(isExpanded ? null : item.id)}
+                className={`px-2.5 py-1 text-xs rounded font-medium flex items-center gap-1 cursor-pointer transition-colors ${
+                  isExpanded
+                    ? 'bg-rose-950/60 text-rose-300 border border-rose-500/50'
+                    : 'bg-rose-950/30 text-rose-400 hover:bg-rose-950/50 border border-rose-500/30'
+                }`}
+                title={i18n._(msg`Ver el detalle del conflicto y opciones de resolución`)}
               >
-                <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
-                <span>{i18n._(msg`Subir`)}</span>
+                <span className="material-symbols-outlined text-[14px]">
+                  {isExpanded ? 'unfold_less' : 'difference'}
+                </span>
+                <span>{isExpanded ? i18n._(msg`Ocultar`) : i18n._(msg`Resolver conflicto`)}</span>
               </button>
             )}
 
@@ -945,7 +1097,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
             {isMenuOpen && (
               <div
                 id={`sync-menu-dropdown-${item.id}`}
-                className="absolute right-0 top-full mt-1 w-48 bg-[var(--surface-container-high)] border border-[var(--outline)] rounded-md shadow-xl py-1 z-30 text-xs animate-fade-in"
+                className="absolute right-0 top-full mt-1 w-52 bg-[var(--surface-container-high)] border border-[var(--outline)] rounded-md shadow-xl py-1 z-30 text-xs animate-fade-in"
               >
                 <button
                   type="button"
@@ -986,15 +1138,35 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                 )}
 
                 {item.diffType === 'conflict' && (
-                  <button
-                    type="button"
-                    disabled={isResolving || !item.remoteData}
-                    onClick={() => handleResolveSingle(item, 'keep_remote')}
-                    className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-container)] flex items-center gap-2 text-amber-400"
-                  >
-                    <span className="material-symbols-outlined text-[15px]">arrow_downward</span>
-                    <span>{i18n._(msg`Mantener versión remota`)}</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      disabled={isResolving || !isSanityConfigured}
+                      onClick={() => handleResolveSingle(item, 'keep_local')}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-container)] flex items-center gap-2 text-sky-400"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">arrow_upward</span>
+                      <span>{i18n._(msg`Conservar versión local`)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isResolving || !item.remoteData || !isSanityConfigured}
+                      onClick={() => handleResolveSingle(item, 'keep_remote')}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-container)] flex items-center gap-2 text-amber-400"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">arrow_downward</span>
+                      <span>{i18n._(msg`Aceptar versión remota`)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isResolving || !isSanityConfigured}
+                      onClick={() => handleResolveSingle(item, 'merge')}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-container)] flex items-center gap-2 text-indigo-400"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">call_merge</span>
+                      <span>{i18n._(msg`Fusionar cambios (3-way)`)}</span>
+                    </button>
+                  </>
                 )}
 
                 {item.diffType === 'synced' && (
@@ -1124,43 +1296,109 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
           </div>
         )}
 
-        {/* Expanded Diff Viewer */}
+        {/* Expanded Diff Viewer & Conflict Resolution */}
         {isExpanded && (
           <div
             id={`sync-diff-${item.id}`}
-            className="px-4 py-3 bg-[var(--surface-container-low)]/50 border-y border-[var(--outline)]/40 flex flex-col gap-2 text-xs"
+            className="px-4 py-3 bg-[var(--surface-container-low)]/50 border-y border-[var(--outline)]/40 flex flex-col gap-2.5 text-xs animate-fade-in"
           >
-            {item.summaryChanges.length > 0 && (
-              <ul className="list-disc list-inside space-y-1 text-xs text-[var(--on-surface)] pl-1">
-                {item.summaryChanges.map((change, idx) => (
-                  <li key={idx} className="font-mono text-[11px]">
-                    {change}
-                  </li>
-                ))}
-              </ul>
+            {/* Conflict Solution Action Banner */}
+            {item.diffType === 'conflict' && (
+              <div
+                id={`sync-conflict-resolution-bar-${item.id}`}
+                className="p-3 rounded-md bg-rose-950/20 border border-rose-900/40 flex flex-wrap items-center justify-between gap-3"
+              >
+                <div className="flex items-center gap-2 text-rose-300 font-medium text-xs">
+                  <span className="material-symbols-outlined text-[16px] text-rose-400 shrink-0">
+                    priority_high
+                  </span>
+                  <span>{i18n._(msg`Conflicto detectado: selecciona qué solución aplicar`)}</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    id={`btn-conflict-keep-local-${item.id}`}
+                    disabled={isResolving || !isSanityConfigured}
+                    onClick={() => handleResolveSingle(item, 'keep_local')}
+                    className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium flex items-center gap-1 cursor-pointer disabled:opacity-40 text-sky-400 hover:bg-sky-950/40"
+                    title={i18n._(msg`Conservar los cambios locales y sobrescribir en Sanity Cloud`)}
+                  >
+                    <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
+                    <span>{i18n._(msg`Mantener Local`)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    id={`btn-conflict-keep-remote-${item.id}`}
+                    disabled={isResolving || !isSanityConfigured || !item.remoteData}
+                    onClick={() => handleResolveSingle(item, 'keep_remote')}
+                    className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium flex items-center gap-1 cursor-pointer disabled:opacity-40 text-amber-400 hover:bg-amber-950/40"
+                    title={i18n._(msg`Aceptar la versión de Sanity Cloud y sobrescribir los cambios locales`)}
+                  >
+                    <span className="material-symbols-outlined text-[14px]">arrow_downward</span>
+                    <span>{i18n._(msg`Aceptar Remoto`)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    id={`btn-conflict-merge-${item.id}`}
+                    disabled={isResolving || !isSanityConfigured}
+                    onClick={() => handleResolveSingle(item, 'merge')}
+                    className="px-3 py-1 text-xs rounded font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-40 bg-indigo-600 hover:bg-indigo-500 text-white transition shadow-sm"
+                    title={i18n._(msg`Fusionar cambios automáticamente conservando ediciones no conflictivas`)}
+                  >
+                    <span className="material-symbols-outlined text-[14px]">call_merge</span>
+                    <span>{i18n._(msg`Fusionar (3-way merge)`)}</span>
+                  </button>
+                </div>
+              </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-1">
-              <div className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)]/60 flex flex-col">
-                <span className="text-[10px] font-mono font-semibold uppercase text-sky-400 mb-1 flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[13px]">laptop</span>
-                  <span>{i18n._(msg`Versión Local`)}</span>
+            {/* Differences Summary */}
+            {item.summaryChanges.length > 0 && (
+              <div className="p-2.5 rounded bg-[var(--surface)] border border-[var(--outline)]/40 flex flex-col gap-1">
+                <span className="text-[10px] font-semibold text-[var(--on-surface-variant)] uppercase tracking-wider">
+                  {i18n._(msg`Resumen de discrepancias`)}
                 </span>
-                <pre className="text-[11px] font-mono text-[var(--on-surface)] overflow-x-auto whitespace-pre-wrap max-h-36 p-1.5 bg-[var(--surface-container-low)] rounded border border-[var(--outline)]/40">
-                  {item.localData ? JSON.stringify(item.localData, null, 2) : i18n._(msg`(No existe en local)`)}
-                </pre>
+                <ul className="list-disc list-inside space-y-0.5 text-xs text-[var(--on-surface)] pl-1">
+                  {item.summaryChanges.map((change, idx) => (
+                    <li key={idx} className="font-mono text-[11px]">
+                      {change}
+                    </li>
+                  ))}
+                </ul>
               </div>
+            )}
 
-              <div className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)]/60 flex flex-col">
-                <span className="text-[10px] font-mono font-semibold uppercase text-amber-400 mb-1 flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[13px]">cloud</span>
-                  <span>{i18n._(msg`Versión Sanity Cloud`)}</span>
-                </span>
-                <pre className="text-[11px] font-mono text-[var(--on-surface)] overflow-x-auto whitespace-pre-wrap max-h-36 p-1.5 bg-[var(--surface-container-low)] rounded border border-[var(--outline)]/40">
-                  {item.remoteData ? JSON.stringify(item.remoteData, null, 2) : i18n._(msg`(No existe en Sanity)`)}
-                </pre>
+            {/* Structured Field-by-Field Comparison */}
+            {renderStructuredDiff(item)}
+
+            {/* Raw JSON Details (collapsible) */}
+            <details className="mt-1">
+              <summary className="text-[11px] font-mono text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer select-none py-1">
+                {i18n._(msg`Ver datos JSON sin procesar`)}
+              </summary>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-1">
+                <div className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)]/60 flex flex-col">
+                  <span className="text-[10px] font-mono font-semibold uppercase text-sky-400 mb-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[13px]">laptop</span>
+                    <span>{i18n._(msg`Versión Local (JSON)`)}</span>
+                  </span>
+                  <pre className="text-[11px] font-mono text-[var(--on-surface)] overflow-x-auto whitespace-pre-wrap max-h-36 p-1.5 bg-[var(--surface-container-low)] rounded border border-[var(--outline)]/40">
+                    {item.localData ? JSON.stringify(item.localData, null, 2) : i18n._(msg`(No existe en local)`)}
+                  </pre>
+                </div>
+
+                <div className="p-2 rounded bg-[var(--surface)] border border-[var(--outline)]/60 flex flex-col">
+                  <span className="text-[10px] font-mono font-semibold uppercase text-amber-400 mb-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[13px]">cloud</span>
+                    <span>{i18n._(msg`Versión Sanity Cloud (JSON)`)}</span>
+                  </span>
+                  <pre className="text-[11px] font-mono text-[var(--on-surface)] overflow-x-auto whitespace-pre-wrap max-h-36 p-1.5 bg-[var(--surface-container-low)] rounded border border-[var(--outline)]/40">
+                    {item.remoteData ? JSON.stringify(item.remoteData, null, 2) : i18n._(msg`(No existe en Sanity)`)}
+                  </pre>
+                </div>
               </div>
-            </div>
+            </details>
           </div>
         )}
       </div>
