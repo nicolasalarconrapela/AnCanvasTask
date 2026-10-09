@@ -58,6 +58,16 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState<boolean>(false);
   const [bulkDeleteScope, setBulkDeleteScope] = useState<'local' | 'remote' | 'both'>('local');
+  const [collapsedSummaryConflictDiffs, setCollapsedSummaryConflictDiffs] = useState<Set<string>>(new Set());
+
+  const toggleSummaryConflictDiff = (id: string) => {
+    setCollapsedSummaryConflictDiffs((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const toggleDocCollapse = (docKey: string) => {
     setCollapsedDocKeys((prev) => {
@@ -787,6 +797,35 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     return Array.from(wsMap.values());
   }, [filteredItems, i18n]);
 
+  const computeTextLineDiff = (localStr: string = '', remoteStr: string = '') => {
+    const localLines = localStr ? localStr.split('\n') : [];
+    const remoteLines = remoteStr ? remoteStr.split('\n') : [];
+    const max = Math.max(localLines.length, remoteLines.length);
+    const rows: Array<{
+      type: 'same' | 'local_only' | 'remote_only' | 'modified';
+      localLine?: string;
+      remoteLine?: string;
+      lineNum: number;
+    }> = [];
+
+    for (let i = 0; i < max; i++) {
+      const l = localLines[i];
+      const r = remoteLines[i];
+      if (l !== undefined && r !== undefined) {
+        if (l === r) {
+          rows.push({ type: 'same', localLine: l, remoteLine: r, lineNum: i + 1 });
+        } else {
+          rows.push({ type: 'modified', localLine: l, remoteLine: r, lineNum: i + 1 });
+        }
+      } else if (l !== undefined) {
+        rows.push({ type: 'local_only', localLine: l, lineNum: i + 1 });
+      } else if (r !== undefined) {
+        rows.push({ type: 'remote_only', remoteLine: r, lineNum: i + 1 });
+      }
+    }
+    return rows;
+  };
+
   const renderStructuredDiff = (item: SyncItemDiff) => {
     if (item.entityType === 'task') {
       const local = item.localData || {};
@@ -818,9 +857,15 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         },
         {
           label: i18n._(msg`Etiquetas`),
-          local: Array.isArray(local.tags) ? local.tags.join(', ') || '-' : local.tags || '-',
-          remote: Array.isArray(remote.tags) ? remote.tags.join(', ') || '-' : remote.tags || '-',
+          local: Array.isArray(local.tags) ? (local.tags.length > 0 ? local.tags.join(', ') : '-') : local.tags || '-',
+          remote: Array.isArray(remote.tags) ? (remote.tags.length > 0 ? remote.tags.join(', ') : '-') : remote.tags || '-',
           isDiff: JSON.stringify(local.tags || []) !== JSON.stringify(remote.tags || []),
+        },
+        {
+          label: i18n._(msg`Bloqueado por`),
+          local: local.blockedBy || '-',
+          remote: remote.blockedBy || '-',
+          isDiff: (local.blockedBy || '') !== (remote.blockedBy || ''),
         },
       ];
 
@@ -829,35 +874,96 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
           <table className="w-full text-left text-xs border-collapse font-sans">
             <thead>
               <tr className="border-b border-[var(--outline)]/40 bg-[var(--surface-container-high)]/40 text-[11px] text-[var(--on-surface-variant)]">
-                <th className="py-1.5 px-3 font-semibold w-28">{i18n._(msg`Campo`)}</th>
-                <th className="py-1.5 px-3 font-semibold text-sky-400 flex-1">
-                  <div className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[13px]">laptop</span>
+                <th className="py-2 px-3 font-semibold w-28">{i18n._(msg`Campo`)}</th>
+                <th className="py-2 px-3 font-semibold text-sky-400 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px]">laptop</span>
                     <span>{i18n._(msg`Versión Local`)}</span>
+                    {item.localTimestamp && (
+                      <span className="text-[10px] text-sky-300/70 font-normal font-mono">
+                        ({formatRelativeTime(item.localTimestamp)})
+                      </span>
+                    )}
                   </div>
                 </th>
-                <th className="py-1.5 px-3 font-semibold text-amber-400 flex-1">
-                  <div className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[13px]">cloud</span>
+                <th className="py-2 px-3 font-semibold text-amber-400 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px]">cloud</span>
                     <span>{i18n._(msg`Versión Sanity Cloud`)}</span>
+                    {item.remoteTimestamp && (
+                      <span className="text-[10px] text-amber-300/70 font-normal font-mono">
+                        ({formatRelativeTime(item.remoteTimestamp)})
+                      </span>
+                    )}
                   </div>
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--outline)]/20 text-[11px]">
               {fields.map((f, i) => (
-                <tr key={i} className={f.isDiff ? 'bg-amber-950/10' : ''}>
-                  <td className="py-1.5 px-3 font-medium text-[var(--on-surface-variant)]">{f.label}</td>
-                  <td className={`py-1.5 px-3 font-mono ${f.isDiff ? 'text-sky-300 font-semibold' : 'text-[var(--on-surface)]'}`}>
+                <tr key={i} className={f.isDiff ? 'bg-amber-950/15' : ''}>
+                  <td className="py-2 px-3 font-medium text-[var(--on-surface-variant)] flex items-center gap-1.5">
+                    {f.isDiff && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" title={i18n._(msg`Diferencia detectada`)} />
+                    )}
+                    <span>{f.label}</span>
+                  </td>
+                  <td className={`py-2 px-3 font-mono ${f.isDiff ? 'text-sky-300 font-semibold bg-sky-950/20' : 'text-[var(--on-surface)]'}`}>
                     {f.local}
                   </td>
-                  <td className={`py-1.5 px-3 font-mono ${f.isDiff ? 'text-amber-300 font-semibold' : 'text-[var(--on-surface)]'}`}>
+                  <td className={`py-2 px-3 font-mono ${f.isDiff ? 'text-amber-300 font-semibold bg-amber-950/20' : 'text-[var(--on-surface)]'}`}>
                     {f.remote}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      );
+    }
+
+    if (item.entityType === 'task_document') {
+      const localContent = typeof item.localData?.content === 'string' ? item.localData.content : '';
+      const remoteContent = typeof item.remoteData?.content === 'string' ? item.remoteData.content : '';
+      const diffRows = computeTextLineDiff(localContent, remoteContent);
+
+      return (
+        <div className="flex flex-col gap-2 rounded border border-[var(--outline)]/40 bg-[var(--surface)] p-2">
+          <div className="flex items-center justify-between text-[11px] font-mono border-b border-[var(--outline)]/30 pb-1.5">
+            <div className="flex items-center gap-1.5 text-sky-400 font-semibold">
+              <span className="material-symbols-outlined text-[14px]">laptop</span>
+              <span>Local {item.localTimestamp ? `(${formatRelativeTime(item.localTimestamp)})` : ''}</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-amber-400 font-semibold">
+              <span className="material-symbols-outlined text-[14px]">cloud</span>
+              <span>Sanity Cloud {item.remoteTimestamp ? `(${formatRelativeTime(item.remoteTimestamp)})` : ''}</span>
+            </div>
+          </div>
+          <div className="max-h-60 overflow-y-auto font-mono text-[11px] divide-y divide-[var(--outline)]/10 rounded bg-[var(--surface-container-low)]">
+            {diffRows.map((row, idx) => (
+              <div
+                key={idx}
+                className={`grid grid-cols-2 gap-2 py-0.5 px-2 ${
+                  row.type === 'modified'
+                    ? 'bg-amber-950/20'
+                    : row.type === 'local_only'
+                    ? 'bg-sky-950/20'
+                    : row.type === 'remote_only'
+                    ? 'bg-rose-950/20'
+                    : ''
+                }`}
+              >
+                <div className={`overflow-x-auto whitespace-pre font-mono ${row.type === 'local_only' || row.type === 'modified' ? 'text-sky-300 font-medium' : 'text-[var(--on-surface-variant)]'}`}>
+                  <span className="text-[10px] opacity-40 select-none mr-2">{row.lineNum}</span>
+                  {row.localLine !== undefined ? row.localLine : <span className="opacity-20 select-none">-</span>}
+                </div>
+                <div className={`overflow-x-auto whitespace-pre font-mono ${row.type === 'remote_only' || row.type === 'modified' ? 'text-amber-300 font-medium' : 'text-[var(--on-surface-variant)]'}`}>
+                  <span className="text-[10px] opacity-40 select-none mr-2">{row.lineNum}</span>
+                  {row.remoteLine !== undefined ? row.remoteLine : <span className="opacity-20 select-none">-</span>}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       );
     }
@@ -897,16 +1003,16 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
           <table className="w-full text-left text-xs border-collapse font-sans">
             <thead>
               <tr className="border-b border-[var(--outline)]/40 bg-[var(--surface-container-high)]/40 text-[11px] text-[var(--on-surface-variant)]">
-                <th className="py-1.5 px-3 font-semibold w-28">{i18n._(msg`Propiedad`)}</th>
-                <th className="py-1.5 px-3 font-semibold text-sky-400 flex-1">
-                  <div className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[13px]">laptop</span>
+                <th className="py-2 px-3 font-semibold w-28">{i18n._(msg`Propiedad`)}</th>
+                <th className="py-2 px-3 font-semibold text-sky-400 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px]">laptop</span>
                     <span>{i18n._(msg`Versión Local`)}</span>
                   </div>
                 </th>
-                <th className="py-1.5 px-3 font-semibold text-amber-400 flex-1">
-                  <div className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[13px]">cloud</span>
+                <th className="py-2 px-3 font-semibold text-amber-400 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px]">cloud</span>
                     <span>{i18n._(msg`Versión Sanity Cloud`)}</span>
                   </div>
                 </th>
@@ -914,12 +1020,17 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
             </thead>
             <tbody className="divide-y divide-[var(--outline)]/20 text-[11px]">
               {fields.map((f, i) => (
-                <tr key={i} className={f.isDiff ? 'bg-amber-950/10' : ''}>
-                  <td className="py-1.5 px-3 font-medium text-[var(--on-surface-variant)]">{f.label}</td>
-                  <td className={`py-1.5 px-3 font-mono ${f.isDiff ? 'text-sky-300 font-semibold' : 'text-[var(--on-surface)]'}`}>
+                <tr key={i} className={f.isDiff ? 'bg-amber-950/15' : ''}>
+                  <td className="py-2 px-3 font-medium text-[var(--on-surface-variant)] flex items-center gap-1.5">
+                    {f.isDiff && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" title={i18n._(msg`Diferencia detectada`)} />
+                    )}
+                    <span>{f.label}</span>
+                  </td>
+                  <td className={`py-2 px-3 font-mono ${f.isDiff ? 'text-sky-300 font-semibold bg-sky-950/20' : 'text-[var(--on-surface)]'}`}>
                     {f.local}
                   </td>
-                  <td className={`py-1.5 px-3 font-mono ${f.isDiff ? 'text-amber-300 font-semibold' : 'text-[var(--on-surface)]'}`}>
+                  <td className={`py-2 px-3 font-mono ${f.isDiff ? 'text-amber-300 font-semibold bg-amber-950/20' : 'text-[var(--on-surface)]'}`}>
                     {f.remote}
                   </td>
                 </tr>
@@ -2066,66 +2177,114 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                 <div className="divide-y divide-rose-900/30 rounded border border-rose-900/30 bg-[var(--surface)]">
                   {(result?.items || [])
                     .filter((i) => i.diffType === 'conflict')
-                    .map((conflictItem) => (
-                      <div key={conflictItem.id} className="p-3 flex flex-col gap-2">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="material-symbols-outlined text-[16px] text-rose-400">
-                              {conflictItem.entityType === 'workspace' ? 'folder' : 'task_alt'}
-                            </span>
-                            <span className="font-semibold text-[var(--on-surface)] truncate">
-                              {conflictItem.title.replace(/^(Workspace:\s*|Tarea:\s*)/, '')}
-                            </span>
-                            {conflictItem.documentPath && (
-                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-container-high)] text-[var(--on-surface-variant)]">
-                                {conflictItem.documentPath}
+                    .map((conflictItem) => {
+                      const isDiffCollapsed = collapsedSummaryConflictDiffs.has(conflictItem.id);
+                      return (
+                        <div key={conflictItem.id} className="p-3 flex flex-col gap-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="material-symbols-outlined text-[16px] text-rose-400 shrink-0">
+                                {conflictItem.entityType === 'workspace' ? 'folder' : conflictItem.entityType === 'task_document' ? 'description' : 'task_alt'}
                               </span>
-                            )}
+                              <span className="font-semibold text-[var(--on-surface)] truncate text-xs sm:text-sm">
+                                {conflictItem.title.replace(/^(Workspace:\s*|Tarea:\s*)/, '')}
+                              </span>
+                              {conflictItem.documentPath && (
+                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] truncate">
+                                  {conflictItem.documentPath}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => toggleSummaryConflictDiff(conflictItem.id)}
+                                className="btn-m3-secondary px-2 py-1 text-xs rounded font-medium text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] flex items-center gap-1 cursor-pointer"
+                                title={isDiffCollapsed ? i18n._(msg`Ver visor de diferencias`) : i18n._(msg`Ocultar visor de diferencias`)}
+                              >
+                                <span className="material-symbols-outlined text-[13px]">
+                                  {isDiffCollapsed ? 'visibility' : 'visibility_off'}
+                                </span>
+                                <span>{isDiffCollapsed ? i18n._(msg`Ver Diff`) : i18n._(msg`Ocultar Diff`)}</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isProcessing || !isSanityConfigured}
+                                onClick={() => handleResolveSingle(conflictItem, 'keep_local')}
+                                className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium text-sky-400 hover:bg-sky-950/40 flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                                title={i18n._(msg`Conservar local y subir a Sanity Cloud`)}
+                              >
+                                <span className="material-symbols-outlined text-[13px]">arrow_upward</span>
+                                <span>{i18n._(msg`Mantener Local`)}</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isProcessing || !isSanityConfigured || !conflictItem.remoteData}
+                                onClick={() => handleResolveSingle(conflictItem, 'keep_remote')}
+                                className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium text-amber-400 hover:bg-amber-950/40 flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                                title={i18n._(msg`Aceptar versión de Sanity Cloud`)}
+                              >
+                                <span className="material-symbols-outlined text-[13px]">arrow_downward</span>
+                                <span>{i18n._(msg`Aceptar Remoto`)}</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isProcessing || !isSanityConfigured}
+                                onClick={() => handleResolveSingle(conflictItem, 'merge')}
+                                className="px-2.5 py-1 text-xs rounded font-medium bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                                title={i18n._(msg`Fusionar (3-way merge)`)}
+                              >
+                                <span className="material-symbols-outlined text-[13px]">call_merge</span>
+                                <span>{i18n._(msg`Fusionar`)}</span>
+                              </button>
+                            </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={isProcessing || !isSanityConfigured}
-                              onClick={() => handleResolveSingle(conflictItem, 'keep_local')}
-                              className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium text-sky-400 hover:bg-sky-950/40 flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                              title={i18n._(msg`Conservar local`)}
-                            >
-                              <span className="material-symbols-outlined text-[13px]">arrow_upward</span>
-                              <span>{i18n._(msg`Mantener Local`)}</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isProcessing || !isSanityConfigured || !conflictItem.remoteData}
-                              onClick={() => handleResolveSingle(conflictItem, 'keep_remote')}
-                              className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium text-amber-400 hover:bg-amber-950/40 flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                              title={i18n._(msg`Aceptar versión de Sanity`)}
-                            >
-                              <span className="material-symbols-outlined text-[13px]">arrow_downward</span>
-                              <span>{i18n._(msg`Aceptar Remoto`)}</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isProcessing || !isSanityConfigured}
-                              onClick={() => handleResolveSingle(conflictItem, 'merge')}
-                              className="px-2.5 py-1 text-xs rounded font-medium bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                              title={i18n._(msg`Fusionar (3-way merge)`)}
-                            >
-                              <span className="material-symbols-outlined text-[13px]">call_merge</span>
-                              <span>{i18n._(msg`Fusionar`)}</span>
-                            </button>
-                          </div>
+                          {conflictItem.summaryChanges.length > 0 && (
+                            <ul className="list-disc list-inside text-[11px] font-mono text-[var(--on-surface-variant)] pl-2 space-y-0.5">
+                              {conflictItem.summaryChanges.map((change, idx) => (
+                                <li key={idx}>{change}</li>
+                              ))}
+                            </ul>
+                          )}
+
+                          {/* Diff Viewer (Structured table / side-by-side) */}
+                          {!isDiffCollapsed && (
+                            <div className="flex flex-col gap-2 mt-1">
+                              {renderStructuredDiff(conflictItem)}
+
+                              <details className="mt-0.5">
+                                <summary className="text-[10px] font-mono text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer select-none py-0.5">
+                                  {i18n._(msg`Ver datos JSON sin procesar`)}
+                                </summary>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-1">
+                                  <div className="p-2 rounded bg-[var(--surface-container-low)] border border-[var(--outline)]/40 flex flex-col">
+                                    <span className="text-[10px] font-mono font-semibold uppercase text-sky-400 mb-1 flex items-center gap-1">
+                                      <span className="material-symbols-outlined text-[12px]">laptop</span>
+                                      <span>{i18n._(msg`Versión Local (JSON)`)}</span>
+                                    </span>
+                                    <pre className="text-[10px] font-mono text-[var(--on-surface)] overflow-x-auto whitespace-pre-wrap max-h-28 p-1 bg-[var(--surface)] rounded border border-[var(--outline)]/20">
+                                      {conflictItem.localData ? JSON.stringify(conflictItem.localData, null, 2) : i18n._(msg`(No existe en local)`)}
+                                    </pre>
+                                  </div>
+
+                                  <div className="p-2 rounded bg-[var(--surface-container-low)] border border-[var(--outline)]/40 flex flex-col">
+                                    <span className="text-[10px] font-mono font-semibold uppercase text-amber-400 mb-1 flex items-center gap-1">
+                                      <span className="material-symbols-outlined text-[12px]">cloud</span>
+                                      <span>{i18n._(msg`Versión Sanity Cloud (JSON)`)}</span>
+                                    </span>
+                                    <pre className="text-[10px] font-mono text-[var(--on-surface)] overflow-x-auto whitespace-pre-wrap max-h-28 p-1 bg-[var(--surface)] rounded border border-[var(--outline)]/20">
+                                      {conflictItem.remoteData ? JSON.stringify(conflictItem.remoteData, null, 2) : i18n._(msg`(No existe en Sanity)`)}
+                                    </pre>
+                                  </div>
+                                </div>
+                              </details>
+                            </div>
+                          )}
                         </div>
-
-                        {conflictItem.summaryChanges.length > 0 && (
-                          <ul className="list-disc list-inside text-[11px] font-mono text-[var(--on-surface-variant)] pl-2 space-y-0.5">
-                            {conflictItem.summaryChanges.map((change, idx) => (
-                              <li key={idx}>{change}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
               </div>
             )}
