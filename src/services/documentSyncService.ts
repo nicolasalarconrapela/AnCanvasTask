@@ -160,12 +160,13 @@ export function mergeSyncValue(base: any, local: any, remote: any, path = ''): a
   if (['/content', '/title', '/description'].some(field => path.endsWith(field)) && [base, local, remote].every(v => typeof v === 'string')) {
     return mergeText(base, local, remote);
   }
-  if (Array.isArray(local) && Array.isArray(remote) && Array.isArray(base)) {
+  if (Array.isArray(local) && Array.isArray(remote)) {
     const key = (v: any) => v?.id || v?._key || v?.name || v?.taskId || v?.groupTitle;
-    if ([...base, ...local, ...remote].every(v => key(v))) {
+    const baseList = Array.isArray(base) ? base : [];
+    if ([...baseList, ...local, ...remote].every(v => key(v))) {
       const index = (items: any[]) => new Map(items.map(v => [key(v), v]));
-      const b = index(base), l = index(local), r = index(remote);
-      return [...new Set([...r.keys(), ...l.keys()])].map(k =>
+      const b = index(baseList), l = index(local), r = index(remote);
+      return [...new Set([...b.keys(), ...r.keys(), ...l.keys()])].map(k =>
         mergeSyncValue(b.get(k), l.get(k), r.get(k), `${path}/${k}`)
       ).filter(v => v !== undefined);
     }
