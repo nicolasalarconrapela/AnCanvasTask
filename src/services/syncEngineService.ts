@@ -80,8 +80,15 @@ export function compareMarkdownDocuments(store: WorkspaceStoreState, remote: Wor
         const base = baseDocs.find(doc => doc.id === id);
         let diffType: SyncDifferenceType = !local ? 'only_remote' : !cloud ? 'only_local' : 'synced';
         if (local && cloud && comparable(local) !== comparable(cloud)) {
-          diffType = !base ? 'conflict' : comparable(local) === comparable(base) ? 'remote_override'
-            : comparable(cloud) === comparable(base) ? 'local_override' : 'conflict';
+          if (!base) {
+            const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+            const cloudTime = cloud.updatedAt ? new Date(cloud.updatedAt).getTime() : 0;
+            diffType = localTime >= cloudTime ? 'local_override' : 'remote_override';
+          } else {
+            const changedLocal = comparable(local) !== comparable(base);
+            const changedRemote = comparable(cloud) !== comparable(base);
+            diffType = changedLocal && changedRemote ? 'conflict' : changedLocal ? 'local_override' : 'remote_override';
+          }
         }
         const doc = local || cloud!;
         items.push({ id: `md_${JSON.stringify([workspaceId, branchName, id])}`, entityType: 'task_document',
@@ -238,8 +245,11 @@ export async function analyzeSyncDifferences(
 
       if (changes.length > 0 || contentDiffers) {
         const base = workspaceStore.remoteBase?.find(w => w.id === localWs.id);
-        if (!base) diffType = 'conflict';
-        else {
+        if (!base) {
+          const localTime = localWs.updatedAt ? new Date(localWs.updatedAt).getTime() : 0;
+          const remoteTime = remoteWs.updatedAt ? new Date(remoteWs.updatedAt).getTime() : 0;
+          diffType = localTime >= remoteTime ? 'local_override' : 'remote_override';
+        } else {
           const changedLocal = JSON.stringify(syncComparable(base)) !== JSON.stringify(syncComparable(localWs));
           const changedRemote = JSON.stringify(syncComparable(base)) !== JSON.stringify(syncComparable(remoteWs));
           diffType = changedLocal && changedRemote ? 'conflict' : changedLocal ? 'local_override' : 'remote_override';
@@ -360,8 +370,12 @@ export async function analyzeSyncDifferences(
               });
             } else {
               const base = workspaceStore.remoteDocuments?.find(d => d._id === matchedRemote._id);
-              let diffType: SyncDifferenceType = 'conflict';
-              if (base) {
+              let diffType: SyncDifferenceType = 'local_override';
+              if (!base) {
+                const localTime = doc.updatedAt ? new Date(doc.updatedAt).getTime() : 0;
+                const remoteTime = (matchedRemote.updatedAt || matchedRemote._updatedAt) ? new Date(matchedRemote.updatedAt || matchedRemote._updatedAt).getTime() : 0;
+                diffType = localTime >= remoteTime ? 'local_override' : 'remote_override';
+              } else {
                 const changedLocal = JSON.stringify(syncComparable(fields)) !== JSON.stringify(syncComparable(select(base)));
                 const changedRemote = JSON.stringify(syncComparable(select(matchedRemote))) !== JSON.stringify(syncComparable(select(base)));
                 diffType = changedLocal && changedRemote ? 'conflict' : changedLocal ? 'local_override' : 'remote_override';
