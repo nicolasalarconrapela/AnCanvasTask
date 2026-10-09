@@ -88,6 +88,7 @@ import { MarkdownSplitEditor } from './components/MarkdownSplitEditor';
 import { SafeMarkdownNormalizerModal } from './components/SafeMarkdownNormalizerModal';
 import { SafeguardPage } from './components/SafeguardPage';
 import { LanguageSelector } from './components/LanguageSelector';
+import { APP_VERSION, APP_ENV } from './utils/appInfo';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
@@ -4314,6 +4315,28 @@ export default function App() {
               <img src="/logo.png" alt="Logo" className="w-5 h-5 rounded-sm object-contain" />
               <span>Tasks Canvas</span>
             </div>
+            {/* Version & Environment badges */}
+            <div id="div-app-version-env-badge" className="flex items-center gap-1 shrink-0 select-none">
+              <span
+                id="badge-app-version"
+                className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] border border-[var(--outline)]"
+                title={`Versión: ${APP_VERSION}`}
+              >
+                v{APP_VERSION}
+              </span>
+              <span
+                id="badge-app-env"
+                className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.2 rounded border flex items-center gap-1 ${
+                  APP_ENV.isDev
+                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                }`}
+                title={`Entorno: ${APP_ENV.mode}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.isDev ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                <span className="hidden sm:inline">{APP_ENV.label}</span>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -4645,6 +4668,15 @@ export default function App() {
                   </div>
                   <span className="text-[10px] text-[var(--on-surface-variant)]">➔</span>
                 </button>
+
+                {/* Application Version & Environment info row */}
+                <div id="div-header-more-menu-version-info" className="px-3 py-2 border-t border-[var(--outline)] mt-1 flex items-center justify-between text-[10px] text-[var(--on-surface-variant)] font-mono">
+                  <span>v{APP_VERSION}</span>
+                  <div className="flex items-center gap-1 capitalize px-1.5 py-0.2 rounded bg-[var(--surface)] border border-[var(--outline)]">
+                    <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.isDev ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                    <span>{APP_ENV.mode}</span>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -4917,6 +4949,18 @@ export default function App() {
                     );
                   })}
                 </div>
+              </div>
+            </div>
+
+            {/* Sidebar Footer with Version & Environment */}
+            <div
+              id="div-sidebar-version-env-footer"
+              className="mt-auto pt-2.5 border-t border-[var(--outline)] flex items-center justify-between text-[10px] text-[var(--on-surface-variant)] font-mono shrink-0"
+            >
+              <span className="text-[10px] text-[var(--on-surface-variant)]">v{APP_VERSION}</span>
+              <div className="flex items-center gap-1">
+                <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.isDev ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                <span className="capitalize">{APP_ENV.mode}</span>
               </div>
             </div>
           </aside>

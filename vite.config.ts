@@ -1,9 +1,14 @@
+import fs from 'fs';
+import path from 'path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
 import { defineConfig, Plugin } from 'vite';
 import { lingui } from '@lingui/vite-plugin';
 import { transformSync } from '@babel/core';
+
+const packageJson = JSON.parse(
+  fs.readFileSync(new URL('./package.json', import.meta.url), 'utf-8')
+);
 
 function linguiMacro(): Plugin {
   return {
@@ -55,6 +60,7 @@ export default defineConfig(() => {
     ],
     define: {
       'process.env': {},
+      __APP_VERSION__: JSON.stringify(packageJson.version),
     },
     resolve: {
       alias: {
