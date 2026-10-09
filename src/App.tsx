@@ -929,7 +929,8 @@ export default function App() {
                       activeDocumentId: activeBr.activeDocumentId || b.activeDocumentId,
                       taskDocuments: b.taskDocuments.map(d => {
                         if (activeDoc && (d.id === activeDoc.id || d.path === activeDoc.path)) {
-                          return { ...d, content: activeDoc.content, lastSavedContent: activeDoc.lastSavedContent };
+                          const liveContent = markdownRef.current !== undefined ? markdownRef.current : activeDoc.content;
+                          return { ...d, content: liveContent, lastSavedContent: activeDoc.lastSavedContent };
                         }
                         return d;
                       }),
@@ -1461,7 +1462,8 @@ export default function App() {
   useEffect(() => {
     const layoutRevision = `${currentDocKey}:${(activeDocument.visualState as any)?._rev || ''}`;
     const changedDocument = activeDocKeyRef.current !== currentDocKey;
-    if (changedDocument || activeDocument.content !== markdownRef.current || appliedRemoteLayoutRef.current !== layoutRevision) {
+
+    if (changedDocument) {
       appliedRemoteLayoutRef.current = layoutRevision;
       isSwitchingDocRef.current = true;
       activeDocKeyRef.current = currentDocKey;
@@ -1502,14 +1504,24 @@ export default function App() {
           editor,
           activeDocument.content,
           activeDocument.visualState,
-          { clearNotes: changedDocument }
+          { clearNotes: true }
         );
       }
 
       const timer = setTimeout(() => { isSwitchingDocRef.current = false; }, 60);
       return () => { clearTimeout(timer); isSwitchingDocRef.current = false; };
+    } else if (appliedRemoteLayoutRef.current !== layoutRevision) {
+      appliedRemoteLayoutRef.current = layoutRevision;
+      if (editor && activeDocument.visualState) {
+        loadTasksFromMarkdown(
+          editor,
+          markdownRef.current,
+          activeDocument.visualState,
+          { clearNotes: false }
+        );
+      }
     }
-  }, [currentDocKey, activeDocument, activeWorkspace.name, activeBranch.name, editor, triggerDebouncedVisualSave]);
+  }, [currentDocKey, activeDocument.id, activeDocument.path, (activeDocument.visualState as any)?._rev, activeWorkspace.name, activeBranch.name, editor]);
 
   useEffect(() => () => {
     if (debouncedSaveRef.current) clearTimeout(debouncedSaveRef.current);
