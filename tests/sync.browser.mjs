@@ -34,6 +34,10 @@ const api = createServer(async (request, response) => {
     response.write('event: welcome\ndata: {"type":"welcome"}\n\n');
     listeners.add(response); request.on('close', () => listeners.delete(response)); return;
   }
+  if (url.pathname.includes('/data/doc/')) {
+    const ids = decodeURIComponent(url.pathname.split('/').pop()).split(',');
+    return json({ documents: ids.map(id => documents.get(id)).filter(Boolean) });
+  }
   if (url.pathname.includes('/data/query')) {
     const query = url.searchParams.get('query') || '';
     const id = JSON.parse(url.searchParams.get('$id') || 'null');
@@ -80,6 +84,7 @@ async function waitUntil(predicate, message) {
 async function openBrowser(executable, port) {
   const profile = await mkdtemp(join(tmpdir(), 'antask-collab-'));
   const processHandle = spawn(executable, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    '--disable-sync', '--disable-features=msImplicitSignin',
     `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
   const browser = { processHandle, errors: [] }; browsers.push(browser);
   let pages;

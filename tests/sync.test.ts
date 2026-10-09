@@ -18,6 +18,7 @@ class MemoryStorage implements Storage {
 
 class FakeSanity {
   documents = new Map<string, any>();
+  querySnapshot?: Map<string, any>;
   commits = 0;
   offline = false;
   failAfterCommit = false;
@@ -26,16 +27,19 @@ class FakeSanity {
   release?: () => void;
   revision = 0;
   client = () => ({
+    getDocument: async (id: string) => this.client().fetch('*[_id == $id][0]', { id, direct: true }),
+    getDocuments: async (ids: string[]) => Promise.all(ids.map(id => this.client().getDocument(id))),
     fetch: async (query: string, params: any) => {
       if (this.offline) throw new Error('offline');
       if (params.id === this.waitForId) {
         this.waitForId = undefined;
         await new Promise<void>(resolve => { this.release = resolve; });
       }
-      if (query.includes('_id == $id')) return structuredClone(this.documents.get(params.id) || null);
-      if (query.includes('_type == "workspace"')) return structuredClone([...this.documents.values()].find(d =>
+      const documents = params.direct ? this.documents : this.querySnapshot || this.documents;
+      if (query.includes('_id == $id')) return structuredClone(documents.get(params.id) || null);
+      if (query.includes('_type == "workspace"')) return structuredClone([...documents.values()].find(d =>
         d._type === 'workspace' && d.workspaceId === params.id && d.syncOwner === params.owner) || null);
-      return structuredClone([...this.documents.values()].filter(d => d._type === 'task' &&
+      return structuredClone([...documents.values()].filter(d => d._type === 'task' &&
         d.workspaceId === params.id && (!d.syncOwner || d.syncOwner === params.owner)));
     },
     transaction: () => {
@@ -147,6 +151,36 @@ test('revision race retries against the new document without losing its fields',
   server.beforeCommit = () => server.documents.set(base._id, { ...base, completed: true, status: 'done', _rev: 'r-race' });
   const result = await sync.write({ ...base, title: 'B' }, config);
   assert.equal(result.title, 'B'); assert.equal(result.status, 'done'); assert.equal(server.commits, 1);
+});
+
+test('saving uses the current document revision while GROQ remains stale', async () => {
+  const base = task(); sync.observe(base);
+  server.querySnapshot = new Map([[base._id, base]]);
+  server.documents.set(base._id, { ...base, completed: true, status: 'done', _rev: 'new' });
+  const result = await sync.write({ ...base, title: 'B' }, config);
+  assert.equal(result.title, 'B'); assert.equal(result.completed, true);
+  assert.equal(server.commits, 1);
+});
+
+test('workspace saves find newly created task projections before GROQ indexes them', async () => {
+  const base = workspace(); server.documents.set(base._id, base); sync.observe(base);
+  server.querySnapshot = structuredClone(server.documents);
+  const next = structuredClone(base); next.branches[0].taskDocuments[0].content = markdown.replace('[ ] A', '[ ] B');
+  const saved = await sync.write(next, config);
+  const again = structuredClone(saved); again.branches[0].taskDocuments[0].content = markdown.replace('[ ] A', '[ ] C');
+  await sync.write(again, config);
+  assert.equal(server.documents.get(buildTaskDocumentId('x', 'w', 'main::d')).title, 'C');
+  assert.equal(server.commits, 2);
+});
+
+test('task projection reads the current parent workspace despite stale GROQ', async () => {
+  const parent = workspace(); server.querySnapshot = new Map([[parent._id, parent]]);
+  server.documents.set(parent._id, { ...parent, name: 'Remote name', _rev: 'new' });
+  const doc = { ...task(), workspaceId: 'w', documentKey: 'main::d' };
+  server.documents.set(doc._id, doc); sync.observe(doc);
+  await sync.write({ ...doc, title: 'B' }, config);
+  assert.equal(server.documents.get(parent._id).name, 'Remote name');
+  assert(server.documents.get(parent._id).branches[0].taskDocuments[0].content.includes('[ ] B'));
 });
 
 test('a remotely deleted document cannot be recreated by an old snapshot', async () => {

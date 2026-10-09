@@ -202,7 +202,7 @@ export class DocumentSync {
     const session = getSyncSession(config);
     if (!session) throw new Error('La sesión de Sanity todavía no está preparada');
     const client = this.clientFactory(session.config);
-    const remote = await client.fetch('*[_id == $id][0]', { id: document._id }, { signal: session.controller.signal });
+    const remote = await client.getDocument(document._id, { signal: session.controller.signal });
     assertSyncSession(session);
     if (remote?.syncOwner && remote.syncOwner !== session.owner) throw new SyncConflict('El documento pertenece a otra cuenta');
     if (remote?.syncDeleted) throw new SyncConflict('El documento fue eliminado remotamente');
@@ -256,13 +256,14 @@ export class DocumentSync {
     const client = this.clientFactory(session.config);
     for (let attempt = 0; attempt < 3; attempt++) {
       assertSyncSession(session);
-      const deletion = await client.fetch('*[_id == $id][0]', { id: deletionMarkerId(pending.document._id) }, {
+      const deletion = await client.getDocument(deletionMarkerId(pending.document._id), {
         signal: session.controller.signal,
       });
       assertSyncSession(session);
       if (deletion && !pending.document.syncDeleted) throw new SyncConflict('El documento fue eliminado remotamente');
-      const remote = await client.fetch('*[_id == $id][0]', { id: pending.document._id }, {
-        signal: session.controller.signal, perspective: 'raw',
+      // GROQ can lag behind committed writes, including our previous save.
+      const remote = await client.getDocument(pending.document._id, {
+        signal: session.controller.signal,
       });
       assertSyncSession(session);
       if (remote?.syncOwner && remote.syncOwner !== session.owner) throw new SyncConflict('El documento pertenece a otra cuenta');
@@ -284,7 +285,7 @@ export class DocumentSync {
         if (merged._type === 'task') await this.projectTask(merged, pending.base, client, session, writes);
         for (const write of [...writes]) if (write.document.syncDeleted) {
           const id = deletionMarkerId(write.document._id);
-          const marker = await client.fetch('*[_id == $id][0]', { id }, { signal: session.controller.signal });
+          const marker = await client.getDocument(id, { signal: session.controller.signal });
           writes.push({ document: { _id: id, _type: 'syncDeletion', syncOwner: session.owner,
             targetId: write.document._id, deletedDocument: { ...write.document, syncDeleted: true } }, remote: marker });
         }
@@ -313,8 +314,19 @@ export class DocumentSync {
 
   private async projectWorkspace(workspace: Document, remote: Document | null, client: any, session: SyncSession,
     writes: Array<{ document: Document; remote: Document | null }>): Promise<void> {
-    const tasks: Document[] = await client.fetch('*[_type == "task" && workspaceId == $id && (syncOwner == $owner || !defined(syncOwner))]',
+    const indexedTasks: Document[] = await client.fetch('*[_type == "task" && workspaceId == $id && (syncOwner == $owner || !defined(syncOwner))]',
       { id: workspace.workspaceId, owner: session.owner }, { signal: session.controller.signal });
+    assertSyncSession(session);
+    // Discover legacy IDs with GROQ, but read revisions directly. Include the
+    // deterministic IDs of projections whose creation is not indexed yet.
+    const ids = new Set(indexedTasks.map(task => task._id));
+    for (const branch of [...(remote?.branches || []), ...(workspace.branches || [])]) {
+      for (const doc of branch.taskDocuments || []) for (const task of taskFields(doc.content)) {
+        ids.add(buildTaskDocumentId(task.taskId, workspace.workspaceId, `${branch.name}::${doc.id}`));
+      }
+    }
+    const tasks: Document[] = ids.size ? (await client.getDocuments([...ids], { signal: session.controller.signal }))
+      .filter((task: Document | null) => task && task.workspaceId === workspace.workspaceId && (!task.syncOwner || task.syncOwner === session.owner)) : [];
     assertSyncSession(session);
     const retained = new Set<string>();
     for (const branch of workspace.syncDeleted ? [] : workspace.branches || []) for (const doc of branch.taskDocuments || []) {
@@ -339,7 +351,7 @@ export class DocumentSync {
           if (baseFields && equal(fields, baseFields)) { doc.content = deleteTaskFromMarkdown(doc.content, fields.taskId); retained.add(existing._id); continue; }
           throw new SyncConflict(`La tarea ${fields.taskId} fue eliminada remotamente`);
         }
-        const marker = await client.fetch('*[_id == $id][0]', { id: deletionMarkerId(existing?._id || buildTaskDocumentId(fields.taskId, workspace.workspaceId, documentKey)) }, { signal: session.controller.signal });
+        const marker = await client.getDocument(deletionMarkerId(existing?._id || buildTaskDocumentId(fields.taskId, workspace.workspaceId, documentKey)), { signal: session.controller.signal });
         assertSyncSession(session);
         if (marker) throw new SyncConflict(`La tarea ${fields.taskId} fue eliminada remotamente`);
         const currentFields = existing ? Object.fromEntries(Object.keys(fields).map(k => [k, existing[k] ?? (k === 'status' ? (existing.completed ? 'done' : 'todo') : fields[k])])) : null;
@@ -369,14 +381,17 @@ export class DocumentSync {
   private async projectTask(task: Document, base: Document | null, client: any, session: SyncSession,
     writes: Array<{ document: Document; remote: Document | null }>): Promise<void> {
     if (!task.workspaceId) return;
-    const workspace = await client.fetch('*[_type == "workspace" && workspaceId == $id && syncOwner == $owner][0]',
+    const indexedWorkspace = await client.fetch('*[_type == "workspace" && workspaceId == $id && syncOwner == $owner][0]',
       { id: task.workspaceId, owner: session.owner }, { signal: session.controller.signal });
     assertSyncSession(session);
+    const workspace = await client.getDocument(indexedWorkspace?._id || `workspace-${task.workspaceId}`, { signal: session.controller.signal });
+    assertSyncSession(session);
+    if (workspace?.syncOwner && workspace.syncOwner !== session.owner) throw new SyncConflict('El documento pertenece a otra cuenta');
     if (!workspace || workspace.syncDeleted) {
       if (task.syncDeleted) return;
       throw new SyncConflict('El workspace de la tarea fue eliminado');
     }
-    const deletion = await client.fetch('*[_id == $id][0]', { id: deletionMarkerId(workspace._id) }, { signal: session.controller.signal });
+    const deletion = await client.getDocument(deletionMarkerId(workspace._id), { signal: session.controller.signal });
     assertSyncSession(session);
     if (deletion) throw new SyncConflict('El workspace de la tarea fue eliminado');
     const next = structuredClone(workspace);
