@@ -88,7 +88,7 @@ import { MarkdownSplitEditor } from './components/MarkdownSplitEditor';
 import { SafeMarkdownNormalizerModal } from './components/SafeMarkdownNormalizerModal';
 import { SafeguardPage } from './components/SafeguardPage';
 import { LanguageSelector } from './components/LanguageSelector';
-import { APP_VERSION, APP_ENV } from './utils/appInfo';
+import { APP_VERSION, APP_ENV } from './version';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';

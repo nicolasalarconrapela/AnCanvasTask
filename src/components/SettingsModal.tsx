@@ -3,7 +3,7 @@ import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { SUPPORTED_LANGUAGES, SupportedLanguageCode, dynamicActivate } from '../i18n';
-import { APP_VERSION, APP_ENV } from '../utils/appInfo';
+import { APP_VERSION, APP_ENV } from '../version';
 import {
   AppUserSettings,
   clearRecentFilesHistory,

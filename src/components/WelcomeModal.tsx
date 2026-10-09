@@ -7,7 +7,7 @@ import {
   testSanityConnection,
   SanityConnectionTestResult,
 } from '../services/sanityService';
-import { APP_VERSION, APP_ENV } from '../utils/appInfo';
+import { APP_VERSION, APP_ENV } from '../version';
 
 export interface WelcomeModalProps {
   isOpen: boolean;
