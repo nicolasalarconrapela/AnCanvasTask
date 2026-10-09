@@ -445,7 +445,7 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
                       className="btn-m3-primary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50 shadow-xs"
                       title={i18n._(msg`Analizar y resolver diferencias, overrides y conflictos con Sanity Cloud`)}
                     >
-                      <span className="material-symbols-outlined text-[14px]">sync_problem</span>
+                      <span className="material-symbols-outlined text-[14px]">sync_alt</span>
                       <span>{i18n._(msg`Overrides`)}</span>
                     </button>
                   )}

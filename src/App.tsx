@@ -4460,7 +4460,7 @@ export default function App() {
             title={i18n._(msg`Sync & Override (Detección de diferencias, overrides y resolución de conflictos)`)}
             aria-label={i18n._(msg`Sync & Override`)}
           >
-            <span className="material-symbols-outlined text-[16px] text-amber-500/90">
+            <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">
               sync_alt
             </span>
             <span className="hidden sm:inline font-sans text-xs">
@@ -4559,10 +4559,10 @@ export default function App() {
                   title={i18n._(msg`Sync & Override Detection (Detección de diferencias y resolución de conflictos)`)}
                 >
                   <div id="div-header-more-menu-sync-override-content" className="flex items-center gap-2.5">
-                    <span className="material-symbols-outlined text-[18px] text-amber-400">sync_problem</span>
+                    <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">sync_alt</span>
                     <span className="font-medium">{i18n._(msg`Sync & Override Detection`)}</span>
                   </div>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/60 text-amber-300">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-container-high)] border border-[var(--outline)] text-[var(--on-surface-variant)]">
                     Sync
                   </span>
                 </button>
@@ -5648,10 +5648,10 @@ export default function App() {
             id="btn-mobile-nav-sync-sanity"
             type="button"
             onClick={() => setIsSyncOverrideModalOpen(true)}
-            className="flex flex-col items-center justify-center py-1 px-0.5 rounded-lg text-[10px] text-amber-400 bg-amber-950/30 border border-amber-800/60 hover:text-amber-300 transition-all cursor-pointer overflow-hidden active:scale-95"
+            className="flex flex-col items-center justify-center py-1 px-0.5 rounded-lg text-[10px] text-[var(--on-surface-variant)] bg-[var(--surface-container-high)]/60 border border-[var(--outline)] hover:text-[var(--on-surface)] transition-all cursor-pointer overflow-hidden active:scale-95"
             title={i18n._(msg`Sincronizar con Sanity`)}
           >
-            <span className="material-symbols-outlined text-[18px]">sync_problem</span>
+            <span className="material-symbols-outlined text-[18px]">sync_alt</span>
             <span className="truncate w-full text-center leading-none mt-0.5">{i18n._(msg`Sincronizar`)}</span>
           </button>
         ) : null}

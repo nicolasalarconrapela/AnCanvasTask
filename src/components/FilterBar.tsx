@@ -382,7 +382,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                         ? 'bg-emerald-400'
                         : syncStatus === 'saving' || syncStatus === 'loading'
                         ? 'bg-sky-400 animate-pulse'
-                        : 'bg-cyan-400'
+                        : 'bg-zinc-400'
                     }`}
                   />
                   <span>
@@ -403,8 +403,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                   className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-[var(--surface)] text-[var(--on-surface)] border border-[var(--outline)] hover:border-[var(--primary)] hover:bg-[var(--surface-container-high)] transition-colors cursor-pointer"
                   title={i18n._(msg`Sincronizar y detectar diferencias, overrides y conflictos con Sanity Cloud`)}
                 >
-                  <span className="material-symbols-outlined text-[15px] text-amber-400">
-                    sync_problem
+                  <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">
+                    sync_alt
                   </span>
                   <span>{i18n._(msg`Sincronizar`)}</span>
                 </button>

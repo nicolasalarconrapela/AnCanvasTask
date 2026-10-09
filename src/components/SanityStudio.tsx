@@ -702,7 +702,7 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
               className="btn-m3-primary w-full py-1.5 text-xs justify-start px-2.5 cursor-pointer shadow-xs flex items-center gap-1.5"
               title="Comparar y sincronizar diferencias / overrides con Sanity Cloud"
             >
-              <span className="material-symbols-outlined text-[16px]">sync_problem</span>
+              <span className="material-symbols-outlined text-[16px]">sync_alt</span>
               <span>Sincronizar & Overrides</span>
             </button>
           )}
