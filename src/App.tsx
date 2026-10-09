@@ -95,6 +95,7 @@ import { dynamicActivate, formatTime, formatTaskCount, formatSectionCount, forma
 import {
   loadWorkspaceStore,
   saveWorkspaceStore,
+  flushWorkspaceStoreSaves,
   getActiveWorkspace,
   getActiveBranch,
   getActiveDocument,
@@ -838,6 +839,7 @@ export default function App() {
   // Dynamic profile / configuration sync listener (INV-02, INV-07)
   useEffect(() => {
     const handleConfigChange = (e: any) => {
+      flushWorkspaceStoreSaves();
       const updated = e.detail || getSanityConfig();
       syncReadyRef.current = false;
       setSyncReady(false);
@@ -1277,7 +1279,7 @@ export default function App() {
           );
           triggerDebouncedVisualSave(editor);
         }
-      }, 250);
+      }, 500);
     },
     [editor, triggerDebouncedVisualSave]
   );
@@ -1308,10 +1310,22 @@ export default function App() {
 
       if (!hasChanges) return prevStore;
       const nextStore = { ...prevStore, workspaces: nextWs };
-      saveWorkspaceStore(nextStore);
+      saveWorkspaceStore(nextStore, 350);
       return nextStore;
     });
   }, [markdownInput]);
+
+  // Persist buffered edits before leaving the page or unmounting the editor.
+  useEffect(() => {
+    const handleVisibility = () => { if (document.visibilityState === 'hidden') flushWorkspaceStoreSaves(); };
+    window.addEventListener('pagehide', flushWorkspaceStoreSaves);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flushWorkspaceStoreSaves);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      flushWorkspaceStoreSaves();
+    };
+  }, []);
 
   // Automatic periodic auto-save and cloud conflict detection
   useEffect(() => {
@@ -2940,7 +2954,7 @@ export default function App() {
   }, [editor, markdownInput, triggerDebouncedVisualSave]);
 
   const parsedStats = useMemo(() => {
-    const groups = parseTasksMarkdown(markdownInput);
+    const groups = parsedGroups;
     const totalTasks = groups.reduce((acc, g) => acc + g.tasks.length, 0);
     const completedTasks = groups.reduce(
       (acc, g) => acc + g.tasks.filter((t) => t.completed).length,
@@ -2962,7 +2976,7 @@ export default function App() {
       criticalCount: criticalTasks,
       blockedCount: blockedTasks,
     };
-  }, [markdownInput]);
+  }, [parsedGroups]);
 
   const hasUnsavedChanges = useMemo(
     () => markdownInput !== lastSavedMarkdown,
@@ -3438,21 +3452,21 @@ export default function App() {
     if (result.ok) await refreshRemoteRef.current();
   }, [activeWorkspace, pushToast]);
 
-  // Local edits are persisted immediately; only hydrated sessions may publish.
+  // Local state stays current; only hydrated sessions may publish after a pause.
   useEffect(() => {
     if (!syncReady || !activeSanityConfig.token || !activeSanityConfig.projectId) return;
     const session = getSyncSession(activeSanityConfig);
     if (!session || workspaceStore.scope !== session.scope || markdownInput !== activeDocument.content) return;
-    const baseWs = workspaceStore.remoteBase?.find(w => w.id === activeWorkspace.id);
-    if (JSON.stringify(syncComparable(baseWs)) === JSON.stringify(syncComparable(activeWorkspace))) return;
-    const normalized = autoAssignAllMissingTaskIds(markdownInput).updatedMarkdown;
-    if (normalized !== markdownInput) { setMarkdownInput(normalized); return; }
-    if (!baseWs && activeWorkspace.isPlaceholder && activeWorkspace.name === 'Mi Workspace' && markdownInput.trim() === '# Tareas\n\n## General') return;
-    const snapshot = { ...activeWorkspace, branches: activeWorkspace.branches.map(b => b.name === activeBranch.name
-      ? { ...b, taskDocuments: b.taskDocuments.map(d => d.id === activeDocument.id ? { ...d, content: markdownInput } : d) } : b) };
     const timer = setTimeout(async () => {
       try {
         assertSyncSession(session);
+        const baseWs = workspaceStore.remoteBase?.find(w => w.id === activeWorkspace.id);
+        if (JSON.stringify(syncComparable(baseWs)) === JSON.stringify(syncComparable(activeWorkspace))) return;
+        const normalized = autoAssignAllMissingTaskIds(markdownInput).updatedMarkdown;
+        if (normalized !== markdownInput) { setMarkdownInput(normalized); return; }
+        if (!baseWs && activeWorkspace.isPlaceholder && activeWorkspace.name === 'Mi Workspace' && markdownInput.trim() === '# Tareas\n\n## General') return;
+        const snapshot = { ...activeWorkspace, branches: activeWorkspace.branches.map(b => b.name === activeBranch.name
+          ? { ...b, taskDocuments: b.taskDocuments.map(d => d.id === activeDocument.id ? { ...d, content: markdownInput } : d) } : b) };
         setSyncStatus('saving');
         const result = await saveWorkspaceToSanity(snapshot, session.config);
         assertSyncSession(session);
@@ -3461,7 +3475,7 @@ export default function App() {
       } catch (error: any) {
         if (getSyncSession() === session) { setSyncStatus('local'); pushToast(error.message, 'warning'); }
       }
-    }, 250);
+    }, 1000);
     debouncedSanityTasksRef.current = timer;
     return () => clearTimeout(timer);
   }, [markdownInput, activeSanityConfig, syncReady, currentDocKey, activeWorkspace, workspaceStore.remoteBase]);

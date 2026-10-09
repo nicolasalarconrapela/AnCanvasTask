@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, afterEach, test } from 'node:test';
 import { DocumentSync, SyncConflict, mergeSyncValue, mergeMarkdown, buildTaskDocumentId, deletionMarkerId } from '../src/services/documentSyncService';
 import { beginSyncSession, getSyncSession, invalidateSyncSession } from '../src/services/syncSessionService';
-import { createEmptyWorkspace, loadWorkspaceStore, saveWorkspaceStore, sanitizeWorkspace } from '../src/services/workspaceService';
+import { createEmptyWorkspace, loadWorkspaceStore, saveWorkspaceStore, flushWorkspaceStoreSaves, sanitizeWorkspace } from '../src/services/workspaceService';
 import { applyRemoteTask, clearSanityConfig, getSanityConfig, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments, subscribeToSanityLiveChanges } from '../src/services/sanityService';
 import { scanTaskBlocks, updateTaskInMarkdown } from '../src/utils/markdownSync';
 
@@ -98,7 +98,30 @@ beforeEach(async () => {
   sync = new DocumentSync(server.client);
   await beginSyncSession(config);
 });
-afterEach(() => { invalidateSyncSession(); globalThis.fetch = originalFetch; });
+afterEach(() => { flushWorkspaceStoreSaves(); invalidateSyncSession(); globalThis.fetch = originalFetch; });
+
+test('typing batches workspace persistence and flush keeps the latest edit', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const initial = loadWorkspaceStore(); saveWorkspaceStore(initial);
+  saveWorkspaceStore({ ...initial, workspaces: [{ ...initial.workspaces[0], name: 'First edit' }] }, 350);
+  t.mock.timers.tick(200);
+  saveWorkspaceStore({ ...initial, workspaces: [{ ...initial.workspaces[0], name: 'Latest edit' }] }, 350);
+  t.mock.timers.tick(200);
+  assert.equal(loadWorkspaceStore().workspaces[0].name, initial.workspaces[0].name);
+  flushWorkspaceStoreSaves();
+  assert.equal(loadWorkspaceStore().workspaces[0].name, 'Latest edit');
+  t.mock.timers.tick(1000);
+  assert.equal(loadWorkspaceStore().workspaces[0].name, 'Latest edit');
+});
+
+test('an immediate workspace save supersedes an older buffered snapshot', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const initial = loadWorkspaceStore();
+  saveWorkspaceStore({ ...initial, workspaces: [{ ...initial.workspaces[0], name: 'Buffered' }] }, 350);
+  saveWorkspaceStore({ ...initial, workspaces: [{ ...initial.workspaces[0], name: 'Merged remote' }] });
+  t.mock.timers.tick(1000);
+  assert.equal(loadWorkspaceStore().workspaces[0].name, 'Merged remote');
+});
 
 test('first login has an empty isolated workspace and does not publish examples', () => {
   const store = loadWorkspaceStore();

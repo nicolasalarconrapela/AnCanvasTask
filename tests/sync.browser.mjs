@@ -93,12 +93,15 @@ async function openBrowser(executable, port) {
   await new Promise((resolve, reject) => { browser.socket.onopen = resolve; browser.socket.onerror = reject; });
   let sequence = 0; const pending = new Map();
   browser.send = (method, params = {}) => new Promise((resolve, reject) => {
-    const id = ++sequence; pending.set(id, { resolve, reject }); browser.socket.send(JSON.stringify({ id, method, params }));
+    const id = ++sequence;
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Browser command timed out: ${method}`)); }, 10000);
+    pending.set(id, { resolve, reject, timer }); browser.socket.send(JSON.stringify({ id, method, params }));
   });
   browser.socket.onmessage = async event => {
     const message = JSON.parse(event.data);
     if (message.id) {
       const handler = pending.get(message.id); pending.delete(message.id);
+      clearTimeout(handler?.timer);
       if (message.error) handler?.reject(new Error(message.error.message)); else handler?.resolve(message.result);
     } else if (message.method === 'Runtime.exceptionThrown') browser.errors.push(message.params.exceptionDetails.text);
     else if (message.method === 'Fetch.requestPaused') {
@@ -140,11 +143,31 @@ try {
   await waitUntil(async () => (await a.content()).includes('[x]'), 'B checkbox did not reach A');
   await Promise.all([a.edit('Write ', 'Draft '), b.edit('report', 'report today')]);
   await waitUntil(async () => (await a.content()).includes('Draft final updated report today') && await a.content() === await b.content(), 'Concurrent title edits did not converge');
+  await pause(1800);
+  const beforeTyping = mutations;
+  await a.evaluate(`(()=>{
+    window.typingStoreWrites=0;
+    const setItem=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(key,value){if(key.startsWith('antask_workspaces_v2'))window.typingStoreWrites++;return setItem.call(this,key,value)};
+  })()`);
+  for (const character of ' typingburst') {
+    await a.evaluate(`(()=>{const view=document.querySelector('.cm-content').cmTile.root.view;const from=view.state.doc.toString().indexOf('\\n  id:');view.dispatch({changes:{from,insert:${JSON.stringify(character)}}});})()`);
+    await pause(80);
+  }
+  assert((await a.content()).includes('today typingburst'), 'Editor input was delayed or lost');
+  const typingStoreWrites = await a.evaluate('window.typingStoreWrites');
+  assert(typingStoreWrites <= 1, `Typing serialized the workspace ${typingStoreWrites} times`);
+  assert.equal(mutations, beforeTyping, 'Typing triggered remote saves before the debounce settled');
+  await waitUntil(async () => (await b.content()).includes('today typingburst'), 'Debounced edits did not reach the other browser');
   assert.deepEqual(a.errors, []); assert.deepEqual(b.errors, []);
   console.log(JSON.stringify({ browsers: ['Edge', 'Chrome'], isolatedProfiles: true, sequentialEdits: true,
-    bidirectionalRealtime: true, concurrentTitleEdits: true, cursorPreserved: true, mutations, uncaughtErrors: 0 }));
+    bidirectionalRealtime: true, concurrentTitleEdits: true, cursorPreserved: true, typingStoreWrites,
+    typingDebounced: true, mutations, uncaughtErrors: 0 }));
 } catch(error) {
-  for (const browser of browsers) console.error(JSON.stringify({errors:browser.errors,body:await browser.evaluate("document.body?.innerText.slice(-1800)")}));
+  for (const browser of browsers) {
+    try { console.error(JSON.stringify({errors:browser.errors,body:await browser.evaluate("document.body?.innerText.slice(-1800)")})); }
+    catch (diagnosticError) { console.error(diagnosticError.message); }
+  }
   throw error;
 } finally {
   for (const browser of browsers) { try { await browser.send?.('Browser.close'); } catch {} browser.socket?.close(); browser.processHandle.kill(); }

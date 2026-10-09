@@ -441,8 +441,22 @@ export function loadWorkspaceStore(scope = getStorageScope()): WorkspaceStoreSta
   return initialState;
 }
 
-export function saveWorkspaceStore(state: WorkspaceStoreState): void {
+const pendingStoreSaves = new Map<string, { state: WorkspaceStoreState; timer: ReturnType<typeof setTimeout> }>();
+
+export function flushWorkspaceStoreSaves(): void {
+  for (const { state } of [...pendingStoreSaves.values()]) saveWorkspaceStore(state);
+}
+
+export function saveWorkspaceStore(state: WorkspaceStoreState, delay = 0): void {
   const scope = state.scope || getStorageScope();
+  const pending = pendingStoreSaves.get(scope);
+  if (pending) clearTimeout(pending.timer);
+  pendingStoreSaves.delete(scope);
+  if (delay) {
+    const snapshot = { ...state, scope };
+    pendingStoreSaves.set(scope, { state: snapshot, timer: setTimeout(() => saveWorkspaceStore(snapshot), delay) });
+    return;
+  }
   const key = scope === localScope ? STORAGE_KEY : `${STORAGE_KEY}:${scope}`;
   try {
     const sanitizedWorkspaces = (state.workspaces || []).map((ws, idx) =>
