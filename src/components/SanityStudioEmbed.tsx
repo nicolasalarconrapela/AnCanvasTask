@@ -93,19 +93,8 @@ export const SanityStudioEmbed: React.FC<SanityStudioEmbedProps> = ({
           if (userId && userId !== lastDetectedUserId.current) {
             lastDetectedUserId.current = userId;
 
-            // If a token was captured from studio storage, save it
-            if (session.token && !config.token) {
-              saveSanityConfig({ token: session.token });
-            }
-
-            // Auto-select first project if project mismatch or unconfigured
-            if (session.projects && session.projects.length > 0) {
-              const hasMatching = session.projects.some((p) => p.id === config.projectId);
-              if (!hasMatching && session.projects[0]) {
-                saveSanityConfig({ projectId: session.projects[0].id });
-              }
-            }
-
+            // Detection is informational. Credentials and project are applied
+            // together only when the user saves the configuration.
             const userName = session.user.name || session.user.email || 'usuario';
             onShowToast?.(
               `Sesión de Sanity detectada (${userName}). Abriendo configuración para completar sincronización...`,

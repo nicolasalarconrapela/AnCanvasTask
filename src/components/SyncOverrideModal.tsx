@@ -1,3 +1,4 @@
+import { getSyncSession } from '../services/syncSessionService';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
@@ -110,10 +111,18 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   const isSanityConfigured = Boolean(sanityConfig.projectId && sanityConfig.dataset);
 
   useEffect(() => {
-    const updateConfig = () => setSanityConfig(getSanityConfig());
+    const updateConfig = () => {
+      pendingDeletionsRef.current.forEach(p => clearTimeout(p.timeoutId));
+      pendingDeletionsRef.current.clear();
+      setResult(null);
+      setSanityConfig(getSanityConfig());
+    };
     updateConfig();
     window.addEventListener('antask_sanity_config_updated', updateConfig);
-    return () => window.removeEventListener('antask_sanity_config_updated', updateConfig);
+    return () => {
+      window.removeEventListener('antask_sanity_config_updated', updateConfig);
+      pendingDeletionsRef.current.forEach(p => clearTimeout(p.timeoutId));
+    };
   }, []);
 
   // Close active dropdown menu when clicking outside
@@ -132,7 +141,9 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   const handleRunAnalysis = useCallback(async () => {
     setIsAnalyzing(true);
     try {
+      const session = getSyncSession();
       const res = await analyzeSyncDifferences(workspaceStore);
+      if (getSyncSession() !== session) return;
       setResult(res);
       if (res.hasPendingChanges) {
         const count = res.counts.localOverrides + res.counts.remoteOverrides + res.counts.conflicts;
@@ -157,10 +168,12 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     item: SyncItemDiff,
     strategy: 'keep_local' | 'keep_remote' | 'merge'
   ) => {
+    const session = getSyncSession();
     setResolvingItemId(item.id);
     setActiveMenuId(null);
     try {
       const res = await resolveSyncItem(item, strategy, workspaceStore);
+      if (getSyncSession() !== session) return;
       if (res.success) {
         onShowToast(res.message, 'success');
         if (res.updatedStore) {
@@ -332,14 +345,17 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     }
 
     // Schedule delayed permanent deletion for all items
+    const deletionSession = getSyncSession();
+    const deletionConfig = getSanityConfig();
     const timeoutId = setTimeout(async () => {
+      if (getSyncSession() !== deletionSession) return;
       for (const id of itemIdsArray) {
         pendingDeletionsRef.current.delete(id);
       }
       try {
         if (bulkDeleteScope === 'remote' || bulkDeleteScope === 'both') {
           for (const item of itemsToDelete) {
-            await deleteSyncItem(item, bulkDeleteScope, workspaceStoreRef.current);
+            await deleteSyncItem(item, bulkDeleteScope, workspaceStoreRef.current, deletionConfig);
           }
         }
       } catch (err) {
@@ -465,11 +481,14 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     }
 
     // Schedule permanent execution after 30 seconds
+    const deletionSession = getSyncSession();
+    const deletionConfig = getSanityConfig();
     const timeoutId = setTimeout(async () => {
+      if (getSyncSession() !== deletionSession) return;
       pendingDeletionsRef.current.delete(item.id);
       try {
         if (scope === 'remote' || scope === 'both') {
-          const res = await deleteSyncItem(item, scope, workspaceStoreRef.current);
+          const res = await deleteSyncItem(item, scope, workspaceStoreRef.current, deletionConfig);
           if (!res.success) {
             console.warn('Permanent remote deletion failed:', res.message);
           }
@@ -507,9 +526,12 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
 
   const handleBatchSyncAction = async (mode: 'smart' | 'push_all' | 'pull_all') => {
     if (!result) return;
+    const session = getSyncSession();
     setIsProcessing(true);
     try {
       const res = await executeBatchSync(result.items, mode, workspaceStore);
+      if (getSyncSession() !== session) return;
+      onUpdateWorkspaceStore(res.updatedStore);
       if (res.success) {
         onShowToast(res.message, 'success');
         onUpdateWorkspaceStore(res.updatedStore);

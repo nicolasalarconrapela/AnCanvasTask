@@ -11,7 +11,7 @@
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "tsx tests/verify_core.ts",
+    "test": "tsx tests/verify_core.ts && tsx --test tests/sync.test.ts",
     "i18n:extract": "lingui extract",
     "i18n:compile": "lingui compile",
     "i18n:check": "lingui compile --strict",

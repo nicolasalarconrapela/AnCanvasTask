@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import {
   parseTasksMarkdown,
-} from '../src/shapes/TaskShapeUtil';
+} from '../src/utils/taskMarkdown';
 import {
   scanTaskBlocks,
   updateTaskInMarkdown,

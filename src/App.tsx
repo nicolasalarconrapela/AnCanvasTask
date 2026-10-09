@@ -1,3 +1,5 @@
+import { beginSyncSession, getSyncSession, assertSyncSession, invalidateSyncSession, localScope } from './services/syncSessionService';
+import { documentSync, mergeSyncValue, syncComparable } from './services/documentSyncService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createShapeId,
@@ -24,6 +26,10 @@ import {
   buildSanityTaskDocId,
   sanitizeSanityDocId,
   normalizeSanityWorkspaceDoc,
+  fetchSanityDocumentsList,
+  workspacesFromSanityDocuments,
+  applyRemoteTask,
+  deleteDocumentFromSanity,
 } from './services/sanityService';
 import {
   CustomNoteShapeUtil,
@@ -92,7 +98,7 @@ import {
   getActiveWorkspace,
   getActiveBranch,
   getActiveDocument,
-  getInitialDefaultWorkspaces,
+  createEmptyWorkspace,
   logWorkspaceTrace,
   WorkspaceStoreState,
   Workspace,
@@ -525,7 +531,7 @@ export default function App() {
   // Sanity Live Bidirectional Synchronization State
   const [isLiveSyncActive, setIsLiveSyncActive] = useState<boolean>(false);
   const [lastLiveSyncAt, setLastLiveSyncAt] = useState<string | null>(null);
-  const isRemoteMutationInProgressRef = useRef<boolean>(false);
+
 
   const pushToast = useCallback(
     (
@@ -770,7 +776,10 @@ export default function App() {
   const [isCustomGroup, setIsCustomGroup] = useState<boolean>(false);
 
   // Workspace and GitHub Repositories Store State
-  const [workspaceStore, setWorkspaceStore] = useState<WorkspaceStoreState>(() => loadWorkspaceStore());
+  const [workspaceStore, setWorkspaceStore] = useState<WorkspaceStoreState>(() =>
+    getSanityConfig().projectId ? { scope: 'loading', workspaces: [createEmptyWorkspace()], activeWorkspaceId: '' } : loadWorkspaceStore(localScope));
+  const workspaceStoreRef = useRef(workspaceStore);
+  workspaceStoreRef.current = workspaceStore;
   const [isWorkspaceManagerOpen, setIsWorkspaceManagerOpen] = useState(false);
   const [isNewTaskDocModalOpen, setIsNewTaskDocModalOpen] = useState(false);
   const [newTaskDocPresetFolder, setNewTaskDocPresetFolder] = useState<string>('');
@@ -802,11 +811,12 @@ export default function App() {
   const currentDocKey = `${activeWorkspace.id}::${activeBranch.name}::${activeDocument.id}`;
   const activeDocKeyRef = useRef<string>(currentDocKey);
   const isSwitchingDocRef = useRef<boolean>(false);
+  const appliedRemoteLayoutRef = useRef<string>('');
 
   // Markdown and sync
   const [currentFileName, setCurrentFileName] = useState<string>(() => activeDocument.path || 'TASKS.md');
-  const [markdownInput, setMarkdownInput] = useState<string>(() => activeDocument.content || SAMPLE_MARKDOWN);
-  const [lastSavedMarkdown, setLastSavedMarkdown] = useState<string>(() => activeDocument.lastSavedContent || SAMPLE_MARKDOWN);
+  const [markdownInput, setMarkdownInput] = useState<string>(() => activeDocument.content ?? '');
+  const [lastSavedMarkdown, setLastSavedMarkdown] = useState<string>(() => activeDocument.lastSavedContent ?? '');
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
   const [copiedMarkdown, setCopiedMarkdown] = useState<boolean>(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
@@ -821,11 +831,28 @@ export default function App() {
   const lastConflictNotifiedTimeRef = useRef<number>(0);
   const isAutoSavingRef = useRef<boolean>(false);
   const [activeSanityConfig, setActiveSanityConfig] = useState<SanityConfig>(() => getSanityConfig());
+  const [syncReady, setSyncReady] = useState(false);
+  const syncReadyRef = useRef(false);
+  const refreshRemoteRef = useRef<() => Promise<void>>(async () => {});
 
   // Dynamic profile / configuration sync listener (INV-02, INV-07)
   useEffect(() => {
     const handleConfigChange = (e: any) => {
       const updated = e.detail || getSanityConfig();
+      syncReadyRef.current = false;
+      setSyncReady(false);
+      if (debouncedSaveRef.current) clearTimeout(debouncedSaveRef.current);
+      if (debouncedSanityTasksRef.current) clearTimeout(debouncedSanityTasksRef.current);
+      if (markdownEditorDebounceRef.current) clearTimeout(markdownEditorDebounceRef.current);
+      pendingWorkspaceDeletionsRef.current.forEach(p => clearTimeout(p.timeoutId));
+      pendingWorkspaceDeletionsRef.current.clear();
+      const empty = createEmptyWorkspace();
+      setWorkspaceStore({ scope: 'loading', workspaces: [empty], activeWorkspaceId: empty.id });
+      setMarkdownInput(empty.branches[0].taskDocuments[0].content);
+      undoStackRef.current = [];
+      setIsLiveSyncActive(false);
+      setIsSyncOverrideModalOpen(false);
+      setIsNativeStudioModalOpen(false);
       setActiveSanityConfig(updated);
     };
     window.addEventListener('antask_sanity_config_updated', handleConfigChange);
@@ -833,6 +860,109 @@ export default function App() {
       window.removeEventListener('antask_sanity_config_updated', handleConfigChange);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let refreshing: Promise<void> | null = null;
+    let refreshAgain = false;
+    let initializing = false;
+    let unsubscribe = () => {};
+    const initialize = async () => {
+      if (initializing || cancelled) return;
+      initializing = true;
+      try {
+        const session = await beginSyncSession(activeSanityConfig);
+        if (cancelled) return;
+        if (!session) {
+          const local = loadWorkspaceStore(localScope);
+          setWorkspaceStore(local);
+          syncReadyRef.current = true;
+          setSyncReady(true);
+          setSyncStatus('local');
+          return;
+        }
+        const saved = loadWorkspaceStore(session.scope);
+        workspaceStoreRef.current = saved;
+        setWorkspaceStore(saved);
+        (saved.remoteDocuments || []).forEach(d => documentSync.observe(d, session));
+        const refresh = (): Promise<void> => {
+          if (refreshing) { refreshAgain = true; return refreshing; }
+          refreshing = (async () => {
+            try {
+              assertSyncSession(session);
+              if (session.config.token) await documentSync.flush(session);
+              let docs = await fetchSanityDocumentsList(session.config, true);
+              docs = await documentSync.reconcileDeletions(workspaceStoreRef.current.remoteDocuments || [], docs, session.config);
+              assertSyncSession(session);
+              if (cancelled) return;
+              const previous = workspaceStoreRef.current;
+              if (previous.scope !== session.scope) return;
+              const remote = workspacesFromSanityDocuments(docs);
+              const local = previous.workspaces.filter(w => !w.isPlaceholder || w.name !== 'Mi Workspace' ||
+                w.branches.some(b => b.taskDocuments.some(d => d.content.trim() !== '# Tareas\n\n## General')));
+              const merged = mergeSyncValue(previous.remoteBase || [], local, remote, '/workspaces') as Workspace[];
+              const workspaces = merged.length ? merged : [previous.workspaces.find(w => w.isPlaceholder) || createEmptyWorkspace()];
+              const next: WorkspaceStoreState = { ...previous, scope: session.scope, workspaces,
+                remoteBase: remote, remoteDocuments: docs,
+                activeWorkspaceId: workspaces.some(w => w.id === previous.activeWorkspaceId) ? previous.activeWorkspaceId : workspaces[0].id };
+              workspaceStoreRef.current = next;
+              saveWorkspaceStore(next);
+              setWorkspaceStore(next);
+              syncReadyRef.current = true;
+              setSyncReady(true);
+              setSyncStatus(session.config.token ? 'synced' : 'local');
+            } catch (error: any) {
+              if (cancelled || getSyncSession() !== session) return;
+              syncReadyRef.current = false;
+              setSyncReady(false);
+              setSyncStatus('local');
+              pushToast(error.message, 'warning');
+              if (error.name !== 'TypeError') setIsSyncOverrideModalOpen(true);
+            } finally {
+              refreshing = null;
+              if (refreshAgain && !cancelled) { refreshAgain = false; queueMicrotask(() => { void refresh(); }); }
+            }
+          })();
+          return refreshing;
+        };
+        refreshRemoteRef.current = refresh;
+        unsubscribe = subscribeToSanityLiveChanges(event => {
+          setIsLiveSyncActive(event.type !== 'connection_error');
+          if (event.type !== 'connection_error') void refresh();
+        }, session.config);
+        await refresh();
+      } catch (error: any) {
+        if (!cancelled) { setSyncStatus('local'); pushToast(error.message, 'warning'); }
+      } finally { initializing = false; }
+    };
+    void initialize();
+    const catchUp = () => {
+      if (!getSyncSession(activeSanityConfig) && activeSanityConfig.projectId) void initialize();
+      else void refreshRemoteRef.current();
+    };
+    const storageChanged = (event: StorageEvent) => {
+      if (event.key === 'antaskcanvas_sanity_config') {
+        invalidateSyncSession();
+        window.dispatchEvent(new CustomEvent('antask_sanity_config_updated', { detail: getSanityConfig() }));
+      } else if (event.key?.startsWith('antask_sync_pending:')) catchUp();
+    };
+    window.addEventListener('online', catchUp);
+    window.addEventListener('focus', catchUp);
+    window.addEventListener('storage', storageChanged);
+    const poll = setInterval(catchUp, 30000);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      invalidateSyncSession();
+      syncReadyRef.current = false;
+      refreshRemoteRef.current = async () => {};
+      clearInterval(poll);
+      window.removeEventListener('online', catchUp);
+      window.removeEventListener('focus', catchUp);
+      window.removeEventListener('storage', storageChanged);
+      setIsLiveSyncActive(false);
+    };
+  }, [activeSanityConfig]);
 
   // Synchronize canvas shape visibility (cards, groups, and connector arrows) with active filters & search query
   useEffect(() => {
@@ -1072,10 +1202,15 @@ export default function App() {
     if (debouncedSaveRef.current) {
       clearTimeout(debouncedSaveRef.current);
     }
+    const scheduledSession = getSyncSession();
+    const scheduledScope = workspaceStoreRef.current.scope;
+    const scheduledKey = currentDocKey;
+    const scheduledConfig = getSanityConfig();
     setSyncStatus('saving');
     debouncedSaveRef.current = setTimeout(async () => {
+      if (getSyncSession() !== scheduledSession || workspaceStoreRef.current.scope !== scheduledScope || activeDocKeyRef.current !== scheduledKey) return;
       const visualState = extractVisualStateFromEditor(editorInstance);
-      if (visualState.tasks.length > 0 || visualState.groups.length > 0) {
+      {
         // 1. Immediately persist visualState to workspaceStore in localStorage
         setWorkspaceStore((prevStore) => {
           let hasChanges = false;
@@ -1110,13 +1245,11 @@ export default function App() {
         });
 
         // 2. Persist to canvas visual state cache and remote if configured
-        const res = await saveCanvasVisualState(visualState, activeDocument.id || 'default');
-        setSyncStatus(res.remote ? 'synced' : 'local');
-      } else {
-        setSyncStatus('local');
+        const res = await saveCanvasVisualState(visualState, currentDocKey, scheduledConfig);
+        if (getSyncSession() === scheduledSession) setSyncStatus(res.remote ? 'synced' : 'local');
       }
     }, 700);
-  }, [activeDocument.id]);
+  }, [currentDocKey]);
 
   const handleMarkdownEditorChange = useCallback(
     (newMarkdown: string) => {
@@ -1126,7 +1259,10 @@ export default function App() {
         clearTimeout(markdownEditorDebounceRef.current);
       }
 
+      const scheduledKey = activeDocKeyRef.current;
+      const scheduledSession = getSyncSession();
       markdownEditorDebounceRef.current = setTimeout(() => {
+        if (activeDocKeyRef.current !== scheduledKey || getSyncSession() !== scheduledSession) return;
         if (editor) {
           const currentVisual = extractVisualStateFromEditor(editor);
           loadTasksFromMarkdown(
@@ -1147,7 +1283,7 @@ export default function App() {
 
   // Keep workspaceStore synced whenever markdownInput changes (guarding against doc switches)
   useEffect(() => {
-    if (isSwitchingDocRef.current) return;
+    if (isSwitchingDocRef.current || workspaceStoreRef.current.scope === 'loading') return;
     setWorkspaceStore((prevStore) => {
       let hasChanges = false;
       const nextWs = prevStore.workspaces.map((ws) => {
@@ -1219,7 +1355,9 @@ export default function App() {
         // 2. If Sanity Cloud is configured, check for differences and notify on conflicts
         const sanityConfig = getSanityConfig();
         if (sanityConfig.projectId && sanityConfig.dataset) {
+          const session = getSyncSession(sanityConfig);
           const diffResult = await analyzeSyncDifferences(workspaceStore);
+          if (getSyncSession() !== session) return;
           const totalConflicts = diffResult.counts.conflicts + diffResult.counts.remoteOverrides;
           if (totalConflicts > 0) {
             const now = Date.now();
@@ -1257,7 +1395,9 @@ export default function App() {
 
   // Reactive and reliable document switching across workspaces, branches and files
   useEffect(() => {
-    if (activeDocKeyRef.current !== currentDocKey) {
+    const layoutRevision = `${currentDocKey}:${(activeDocument.visualState as any)?._rev || ''}`;
+    if (activeDocKeyRef.current !== currentDocKey || activeDocument.content !== markdownRef.current || appliedRemoteLayoutRef.current !== layoutRevision) {
+      appliedRemoteLayoutRef.current = layoutRevision;
       isSwitchingDocRef.current = true;
       activeDocKeyRef.current = currentDocKey;
       logWorkspaceTrace(`Cargando documento activo: ${currentDocKey}`, {
@@ -1298,15 +1438,18 @@ export default function App() {
           activeDocument.content,
           activeDocument.visualState
         );
-        triggerDebouncedVisualSave(editor);
       }
 
-      const timer = setTimeout(() => {
-        isSwitchingDocRef.current = false;
-      }, 60);
-      return () => clearTimeout(timer);
+      const timer = setTimeout(() => { isSwitchingDocRef.current = false; }, 60);
+      return () => { clearTimeout(timer); isSwitchingDocRef.current = false; };
     }
   }, [currentDocKey, activeDocument, activeWorkspace.name, activeBranch.name, editor, triggerDebouncedVisualSave]);
+
+  useEffect(() => () => {
+    if (debouncedSaveRef.current) clearTimeout(debouncedSaveRef.current);
+    if (markdownEditorDebounceRef.current) clearTimeout(markdownEditorDebounceRef.current);
+    pendingWorkspaceDeletionsRef.current.forEach(p => clearTimeout(p.timeoutId));
+  }, []);
 
   // Existing folders in the active branch for autocomplete
   const existingFoldersInBranch = useMemo(() => {
@@ -1379,11 +1522,6 @@ export default function App() {
           triggerDebouncedVisualSave(editor);
         }
 
-        // Persist to Sanity if configured
-        const config = getSanityConfig();
-        if (config.projectId && config.dataset && config.token) {
-          saveWorkspaceToSanity(newWs, config);
-        }
 
         return nextStore;
       });
@@ -1405,22 +1543,17 @@ export default function App() {
         };
         saveWorkspaceStore(nextStore);
 
-        // Persist to Sanity if configured (Zero Data Loss)
-        const config = getSanityConfig();
-        if (config.projectId && config.dataset && config.token) {
-          saveWorkspaceToSanity(updatedWs, config)
-            .then((res) => {
-              if (!res.ok) {
-                pushToast(res.message, 'warning');
-              }
-            })
-            .catch((err) => {
-              console.warn('Error saving updated workspace to Sanity:', err);
-            });
-        }
 
         return nextStore;
       });
+      const session = getSyncSession();
+      if (session && syncReadyRef.current && updatedWs.id !== workspaceStoreRef.current.activeWorkspaceId) {
+        void saveWorkspaceToSanity(updatedWs, session.config).then(res => {
+          if (getSyncSession() !== session) return;
+          if (!res.ok) pushToast(res.message, 'warning');
+          else void refreshRemoteRef.current();
+        });
+      }
       pushToast(i18n._(msg`Workspace "${updatedWs.name}" actualizado`), 'success');
     },
     [pushToast, i18n]
@@ -1428,7 +1561,7 @@ export default function App() {
 
   const handleUndoDeleteWorkspace = useCallback(
     (wsId: string) => {
-      const cleanTargetId = wsId.replace(/^ws_/, '').replace(/^workspace-/, '');
+      const cleanTargetId = wsId.replace(/^workspace-/, '');
       const pending =
         pendingWorkspaceDeletionsRef.current.get(wsId) ||
         pendingWorkspaceDeletionsRef.current.get(cleanTargetId);
@@ -1492,7 +1625,9 @@ export default function App() {
 
   const handleDeleteWorkspace = useCallback(
     (wsId: string, deleteRemote: boolean = false) => {
-      const cleanTargetId = wsId.replace(/^ws_/, '').replace(/^workspace-/, '');
+      const cleanTargetId = wsId.replace(/^workspace-/, '');
+      const deletionSession = getSyncSession();
+      const deletionConfig = getSanityConfig();
       const targetWs = workspaceStore.workspaces.find(
         (w) =>
           w.id === wsId ||
@@ -1506,9 +1641,12 @@ export default function App() {
           const timeoutId = setTimeout(() => {
             pendingWorkspaceDeletionsRef.current.delete(wsId);
             pendingWorkspaceDeletionsRef.current.delete(cleanTargetId);
-            const config = getSanityConfig();
+            if (getSyncSession() !== deletionSession) return;
+            const config = deletionConfig;
             if (config.projectId && config.dataset && config.token) {
-              deleteWorkspaceFromSanity(cleanTargetId, config).catch((e) => {
+              deleteWorkspaceFromSanity(cleanTargetId, config).then(res => {
+                if (getSyncSession() === deletionSession && !res.ok) pushToast(res.message, 'error');
+              }).catch((e) => {
                 console.warn('Error deleting remote workspace permanently from Sanity:', e);
               });
             }
@@ -1554,9 +1692,12 @@ export default function App() {
         pendingWorkspaceDeletionsRef.current.delete(actualWsId);
         pendingWorkspaceDeletionsRef.current.delete(wsId);
         if (deleteRemote) {
-          const config = getSanityConfig();
+          if (getSyncSession() !== deletionSession) return;
+          const config = deletionConfig;
           if (config.projectId && config.dataset && config.token) {
-            deleteWorkspaceFromSanity(actualWsId, config).catch((e) => {
+            deleteWorkspaceFromSanity(actualWsId, config).then(res => {
+              if (getSyncSession() === deletionSession && !res.ok) pushToast(res.message, 'error');
+            }).catch((e) => {
               console.warn('Error deleting workspace permanently from Sanity:', e);
             });
           }
@@ -1583,19 +1724,7 @@ export default function App() {
         let nextActiveId = prev.activeWorkspaceId;
 
         if (nextWorkspaces.length === 0) {
-          const freshDefaults = getInitialDefaultWorkspaces();
-          const cleanWs: Workspace = {
-            ...freshDefaults[0],
-            id: 'ws_' + Date.now(),
-            name: 'Mi Workspace',
-            githubRepo: {
-              owner: 'usuario',
-              repo: 'mi-repositorio',
-              fullName: 'usuario/mi-repositorio',
-              url: 'https://github.com/usuario/mi-repositorio',
-              defaultBranch: 'main',
-            },
-          };
+          const cleanWs = createEmptyWorkspace();
           nextWorkspaces = [cleanWs];
           nextActiveId = cleanWs.id;
         } else if (
@@ -1759,7 +1888,10 @@ export default function App() {
       return;
     }
 
+    const session = getSyncSession(config);
     const res = await syncAllWorkspacesToSanity(workspaceStore.workspaces, config);
+    if (getSyncSession(config) !== session) return;
+    if (res.ok) void refreshRemoteRef.current();
     if (res.ok) {
       pushToast(res.message, 'success');
     } else {
@@ -1777,7 +1909,9 @@ export default function App() {
     }
 
     try {
-      const remoteWorkspaces = await loadWorkspacesFromSanity(config);
+      const importSession = getSyncSession(config);
+      const remoteWorkspaces = await loadWorkspacesFromSanity(config, true);
+      if (getSyncSession(config) !== importSession) return;
       if (remoteWorkspaces.length === 0) {
         pushToast(i18n._(msg`No se encontraron documentos _type: "workspace" en Sanity`), 'info');
         return;
@@ -1820,7 +1954,10 @@ export default function App() {
         return;
       }
 
+      const session = getSyncSession(config);
       const res = await saveWorkspaceToSanity(ws, config);
+      if (getSyncSession(config) !== session) return;
+      if (res.ok) void refreshRemoteRef.current();
       if (res.ok) {
         pushToast(res.message, 'success');
       } else {
@@ -2459,7 +2596,10 @@ export default function App() {
       // Async initialization of visual state
       const initVisualState = async () => {
         setSyncStatus('loading');
-        const savedVisualState = await loadCanvasVisualState(activeDocument.id || 'default');
+        const scheduledKey = activeDocKeyRef.current;
+        const scheduledSession = getSyncSession();
+        const savedVisualState = await loadCanvasVisualState(scheduledKey);
+        if (!isMounted || scheduledKey !== activeDocKeyRef.current || scheduledSession !== getSyncSession()) return;
         if (savedVisualState) {
           setSyncStatus(getSanityConfig().token ? 'synced' : 'local');
         } else {
@@ -2467,7 +2607,7 @@ export default function App() {
         }
 
         // Reconstruct tasks from current active document / markdown with saved visual positions
-        const contentToLoad = activeDocument?.content || markdownRef.current || SAMPLE_MARKDOWN;
+        const contentToLoad = activeDocument?.content ?? markdownRef.current;
         const visualToLoad = activeDocument?.visualState || savedVisualState;
         loadTasksFromMarkdown(editorInstance, contentToLoad, visualToLoad);
       };
@@ -2845,13 +2985,19 @@ export default function App() {
       }
 
       try {
+        const fileSession = getSyncSession();
+        const fileKey = activeDocKeyRef.current;
         const text = await file.text();
+        if (getSyncSession() !== fileSession || activeDocKeyRef.current !== fileKey) return;
         setCurrentFileName(file.name);
         setMarkdownInput(text);
         setLastSavedMarkdown(text);
 
         if (editor) {
-          const savedVisualState = await loadCanvasVisualState();
+          const scheduledSession = getSyncSession();
+        const scheduledKey = activeDocKeyRef.current;
+        const savedVisualState = await loadCanvasVisualState(scheduledKey);
+        if (getSyncSession() !== scheduledSession || activeDocKeyRef.current !== scheduledKey) return;
           const { taskCount, groupCount } = loadTasksFromMarkdown(
             editor,
             text,
@@ -2889,7 +3035,10 @@ export default function App() {
       setLastSavedMarkdown(finalMarkdown);
 
       if (editor) {
-        const savedVisualState = await loadCanvasVisualState();
+        const scheduledSession = getSyncSession();
+        const scheduledKey = activeDocKeyRef.current;
+        const savedVisualState = await loadCanvasVisualState(scheduledKey);
+        if (getSyncSession() !== scheduledSession || activeDocKeyRef.current !== scheduledKey) return;
         const { taskCount, groupCount } = loadTasksFromMarkdown(
           editor,
           finalMarkdown,
@@ -3007,7 +3156,10 @@ export default function App() {
 
   const handleApplyMarkdown = useCallback(async () => {
     if (!editor) return;
-    const savedVisualState = await loadCanvasVisualState();
+    const scheduledSession = getSyncSession();
+        const scheduledKey = activeDocKeyRef.current;
+        const savedVisualState = await loadCanvasVisualState(scheduledKey);
+        if (getSyncSession() !== scheduledSession || activeDocKeyRef.current !== scheduledKey) return;
     const { taskCount, groupCount } = loadTasksFromMarkdown(
       editor,
       markdownInput,
@@ -3201,6 +3353,8 @@ export default function App() {
     if (!deleteWarningState) return;
     const { shapeId, taskId, title } = deleteWarningState;
     const priorMarkdown = markdownInput;
+    const undoSession = getSyncSession();
+    const undoDocKey = activeDocKeyRef.current;
 
     const updatedMarkdown = deleteTaskFromMarkdown(markdownInput, taskId, title);
     setMarkdownInput(updatedMarkdown);
@@ -3234,9 +3388,11 @@ export default function App() {
     pushToast(i18n._(msg`Tarea #${taskId} eliminada`), 'info', {
       label: 'Deshacer',
       onClick: async () => {
+        if (getSyncSession() !== undoSession || activeDocKeyRef.current !== undoDocKey) return;
         setMarkdownInput(priorMarkdown);
         if (editor) {
-          const visual = await loadCanvasVisualState(activeDocument.id || 'default');
+          const visual = await loadCanvasVisualState(currentDocKey);
+          if (getSyncSession() !== undoSession || activeDocKeyRef.current !== undoDocKey) return;
           loadTasksFromMarkdown(editor, priorMarkdown, visual, { shouldZoomToFit: false });
           triggerDebouncedVisualSave(editor);
         }
@@ -3268,307 +3424,46 @@ export default function App() {
     }, 100);
   };
 
-  const handleSanityConfigSaved = useCallback(
-    async (newConfig: SanityConfig) => {
-      if (newConfig.projectId && newConfig.dataset) {
-        setSyncStatus('loading');
-        // Automatically open Sync & Override Detection modal on connection
-        setIsSyncOverrideModalOpen(true);
-        if (editor) {
-          const remoteState = await loadCanvasVisualState();
-          if (remoteState) {
-            seedMockTasks(editor, remoteState);
-            pushToast(i18n._(msg`Estado visual cargado desde Sanity`), 'success');
-          } else {
-            triggerDebouncedVisualSave(editor);
-          }
-        }
-        if (newConfig.token) {
-          setSyncStatus('synced');
-          // Perform full task sync immediately
-          const { taskBlocks } = scanTaskBlocks(markdownInput);
-          const tasksToSync = taskBlocks.map((b) => {
-            const isCompleted = b.rawTaskLine.includes('[x]') || b.rawTaskLine.includes('[X]');
-            return {
-              id: b.detectedId || b.temporaryId,
-              title: b.detectedTitle,
-              completed: isCompleted,
-              priority: b.detectedPriority || 'P1',
-              status: b.detectedStatus || (isCompleted ? 'done' : 'todo'),
-              groupTitle: b.groupTitle || 'General',
-              blockedBy: b.detectedBlockedBy || '',
-              tags: b.detectedTags || [],
-            };
-          });
-          syncAllTasksToSanity(tasksToSync, newConfig, activeWorkspace.id).then((res) => {
-            if (res.ok) {
-              pushToast(i18n._(msg`Sincronización activa: ${tasksToSync.length} tareas registradas en Sanity`), 'success');
-            }
-          });
-        } else {
-          setSyncStatus('local');
-        }
-      } else {
-        setSyncStatus('local');
-      }
-    },
-    [editor, markdownInput, triggerDebouncedVisualSave, pushToast, activeWorkspace.id]
-  );
+  const handleSanityConfigSaved = useCallback(async (_newConfig: SanityConfig) => {
+    setSyncStatus('loading');
+  }, []);
 
   const handleSyncAllTasksToSanity = useCallback(async () => {
-    const config = getSanityConfig();
-    if (!config.projectId || !config.dataset || !config.token) {
-      pushToast(i18n._(msg`Configura el API Token de Sanity para guardar en producción`), 'warning');
-      setIsSanityModalOpen(true);
-      return;
-    }
+    const session = getSyncSession();
+    if (!session || !syncReadyRef.current) { pushToast('Espera a que termine la descarga de Sanity', 'warning'); return; }
+    const result = await saveWorkspaceToSanity(activeWorkspace, session.config);
+    if (getSyncSession() !== session) return;
+    pushToast(result.message, result.ok ? 'success' : 'error');
+    if (result.ok) await refreshRemoteRef.current();
+  }, [activeWorkspace, pushToast]);
 
-    setSyncStatus('loading');
-    const { taskBlocks } = scanTaskBlocks(markdownInput);
-    const tasksToSync = taskBlocks.map((b) => {
-      const isCompleted = b.rawTaskLine.includes('[x]') || b.rawTaskLine.includes('[X]');
-      return {
-        id: b.detectedId || b.temporaryId,
-        title: b.detectedTitle,
-        completed: isCompleted,
-        priority: b.detectedPriority || 'P1',
-        status: b.detectedStatus || (isCompleted ? 'done' : 'todo'),
-        groupTitle: b.groupTitle || 'General',
-        blockedBy: b.detectedBlockedBy || '',
-        tags: b.detectedTags || [],
-      };
-    });
-
-    const res = await syncAllTasksToSanity(tasksToSync, config, activeWorkspace.id);
-    if (res.ok) {
-      setSyncStatus('synced');
-      pushToast(res.message, 'success');
-    } else {
-      setSyncStatus('local');
-      pushToast(res.message, 'error');
-    }
-  }, [markdownInput, pushToast, activeWorkspace.id]);
-
-  // Automatic debounced synchronization of tasks to Sanity on markdown/tasks update
+  // Local edits are persisted immediately; only hydrated sessions may publish.
   useEffect(() => {
-    if (!activeSanityConfig.projectId || !activeSanityConfig.dataset || !activeSanityConfig.token) {
-      return;
-    }
-
-    // Skip outbound sync if we are applying an inbound remote mutation from Sanity
-    if (isRemoteMutationInProgressRef.current) {
-      return;
-    }
-
-    if (debouncedSanityTasksRef.current) {
-      clearTimeout(debouncedSanityTasksRef.current);
-    }
-
-    debouncedSanityTasksRef.current = setTimeout(async () => {
-      const { taskBlocks } = scanTaskBlocks(markdownInput);
-      if (taskBlocks.length === 0) return;
-
-      const tasksToSync = taskBlocks.map((b) => {
-        const isCompleted = b.rawTaskLine.includes('[x]') || b.rawTaskLine.includes('[X]');
-        return {
-          id: b.detectedId || b.temporaryId,
-          title: b.detectedTitle,
-          completed: isCompleted,
-          priority: b.detectedPriority || 'P1',
-          status: b.detectedStatus || (isCompleted ? 'done' : 'todo'),
-          groupTitle: b.groupTitle || 'General',
-          blockedBy: b.detectedBlockedBy || '',
-          tags: b.detectedTags || [],
-        };
-      });
-
-      const res = await syncAllTasksToSanity(tasksToSync, activeSanityConfig, activeWorkspace.id);
-      if (res.ok) {
-        setSyncStatus('synced');
+    if (!syncReady || !activeSanityConfig.token || !activeSanityConfig.projectId) return;
+    const session = getSyncSession(activeSanityConfig);
+    if (!session || workspaceStore.scope !== session.scope || isSwitchingDocRef.current) return;
+    const baseWs = workspaceStore.remoteBase?.find(w => w.id === activeWorkspace.id);
+    if (JSON.stringify(syncComparable(baseWs)) === JSON.stringify(syncComparable(activeWorkspace))) return;
+    const normalized = autoAssignAllMissingTaskIds(markdownInput).updatedMarkdown;
+    if (normalized !== markdownInput) { setMarkdownInput(normalized); return; }
+    if (!baseWs && activeWorkspace.isPlaceholder && activeWorkspace.name === 'Mi Workspace' && markdownInput.trim() === '# Tareas\n\n## General') return;
+    const snapshot = { ...activeWorkspace, branches: activeWorkspace.branches.map(b => b.name === activeBranch.name
+      ? { ...b, taskDocuments: b.taskDocuments.map(d => d.id === activeDocument.id ? { ...d, content: markdownInput } : d) } : b) };
+    const timer = setTimeout(async () => {
+      try {
+        assertSyncSession(session);
+        setSyncStatus('saving');
+        const result = await saveWorkspaceToSanity(snapshot, session.config);
+        assertSyncSession(session);
+        if (!result.ok) throw new Error(result.message);
+        await refreshRemoteRef.current();
+      } catch (error: any) {
+        if (getSyncSession() === session) { setSyncStatus('local'); pushToast(error.message, 'warning'); }
       }
     }, 1200);
-
-    return () => {
-      if (debouncedSanityTasksRef.current) {
-        clearTimeout(debouncedSanityTasksRef.current);
-      }
-    };
-  }, [markdownInput, activeSanityConfig, activeWorkspace.id]);
-
-  // Sanity Live Bidirectional Listener: receives mutations from Sanity Content Lake
-  useEffect(() => {
-    if (!activeSanityConfig.projectId || !activeSanityConfig.dataset) {
-      setIsLiveSyncActive(false);
-      return;
-    }
-
-    setIsLiveSyncActive(true);
-
-    const unsubscribe = subscribeToSanityLiveChanges((event: SanityLiveChangeEvent) => {
-      setLastLiveSyncAt(formatTime(new Date()));
-
-      if (event.type === 'task' && event.document) {
-        const taskDoc = event.document;
-
-        // Verify workspace context: only apply to current active markdown if workspace matches or is unspecified (INV-01)
-        const currentWsClean = sanitizeSanityDocId(activeWorkspaceRef.current.id.replace(/^workspace-/, ''));
-        if (taskDoc.workspaceId && sanitizeSanityDocId(taskDoc.workspaceId) !== currentWsClean) {
-          return;
-        }
-
-        const targetId = taskDoc.taskId || (taskDoc._id ? taskDoc._id.replace(/^task-([^_]+-)?/, '') : null);
-        if (!targetId) return;
-
-        const currentMd = markdownRef.current;
-        const { taskBlocks } = scanTaskBlocks(currentMd);
-        const existing = taskBlocks.find(
-          (b) =>
-            (b.detectedId && b.detectedId.toLowerCase() === targetId.toLowerCase()) ||
-            b.temporaryId.toLowerCase() === targetId.toLowerCase()
-        );
-
-        if (existing) {
-          const isDone = taskDoc.status === 'done' || Boolean(taskDoc.completed);
-          const currentIsDone =
-            existing.rawTaskLine.includes('[x]') || existing.rawTaskLine.includes('[X]');
-          const currentTitle = existing.detectedTitle;
-          const currentPriority = existing.detectedPriority || 'P1';
-          const newPriority = taskDoc.priority || 'P1';
-
-          if (
-            isDone !== currentIsDone ||
-            (taskDoc.title && taskDoc.title !== currentTitle) ||
-            newPriority !== currentPriority
-          ) {
-            isRemoteMutationInProgressRef.current = true;
-            const updated = updateTaskInMarkdown(currentMd, targetId, {
-              title: taskDoc.title || currentTitle,
-              completed: isDone,
-              priority: newPriority,
-              status: taskDoc.status || (isDone ? 'done' : 'todo'),
-            });
-            setMarkdownInput(updated);
-            setSyncStatus('synced');
-            pushToast(i18n._(msg`Sanity: Tarea #${targetId} sincronizada en vivo`), 'info');
-            setTimeout(() => {
-              isRemoteMutationInProgressRef.current = false;
-            }, 1800);
-          }
-        } else if (event.transition === 'appear') {
-          pushToast(
-            `Sanity Studio: Nueva tarea "${taskDoc.title || targetId}" creada remotamente`,
-            'info'
-          );
-        }
-      } else if (event.type === 'workspace') {
-        const docId = event.documentId || event.document?._id;
-        const cleanDocId = sanitizeSanityDocId(String(docId || '').replace(/^workspace-/, ''));
-
-        if (event.transition === 'disappear') {
-          // Zero data loss & remote deletion sync
-          if (cleanDocId) {
-            setWorkspaceStore((prevStore) => {
-              const exists = prevStore.workspaces.some(
-                (w) => w.id === cleanDocId || w.id.replace(/^workspace-/, '') === cleanDocId
-              );
-              if (!exists) return prevStore;
-
-              const filtered = prevStore.workspaces.filter(
-                (w) => w.id !== cleanDocId && w.id.replace(/^workspace-/, '') !== cleanDocId
-              );
-              if (filtered.length === 0) {
-                return prevStore;
-              }
-              const nextActiveId =
-                prevStore.activeWorkspaceId === cleanDocId ||
-                prevStore.activeWorkspaceId.replace(/^workspace-/, '') === cleanDocId
-                  ? filtered[0].id
-                  : prevStore.activeWorkspaceId;
-
-              const nextStore: WorkspaceStoreState = {
-                ...prevStore,
-                workspaces: filtered,
-                activeWorkspaceId: nextActiveId,
-              };
-              saveWorkspaceStore(nextStore);
-              return nextStore;
-            });
-            const isRecentLocalMutation =
-              Date.now() - lastLocalWorkspaceMutationTimeRef.current < 4000;
-            if (!isRecentLocalMutation) {
-              pushToast(i18n._(msg`Sanity: Espacio de trabajo eliminado remotamente`), 'info');
-            }
-          }
-        } else if (event.document) {
-          // Reconcile remote workspace updates into local workspaceStore (INV-03, INV-11)
-          const remoteWs = event.document;
-          const remoteCleanId =
-            remoteWs.workspaceId ||
-            (remoteWs._id ? remoteWs._id.replace(/^workspace-/, '') : cleanDocId);
-
-          if (remoteCleanId) {
-            setWorkspaceStore((prevStore) => {
-              const idx = prevStore.workspaces.findIndex(
-                (w) =>
-                  w.id === remoteCleanId ||
-                  w.id === `workspace-${remoteCleanId}` ||
-                  w.id.replace(/^workspace-/, '') === remoteCleanId
-              );
-              if (idx >= 0) {
-                const existingWs = prevStore.workspaces[idx];
-                const updatedList = [...prevStore.workspaces];
-                updatedList[idx] = {
-                  ...existingWs,
-                  name: remoteWs.name || existingWs.name,
-                  githubRepo: {
-                    ...existingWs.githubRepo,
-                    owner: remoteWs.githubRepo?.owner || existingWs.githubRepo.owner,
-                    repo: remoteWs.githubRepo?.repo || existingWs.githubRepo.repo,
-                    fullName: remoteWs.githubRepo?.fullName || existingWs.githubRepo.fullName,
-                    url: remoteWs.githubRepo?.url || existingWs.githubRepo.url,
-                    defaultBranch: remoteWs.githubRepo?.defaultBranch || existingWs.githubRepo.defaultBranch,
-                    description: remoteWs.githubRepo?.description ?? existingWs.githubRepo.description,
-                  },
-                  activeBranchName: remoteWs.activeBranchName || existingWs.activeBranchName,
-                  branches:
-                    remoteWs.branches && Array.isArray(remoteWs.branches) && remoteWs.branches.length > 0
-                      ? remoteWs.branches
-                      : existingWs.branches,
-                  updatedAt: remoteWs.updatedAt || new Date().toISOString(),
-                };
-                const nextStore = { ...prevStore, workspaces: updatedList };
-                saveWorkspaceStore(nextStore);
-                return nextStore;
-              } else {
-                // Remote workspace created on another device/tab
-                const normalizedNew = normalizeSanityWorkspaceDoc(remoteWs);
-                if (!normalizedNew) return prevStore;
-                const nextStore: WorkspaceStoreState = {
-                  ...prevStore,
-                  workspaces: [...prevStore.workspaces, normalizedNew],
-                };
-                saveWorkspaceStore(nextStore);
-                return nextStore;
-              }
-            });
-            const isRecentLocalMutation =
-              Date.now() - lastLocalWorkspaceMutationTimeRef.current < 4000;
-            if (!isRecentLocalMutation) {
-              pushToast(
-                i18n._(msg`Sanity: Espacio de trabajo "${event.document.name || 'Workspace'}" sincronizado en tiempo real`),
-                'info'
-              );
-            }
-          }
-        }
-      }
-    }, activeSanityConfig);
-
-    return () => {
-      unsubscribe();
-      setIsLiveSyncActive(false);
-    };
-  }, [activeSanityConfig.projectId, activeSanityConfig.dataset, activeSanityConfig.token, pushToast, i18n]);
+    debouncedSanityTasksRef.current = timer;
+    return () => clearTimeout(timer);
+  }, [markdownInput, activeSanityConfig, syncReady, currentDocKey, activeWorkspace, workspaceStore.remoteBase]);
 
   const handleImportTaskFromSanity = useCallback(
     (taskDoc: any) => {
@@ -3721,6 +3616,8 @@ export default function App() {
   const handleBatchDeleteTasksFromKanban = useCallback(
     (taskIds: string[]) => {
       const priorMarkdown = markdownInput;
+    const undoSession = getSyncSession();
+    const undoDocKey = activeDocKeyRef.current;
 
       setMarkdownInput((currentMd) => {
         let updatedMd = currentMd;
@@ -3752,9 +3649,11 @@ export default function App() {
       pushToast(i18n._(msg`${taskIds.length} tareas eliminadas`), 'info', {
         label: 'Deshacer',
         onClick: async () => {
+          if (getSyncSession() !== undoSession || activeDocKeyRef.current !== undoDocKey) return;
           setMarkdownInput(priorMarkdown);
           if (editor) {
-            const visual = await loadCanvasVisualState();
+            const visual = await loadCanvasVisualState(undoDocKey);
+            if (getSyncSession() !== undoSession || activeDocKeyRef.current !== undoDocKey) return;
             loadTasksFromMarkdown(editor, priorMarkdown, visual, { shouldZoomToFit: false });
             triggerDebouncedVisualSave(editor);
           }
@@ -6541,8 +6440,11 @@ export default function App() {
         onClose={() => setIsSyncOverrideModalOpen(false)}
         workspaceStore={workspaceStore}
         onUpdateWorkspaceStore={(newStore) => {
+          if (newStore.scope !== workspaceStoreRef.current.scope) return;
+          workspaceStoreRef.current = newStore;
           setWorkspaceStore(newStore);
           saveWorkspaceStore(newStore);
+          void refreshRemoteRef.current();
           const activeWs = getActiveWorkspace(newStore);
           const activeBr = getActiveBranch(activeWs);
           const activeDc = getActiveDocument(activeBr);

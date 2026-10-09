@@ -1,30 +1,24 @@
 import {
   Workspace,
   WorkspaceStoreState,
-  TaskDocument,
   saveWorkspaceStore,
-  getInitialDefaultWorkspaces,
+  createEmptyWorkspace,
 } from './workspaceService';
 import {
   getSanityConfig,
-  saveWorkspaceToSanity,
-  loadWorkspacesFromSanity,
-  saveSanityDocument,
-  loadCanvasVisualState,
-  saveCanvasVisualState,
   fetchSanityDocumentsList,
-  fetchSanityDocumentById,
   deleteDocumentFromSanity,
   deleteWorkspaceFromSanity,
   sanitizeSanityDocId,
+  workspacesFromSanityDocuments,
+  normalizeSanityWorkspaceDoc,
   SanityConfig,
 } from './sanityService';
-import { parseTasksMarkdown, ParsedGroup } from '../shapes/TaskShapeUtil';
+import { parseTasksMarkdown, type ParsedGroup } from '../utils/taskMarkdown';
+import { documentSync, mergeSyncValue, buildTaskDocumentId, syncComparable, applyTaskToMarkdown, taskFields } from './documentSyncService';
+import { getSyncSession, assertSyncSession } from './syncSessionService';
 import {
   deleteTaskFromMarkdown,
-  updateTaskInMarkdown,
-  addTaskToMarkdown,
-  scanTaskBlocks,
 } from '../utils/markdownSync';
 
 export type SyncDifferenceType =
@@ -112,29 +106,10 @@ export async function analyzeSyncDifferences(
 
   if (config.projectId && config.dataset) {
     try {
-      const [wsList, docsList] = await Promise.all([
-        loadWorkspacesFromSanity(config),
-        fetchSanityDocumentsList(config),
-      ]);
-      remoteWorkspaces = wsList || [];
-      remoteSanityDocs = docsList || [];
+      remoteSanityDocs = await fetchSanityDocumentsList(config);
+      remoteWorkspaces = workspacesFromSanityDocuments(remoteSanityDocs);
     } catch (err) {
-      console.warn('Error fetching remote data for sync analysis:', err);
-    }
-  }
-
-  // Map of remote workspaces by exact ID, normalized ID, and normalized name
-  const remoteWsMap = new Map<string, any>();
-  for (const rw of remoteWorkspaces) {
-    if (rw.id) {
-      remoteWsMap.set(rw.id, rw);
-      remoteWsMap.set(rw.id.replace(/^workspace-/, ''), rw);
-    }
-    if (rw.workspaceId) {
-      remoteWsMap.set(rw.workspaceId, rw);
-    }
-    if (rw.name) {
-      remoteWsMap.set(rw.name.trim().toLowerCase(), rw);
+      throw err;
     }
   }
 
@@ -143,21 +118,9 @@ export async function analyzeSyncDifferences(
 
   for (const localWs of workspaceStore.workspaces) {
     const cleanLocalId = localWs.id.replace(/^workspace-/, '');
-    const cleanLocalName = (localWs.name || '').trim().toLowerCase();
 
-    const remoteWs =
-      remoteWsMap.get(localWs.id) ||
-      remoteWsMap.get(cleanLocalId) ||
-      remoteWsMap.get(cleanLocalName) ||
-      remoteWorkspaces.find(
-        (rw) =>
-          rw.id === localWs.id ||
-          rw.id === cleanLocalId ||
-          (rw.name && rw.name.trim().toLowerCase() === cleanLocalName) ||
-          (rw.githubRepo?.fullName &&
-            localWs.githubRepo?.fullName &&
-            rw.githubRepo.fullName.toLowerCase() === localWs.githubRepo.fullName.toLowerCase())
-      );
+    const remoteWs = remoteWorkspaces.find(rw => rw.id === localWs.id || rw.id === cleanLocalId);
+
 
     if (!remoteWs) {
       // Exists only locally
@@ -185,10 +148,6 @@ export async function analyzeSyncDifferences(
       if (remoteWs.name) processedRemoteWsIds.add(remoteWs.name.trim().toLowerCase());
 
       // Compare local vs remote workspace
-      const localTime = new Date(localWs.updatedAt || 0).getTime();
-      const remoteTime = new Date(remoteWs.updatedAt || 0).getTime();
-      const timeDiff = Math.abs(localTime - remoteTime);
-
       const changes: string[] = [];
 
       if (localWs.name !== remoteWs.name) {
@@ -244,12 +203,12 @@ export async function analyzeSyncDifferences(
       let diffType: SyncDifferenceType = 'synced';
 
       if (changes.length > 0 || contentDiffers) {
-        if (localTime > remoteTime + 2000) {
-          diffType = 'local_override';
-        } else if (remoteTime > localTime + 2000) {
-          diffType = 'remote_override';
-        } else {
-          diffType = 'conflict';
+        const base = workspaceStore.remoteBase?.find(w => w.id === localWs.id);
+        if (!base) diffType = 'conflict';
+        else {
+          const changedLocal = JSON.stringify(syncComparable(base)) !== JSON.stringify(syncComparable(localWs));
+          const changedRemote = JSON.stringify(syncComparable(base)) !== JSON.stringify(syncComparable(remoteWs));
+          diffType = changedLocal && changedRemote ? 'conflict' : changedLocal ? 'local_override' : 'remote_override';
         }
       }
 
@@ -304,11 +263,6 @@ export async function analyzeSyncDifferences(
 
   // 3. Compare Individual Tasks grouped by Workspace & Document vs Sanity Task Documents
   const remoteTasks = remoteSanityDocs.filter((d) => d._type === 'task');
-  const remoteTasksMap = new Map<string, any>();
-  for (const rt of remoteTasks) {
-    if (rt.taskId) remoteTasksMap.set(rt.taskId.toLowerCase(), rt);
-    if (rt._id) remoteTasksMap.set(rt._id.replace(/^task-/, '').toLowerCase(), rt);
-  }
   const processedRemoteTaskIds = new Set<string>();
 
   for (const ws of workspaceStore.workspaces) {
@@ -321,17 +275,12 @@ export async function analyzeSyncDifferences(
 
         for (const lt of docTasks) {
           const resTaskId = lt.taskId || lt.temporaryId || 'task';
-          const matchedRemote =
-            remoteTasksMap.get(resTaskId.toLowerCase()) ||
-            (lt.title
-              ? remoteTasks.find(
-                  (rt) => (rt.title || '').trim().toLowerCase() === (lt.title || '').trim().toLowerCase()
-                )
-              : undefined);
+          const matchedRemote = remoteTasks.find(rt => rt.taskId === resTaskId && rt.workspaceId === ws.id &&
+            (rt.documentKey === `${b.name}::${doc.id}` || (!rt.documentKey && rt.branchName === b.name && rt.documentPath === doc.path)));
 
           if (!matchedRemote) {
             items.push({
-              id: `task_${ws.id}_${resTaskId}`,
+              id: `task_${ws.id}_${b.name}_${doc.id}_${resTaskId}`,
               entityType: 'task',
               workspaceId: ws.id,
               workspaceName: ws.name,
@@ -346,16 +295,18 @@ export async function analyzeSyncDifferences(
               resolutionStrategy: 'keep_local',
             });
           } else {
-            const remoteKey = (matchedRemote.taskId || matchedRemote._id?.replace(/^task-/, '') || '').toLowerCase();
+            const remoteKey = matchedRemote._id;
             processedRemoteTaskIds.add(remoteKey);
 
             const titleDiff = lt.title !== matchedRemote.title;
+            const fields: Record<string, any> = { title: lt.title, completed: lt.completed, priority: lt.priority || 'P1', status: lt.status, groupTitle: lt.groupTitle, tags: lt.tags || [], blockedBy: lt.blockedBy || '' };
+            const select = (value: any) => Object.fromEntries(Object.keys(fields).map(k => [k, value[k] ?? (k === 'tags' ? [] : k === 'blockedBy' ? '' : k === 'status' ? (value.completed ? 'done' : 'todo') : fields[k])]));
             const completedDiff = Boolean(lt.completed) !== Boolean(matchedRemote.completed);
             const priorityDiff = (lt.priority || 'P1') !== (matchedRemote.priority || 'P1');
 
-            if (!titleDiff && !completedDiff && !priorityDiff) {
+            if (JSON.stringify(syncComparable(fields)) === JSON.stringify(syncComparable(select(matchedRemote)))) {
               items.push({
-                id: `task_${ws.id}_${resTaskId}`,
+                id: `task_${ws.id}_${b.name}_${doc.id}_${resTaskId}`,
                 entityType: 'task',
                 workspaceId: ws.id,
                 workspaceName: ws.name,
@@ -372,13 +323,12 @@ export async function analyzeSyncDifferences(
                 resolutionStrategy: 'keep_local',
               });
             } else {
-              const localTime = new Date(doc.updatedAt || 0).getTime();
-              const remoteTime = new Date(matchedRemote.updatedAt || matchedRemote._updatedAt || 0).getTime();
+              const base = workspaceStore.remoteDocuments?.find(d => d._id === matchedRemote._id);
               let diffType: SyncDifferenceType = 'conflict';
-              if (localTime > remoteTime + 2000) {
-                diffType = 'local_override';
-              } else if (remoteTime > localTime + 2000) {
-                diffType = 'remote_override';
+              if (base) {
+                const changedLocal = JSON.stringify(syncComparable(fields)) !== JSON.stringify(syncComparable(select(base)));
+                const changedRemote = JSON.stringify(syncComparable(select(matchedRemote))) !== JSON.stringify(syncComparable(select(base)));
+                diffType = changedLocal && changedRemote ? 'conflict' : changedLocal ? 'local_override' : 'remote_override';
               }
 
               const changes: string[] = [];
@@ -387,7 +337,7 @@ export async function analyzeSyncDifferences(
               if (priorityDiff) changes.push(`Prioridad: Remoto (${matchedRemote.priority || 'P1'}) vs Local (${lt.priority || 'P1'})`);
 
               items.push({
-                id: `task_${ws.id}_${resTaskId}`,
+                id: `task_${ws.id}_${b.name}_${doc.id}_${resTaskId}`,
                 entityType: 'task',
                 workspaceId: ws.id,
                 workspaceName: ws.name,
@@ -411,27 +361,17 @@ export async function analyzeSyncDifferences(
   }
 
   // Remote tasks not present locally in any workspace
-  const defaultWs = workspaceStore.workspaces?.find((w) => w.id === workspaceStore.activeWorkspaceId) || workspaceStore.workspaces?.[0];
   for (const rt of remoteTasks) {
-    const remoteKey = (rt.taskId || rt._id?.replace(/^task-/, '') || '').toLowerCase();
+    const remoteKey = rt._id;
     if (!processedRemoteTaskIds.has(remoteKey)) {
-      const cleanRtWsId = rt.workspaceId ? sanitizeSanityDocId(String(rt.workspaceId).replace(/^workspace-/, '')) : '';
-      const cleanRtWsName = (rt.workspaceName || '').trim().toLowerCase();
-
-      const matchingWs = workspaceStore.workspaces?.find((w) => {
-        const cleanLocalId = sanitizeSanityDocId(String(w.id).replace(/^workspace-/, ''));
-        const cleanLocalName = (w.name || '').trim().toLowerCase();
-        return (
-          (cleanRtWsId && (cleanLocalId === cleanRtWsId || w.id === rt.workspaceId || `ws_${cleanLocalId}` === rt.workspaceId)) ||
-          (cleanRtWsName && cleanLocalName === cleanRtWsName)
-        );
-      }) || defaultWs;
-
+      const matchingWs = workspaceStore.workspaces.find(w => w.id === rt.workspaceId);
       items.push({
-        id: `task_${rt.taskId || rt._id}`,
+        id: `task_${rt._id}`,
         entityType: 'task',
-        workspaceId: matchingWs?.id || rt.workspaceId || defaultWs?.id,
-        workspaceName: matchingWs?.name || rt.workspaceName || defaultWs?.name,
+        workspaceId: matchingWs?.id || rt.workspaceId,
+        branchName: rt.branchName,
+        documentPath: rt.documentPath,
+        workspaceName: matchingWs?.name || rt.workspaceName,
         title: `Tarea: [${rt.taskId || 'Cloud'}] ${rt.title || 'Sin título'}`,
         subtitle: `Sanity Cloud • Sección "${rt.groupTitle || 'General'}"`,
         diffType: 'only_remote',
@@ -473,178 +413,67 @@ export async function analyzeSyncDifferences(
  * Resolves a single sync item based on the selected resolution strategy.
  */
 export async function resolveSyncItem(
-  item: SyncItemDiff,
-  strategy: 'keep_local' | 'keep_remote' | 'merge',
-  workspaceStore: WorkspaceStoreState,
-  configOverride?: Partial<SanityConfig>
+  item: SyncItemDiff, strategy: 'keep_local' | 'keep_remote' | 'merge',
+  workspaceStore: WorkspaceStoreState, configOverride?: Partial<SanityConfig>
 ): Promise<{ success: boolean; message: string; updatedStore?: WorkspaceStoreState }> {
   const config = { ...getSanityConfig(), ...configOverride };
-
+  const session = getSyncSession(config);
+  if (!session || workspaceStore.scope !== session.scope) throw new Error('La cuenta de sincronizacion ha cambiado');
+  assertSyncSession(session);
+  let resolved: any;
+  let baseline: any;
   if (item.entityType === 'workspace') {
-    if (strategy === 'keep_local' || (strategy === 'merge' && item.localData)) {
-      // Push local workspace to Sanity
-      if (!item.localData) {
-        return { success: false, message: 'No hay datos locales para enviar a Sanity' };
-      }
-      const saveRes = await saveWorkspaceToSanity(item.localData, config);
-      return {
-        success: saveRes.ok,
-        message: saveRes.message,
-      };
-    } else if (strategy === 'keep_remote') {
-      // Pull remote workspace into local store
-      if (!item.remoteData) {
-        return { success: false, message: 'No hay datos remotos para importar' };
-      }
-
-      const remoteWs = item.remoteData;
-      const nextWorkspaces = [...workspaceStore.workspaces];
-      const existingIdx = nextWorkspaces.findIndex(
-        (w) =>
-          w.id === remoteWs.id ||
-          w.id === remoteWs.workspaceId ||
-          (w.name && remoteWs.name && w.name.trim().toLowerCase() === remoteWs.name.trim().toLowerCase())
-      );
-
-      if (existingIdx >= 0) {
-        nextWorkspaces[existingIdx] = remoteWs;
-      } else {
-        nextWorkspaces.push(remoteWs);
-      }
-
-      const updatedStore: WorkspaceStoreState = {
-        ...workspaceStore,
-        workspaces: nextWorkspaces,
-      };
-      saveWorkspaceStore(updatedStore);
-
-      return {
-        success: true,
-        message: `Workspace "${remoteWs.name}" actualizado desde Sanity`,
-        updatedStore,
-      };
+    if (strategy === 'keep_remote') {
+      if (!item.remoteData) return { success: false, message: 'No hay datos remotos para importar' };
+      resolved = item.remoteData;
+      documentSync.discardPending(resolved._id || `workspace-${resolved.id}`, session);
+    } else {
+      if (!item.localData) return { success: false, message: 'No hay datos locales para enviar' };
+      const base = workspaceStore.remoteBase?.find(w => w.id === item.workspaceId);
+      if (strategy === 'merge' && !base) throw new Error('No hay base compartida. Selecciona conservar local o remoto');
+      const local = strategy === 'merge' ? mergeSyncValue(base, item.localData, item.remoteData, '/workspace') : item.localData;
+      const id = local._id || `workspace-${local.id}`;
+      const document = await documentSync.resolve({ ...documentSync.base(id, session), _id: id, _type: 'workspace',
+        workspaceId: local.id, name: local.name, githubRepo: local.githubRepo, branches: local.branches,
+        activeBranchName: local.activeBranchName, createdAt: local.createdAt }, config);
+      resolved = normalizeSanityWorkspaceDoc(document);
     }
-  }
-
-  if (item.entityType === 'task') {
-    if (strategy === 'keep_local' || (strategy === 'merge' && item.localData)) {
-      // Push individual task to Sanity
-      const taskId = item.localData.taskId || item.localData.temporaryId || item.id.replace(/^task_([^_]+_)?/, '');
-      const taskDoc = {
-        _id: `task-${taskId}`,
-        _type: 'task',
-        taskId,
-        workspaceId: item.workspaceId,
-        workspaceName: item.workspaceName,
-        title: item.localData.title || item.title,
-        completed: Boolean(item.localData.completed),
-        status: item.localData.status || (item.localData.completed ? 'done' : 'todo'),
-        priority: item.localData.priority || 'P1',
-        groupTitle: item.localData.groupTitle || 'General',
-        tags: item.localData.tags || [],
-        blockedBy: item.localData.blockedBy || '',
-        updatedAt: new Date().toISOString(),
-      };
-      const res = await saveSanityDocument(taskDoc, config);
-      return {
-        success: res.ok,
-        message: res.ok ? `Tarea "${taskDoc.title}" sincronizada con Sanity` : res.message,
-      };
-    } else if (strategy === 'keep_remote') {
-      if (!item.remoteData) {
-        return { success: false, message: 'No hay datos remotos de la tarea para importar' };
-      }
-      const remoteTask = item.remoteData;
-      const taskId = remoteTask.taskId || remoteTask._id?.replace(/^task-/, '') || item.id.replace(/^task_([^_]+_)?/, '');
-
-      const targetWs =
-        (item.workspaceId ? workspaceStore.workspaces.find((w) => w.id === item.workspaceId) : null) ||
-        workspaceStore.workspaces.find((w) => w.id === workspaceStore.activeWorkspaceId) ||
-        workspaceStore.workspaces[0];
-      if (!targetWs) {
-        return { success: false, message: 'No hay workspace para importar la tarea' };
-      }
-      const targetBranch =
-        (item.branchName ? targetWs.branches.find((b) => b.name === item.branchName) : null) ||
-        targetWs.branches.find((b) => b.name === targetWs.activeBranchName) ||
-        targetWs.branches[0];
-      if (!targetBranch) {
-        return { success: false, message: 'No hay rama activa para importar la tarea' };
-      }
-      const targetDoc =
-        (item.documentPath ? targetBranch.taskDocuments.find((d) => d.path === item.documentPath) : null) ||
-        targetBranch.taskDocuments.find((d) => d.id === targetBranch.activeDocumentId) ||
-        targetBranch.taskDocuments[0];
-      if (!targetDoc) {
-        return { success: false, message: 'No hay documento de tareas para importar' };
-      }
-
-      let updatedMd = targetDoc.content;
-      const { taskBlocks } = scanTaskBlocks(targetDoc.content);
-      const exists = taskBlocks.some(
-        (b) =>
-          (b.detectedId && b.detectedId.toLowerCase() === taskId.toLowerCase()) ||
-          (b.detectedTitle && remoteTask.title && b.detectedTitle.trim().toLowerCase() === remoteTask.title.trim().toLowerCase())
-      );
-
-      if (exists) {
-        updatedMd = updateTaskInMarkdown(
-          targetDoc.content,
-          taskId,
-          {
-            title: remoteTask.title,
-            completed: Boolean(remoteTask.completed),
-            priority: remoteTask.priority,
-            status: remoteTask.status,
-          },
-          remoteTask.title
-        );
-      } else {
-        const addRes = addTaskToMarkdown(targetDoc.content, {
-          title: remoteTask.title || 'Nueva tarea',
-          priority: remoteTask.priority || 'P1',
-          groupTitle: remoteTask.groupTitle || 'General',
-          customId: taskId,
-          blockedBy: remoteTask.blockedBy,
-          tags: remoteTask.tags,
-        });
-        updatedMd = addRes.updatedMarkdown;
-      }
-
-      const updatedDocs = targetBranch.taskDocuments.map((d) =>
-        d.id === targetDoc.id
-          ? {
-              ...d,
-              content: updatedMd,
-              lastSavedContent: updatedMd,
-              updatedAt: new Date().toISOString(),
-            }
-          : d
-      );
-      const updatedBranches = targetWs.branches.map((b) =>
-        b.name === targetBranch.name ? { ...b, taskDocuments: updatedDocs } : b
-      );
-      const updatedWorkspaces = workspaceStore.workspaces.map((w) =>
-        w.id === targetWs.id ? { ...w, branches: updatedBranches } : w
-      );
-      const updatedStore: WorkspaceStoreState = {
-        ...workspaceStore,
-        workspaces: updatedWorkspaces,
-      };
-      saveWorkspaceStore(updatedStore);
-
-      return {
-        success: true,
-        message: `Tarea "${remoteTask.title || taskId}" actualizada desde Sanity`,
-        updatedStore,
-      };
+  } else if (item.entityType === 'task') {
+    const ws = workspaceStore.workspaces.find(w => w.id === item.workspaceId);
+    const branch = ws?.branches.find(b => b.name === item.branchName);
+    const doc = branch?.taskDocuments.find(d => item.remoteData?.documentKey
+      ? `${branch.name}::${d.id}` === item.remoteData.documentKey : d.path === item.documentPath);
+    if (!ws || !branch || !doc) return { success: false, message: 'La tarea no identifica un workspace, rama y documento locales' };
+    const fields = taskFields(doc.content).find(t => t.taskId === item.localData?.taskId);
+    const documentKey = `${branch.name}::${doc.id}`;
+    let task: any;
+    if (strategy === 'keep_remote') {
+      if (!item.remoteData) return { success: false, message: 'No hay tarea remota para importar' };
+      task = item.remoteData;
+      documentSync.discardPending(task._id, session);
+      // Rejecting an offline workspace snapshot must not replay it later.
+      documentSync.discardPending(ws._id || `workspace-${ws.id}`, session);
+    } else {
+      if (!fields) return { success: false, message: 'No hay tarea local para enviar' };
+      const base = workspaceStore.remoteDocuments?.find(d => d._id === item.remoteData?._id);
+      if (strategy === 'merge' && !base) throw new Error('No hay base compartida para fusionar la tarea');
+      const intention = { ...(item.remoteData || {}), ...fields, _type: 'task',
+        _id: item.remoteData?._id || buildTaskDocumentId(fields.taskId, ws.id, documentKey),
+        workspaceId: ws.id, documentKey, branchName: branch.name, documentPath: doc.path };
+      task = await documentSync.resolve(strategy === 'merge' ? mergeSyncValue(base, intention, item.remoteData) : intention, config);
     }
-  }
-
-  return {
-    success: true,
-    message: 'Resolución completada',
-  };
+    resolved = { ...ws, branches: ws.branches.map(b => b.name === branch.name ? { ...b,
+      taskDocuments: b.taskDocuments.map(d => d.id === doc.id ? { ...d, content: applyTaskToMarkdown(d.content, task) } : d) } : b) };
+    const parent = documentSync.base(ws._id || `workspace-${ws.id}`, session);
+    if (parent?._rev) { resolved._rev = parent._rev; baseline = normalizeSanityWorkspaceDoc(parent); }
+  } else return { success: false, message: 'Tipo de elemento no compatible' };
+  assertSyncSession(session);
+  const replace = (list: Workspace[], value = resolved) => [...list.filter(w => w.id !== resolved.id), value];
+  const updatedStore = { ...workspaceStore, workspaces: replace(workspaceStore.workspaces),
+    remoteBase: replace(workspaceStore.remoteBase || [], baseline || resolved),
+    remoteDocuments: (workspaceStore.remoteDocuments || []).map(d => documentSync.base(d._id, session) || d) };
+  saveWorkspaceStore(updatedStore);
+  return { success: true, message: 'Sincronizacion resuelta', updatedStore };
 }
 
 /**
@@ -691,7 +520,7 @@ export async function executeBatchSync(
         if (res.updatedStore) {
           currentStore = res.updatedStore;
         }
-      }
+      } else { throw new Error(res.message); }
     }
 
     return {
@@ -727,6 +556,8 @@ export async function deleteSyncItem(
       item.remoteData?.workspaceId ||
       item.remoteData?.id ||
       item.id.replace(/^ws_/, '');
+    const session = getSyncSession(config);
+    if ((scope === 'remote' || scope === 'both') && !session) return { success: false, message: 'La sesion de sincronizacion no esta preparada' };
     const cleanId = sanitizeSanityDocId(String(wsId).replace(/^workspace-/, ''));
     let updatedStore: WorkspaceStoreState | undefined;
 
@@ -745,19 +576,7 @@ export async function deleteSyncItem(
       let nextActiveId = workspaceStore.activeWorkspaceId;
 
       if (nextWorkspaces.length === 0) {
-        const freshDefaults = getInitialDefaultWorkspaces();
-        const cleanWs: Workspace = {
-          ...freshDefaults[0],
-          id: 'ws_' + Date.now(),
-          name: 'Mi Workspace',
-          githubRepo: {
-            owner: 'usuario',
-            repo: 'mi-repositorio',
-            fullName: 'usuario/mi-repositorio',
-            url: 'https://github.com/usuario/mi-repositorio',
-            defaultBranch: 'main',
-          },
-        };
+        const cleanWs = createEmptyWorkspace();
         nextWorkspaces = [cleanWs];
         nextActiveId = cleanWs.id;
       } else if (
@@ -780,18 +599,11 @@ export async function deleteSyncItem(
     // 2. Delete remotely if scope is 'remote' or 'both'
     if (scope === 'remote' || scope === 'both') {
       if (config.projectId && config.dataset && config.token) {
-        const explicitId = item.remoteData?._id;
-        let delRes = { ok: false, message: '' };
-        if (explicitId) {
-          delRes = await deleteDocumentFromSanity(explicitId, config);
+        const delRes = await deleteWorkspaceFromSanity(cleanId, config);
+        if (!delRes.ok) {
+          return { success: false, message: delRes.message, updatedStore };
         }
-        if (!delRes.ok || !explicitId) {
-          delRes = await deleteWorkspaceFromSanity(cleanId, config);
-        }
-        if (!delRes.ok && scope === 'remote') {
-          return { success: false, message: delRes.message };
-        }
-      } else if (scope === 'remote') {
+      } else {
         return {
           success: false,
           message: 'Configura el API Token de Sanity para eliminar en remoto',
@@ -825,15 +637,16 @@ export async function deleteSyncItem(
     // 1. Delete locally if scope is 'local' or 'both'
     if (scope === 'local' || scope === 'both') {
       let taskFoundAndRemoved = false;
-      const updatedWorkspaces = workspaceStore.workspaces.map((w) => ({
+      const updatedWorkspaces = workspaceStore.workspaces.map((w) => w.id !== item.workspaceId ? w : ({
         ...w,
-        branches: w.branches.map((b) => ({
+        branches: w.branches.map((b) => b.name !== item.branchName ? b : ({
           ...b,
           taskDocuments: b.taskDocuments.map((d) => {
+            if (item.remoteData?.documentKey ? `${b.name}::${d.id}` !== item.remoteData.documentKey : d.path !== item.documentPath) return d;
             const newContent = deleteTaskFromMarkdown(
               d.content,
               taskId,
-              item.localData?.title
+              undefined
             );
             if (newContent !== d.content) {
               taskFoundAndRemoved = true;
@@ -867,12 +680,12 @@ export async function deleteSyncItem(
           delRes = await deleteDocumentFromSanity(explicitId, config);
         }
         if (!delRes.ok || !explicitId) {
-          delRes = await deleteDocumentFromSanity(`task-${taskId}`, config);
+          delRes = await deleteDocumentFromSanity(buildTaskDocumentId(taskId, item.workspaceId, item.remoteData?.documentKey), config);
         }
-        if (!delRes.ok && scope === 'remote') {
-          return { success: false, message: delRes.message };
+        if (!delRes.ok) {
+          return { success: false, message: delRes.message, updatedStore };
         }
-      } else if (scope === 'remote') {
+      } else {
         return {
           success: false,
           message: 'Configura el API Token de Sanity para eliminar en remoto',

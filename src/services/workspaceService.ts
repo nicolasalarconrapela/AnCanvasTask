@@ -1,3 +1,4 @@
+import { getStorageScope, localScope } from './syncSessionService';
 import { CanvasVisualDocument } from './sanityService';
 
 export interface GitHubRepoInfo {
@@ -37,6 +38,10 @@ export interface BranchConfig {
 }
 
 export interface Workspace {
+  _id?: string;
+  _rev?: string;
+  syncOwner?: string;
+  isPlaceholder?: boolean;
   id: string;
   name: string;
   githubRepo: GitHubRepoInfo;
@@ -47,6 +52,9 @@ export interface Workspace {
 }
 
 export interface WorkspaceStoreState {
+  scope?: string;
+  remoteBase?: Workspace[];
+  remoteDocuments?: any[];
   workspaces: Workspace[];
   activeWorkspaceId: string;
   githubToken?: string;
@@ -293,11 +301,12 @@ export function sanitizeTaskDocument(rawDoc: any, fallbackId?: string): TaskDocu
   const name = rawDoc?.name || 'TASKS.md';
   const folder = rawDoc?.folder || '';
   const path = rawDoc?.path || formatDocumentPath(folder, name);
-  const content = typeof rawDoc?.content === 'string' ? rawDoc.content : SAMPLE_ROOT_MARKDOWN;
+  const content = typeof rawDoc?.content === 'string' ? rawDoc.content : '';
   const lastSavedContent = typeof rawDoc?.lastSavedContent === 'string' ? rawDoc.lastSavedContent : content;
   const updatedAt = rawDoc?.updatedAt || new Date().toISOString();
 
   return {
+    ...rawDoc,
     id,
     name,
     folder,
@@ -312,12 +321,7 @@ export function sanitizeTaskDocument(rawDoc: any, fallbackId?: string): TaskDocu
 export function sanitizeBranch(rawBranch: any, fallbackName: string = 'main'): BranchConfig {
   const name = rawBranch?.name || fallbackName;
   const isProtected = Boolean(rawBranch?.isProtected);
-  const lastCommit = rawBranch?.lastCommit || {
-    hash: Math.random().toString(16).substring(2, 9),
-    message: `chore: commit inicial en ${name}`,
-    author: 'Developer',
-    timestamp: new Date().toISOString(),
-  };
+  const lastCommit = rawBranch?.lastCommit;
 
   const rawDocs = Array.isArray(rawBranch?.taskDocuments) ? rawBranch.taskDocuments : [];
   const taskDocuments: TaskDocument[] = rawDocs.length > 0
@@ -328,8 +332,8 @@ export function sanitizeBranch(rawBranch: any, fallbackName: string = 'main'): B
           name: 'TASKS.md',
           folder: '',
           path: 'TASKS.md',
-          content: SAMPLE_ROOT_MARKDOWN,
-          lastSavedContent: SAMPLE_ROOT_MARKDOWN,
+          content: '',
+          lastSavedContent: '',
           updatedAt: new Date().toISOString(),
         },
       ];
@@ -340,6 +344,7 @@ export function sanitizeBranch(rawBranch: any, fallbackName: string = 'main'): B
       : taskDocuments[0].id;
 
   return {
+    ...rawBranch,
     name,
     isProtected,
     lastCommit,
@@ -372,6 +377,11 @@ export function sanitizeWorkspace(rawWs: any, fallbackId?: string): Workspace {
       : branches[0].name;
 
   return {
+    ...rawWs,
+    _id: rawWs?._id,
+    _rev: rawWs?._rev,
+    syncOwner: rawWs?.syncOwner,
+    isPlaceholder: rawWs?.isPlaceholder,
     id,
     name,
     githubRepo,
@@ -382,10 +392,11 @@ export function sanitizeWorkspace(rawWs: any, fallbackId?: string): Workspace {
   };
 }
 
-export function loadWorkspaceStore(): WorkspaceStoreState {
+export function loadWorkspaceStore(scope = getStorageScope()): WorkspaceStoreState {
+  const key = scope === localScope ? STORAGE_KEY : `${STORAGE_KEY}:${scope}`;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const token = localStorage.getItem(GITHUB_TOKEN_KEY) || undefined;
+    const raw = localStorage.getItem(key);
+    const token = localStorage.getItem(`${GITHUB_TOKEN_KEY}:${scope}`) || undefined;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed.workspaces && Array.isArray(parsed.workspaces) && parsed.workspaces.length > 0) {
@@ -404,6 +415,9 @@ export function loadWorkspaceStore(): WorkspaceStoreState {
         });
 
         return {
+          scope,
+          remoteBase: parsed.remoteBase,
+          remoteDocuments: parsed.remoteDocuments,
           workspaces: sanitizedWorkspaces,
           activeWorkspaceId,
           githubToken: token,
@@ -414,9 +428,12 @@ export function loadWorkspaceStore(): WorkspaceStoreState {
     logWorkspaceWarn('Error al leer workspace store de localStorage, reinicializando por defecto', err);
   }
 
-  logWorkspaceTrace('Inicializando nuevo workspace store con plantilla monorepo');
-  const defaultWorkspaces = getInitialDefaultWorkspaces().map((ws) => sanitizeWorkspace(ws));
+  logWorkspaceTrace('Inicializando workspace store', { scope });
+  const defaultWorkspaces = scope === localScope
+    ? getInitialDefaultWorkspaces().map((ws) => sanitizeWorkspace(ws))
+    : [createEmptyWorkspace()];
   const initialState: WorkspaceStoreState = {
+    scope, remoteBase: [],
     workspaces: defaultWorkspaces,
     activeWorkspaceId: defaultWorkspaces[0].id,
   };
@@ -425,6 +442,8 @@ export function loadWorkspaceStore(): WorkspaceStoreState {
 }
 
 export function saveWorkspaceStore(state: WorkspaceStoreState): void {
+  const scope = state.scope || getStorageScope();
+  const key = scope === localScope ? STORAGE_KEY : `${STORAGE_KEY}:${scope}`;
   try {
     const sanitizedWorkspaces = (state.workspaces || []).map((ws, idx) =>
       sanitizeWorkspace(ws, `ws_${idx}`)
@@ -435,26 +454,35 @@ export function saveWorkspaceStore(state: WorkspaceStoreState): void {
         : sanitizedWorkspaces[0]?.id || 'ws_default';
 
     localStorage.setItem(
-      STORAGE_KEY,
+      key,
       JSON.stringify({
+        remoteBase: state.remoteBase,
+        remoteDocuments: state.remoteDocuments,
         workspaces: sanitizedWorkspaces,
         activeWorkspaceId: safeActiveId,
       })
     );
     if (state.githubToken) {
-      localStorage.setItem(GITHUB_TOKEN_KEY, state.githubToken);
+      localStorage.setItem(`${GITHUB_TOKEN_KEY}:${scope}`, state.githubToken);
     } else {
-      localStorage.removeItem(GITHUB_TOKEN_KEY);
+      localStorage.removeItem(`${GITHUB_TOKEN_KEY}:${scope}`);
     }
   } catch (err) {
     logWorkspaceWarn('Error al guardar workspace store en localStorage', err);
   }
 }
 
+export function createEmptyWorkspace(): Workspace {
+  const id = `ws_${crypto.randomUUID()}`;
+  const docId = `doc_${crypto.randomUUID()}`;
+  return sanitizeWorkspace({ id, isPlaceholder: true, name: 'Mi Workspace', branches: [{ name: 'main', activeDocumentId: docId,
+    taskDocuments: [{ id: docId, name: 'TASKS.md', content: '# Tareas\n\n## General\n', lastSavedContent: '# Tareas\n\n## General\n' }] }] });
+}
+
 // Helpers for Workspace resolution (Crash-Proof)
 export function getActiveWorkspace(store: WorkspaceStoreState): Workspace {
   if (!store || !Array.isArray(store.workspaces) || store.workspaces.length === 0) {
-    return sanitizeWorkspace(getInitialDefaultWorkspaces()[0]);
+    return createEmptyWorkspace();
   }
   const ws = store.workspaces.find((w) => w.id === store.activeWorkspaceId);
   return sanitizeWorkspace(ws || store.workspaces[0]);

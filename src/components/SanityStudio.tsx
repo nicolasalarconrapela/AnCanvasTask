@@ -8,6 +8,7 @@ import {
   writeTestingTaskToSanity,
   SanityConfig,
 } from '../services/sanityService';
+import { getSyncSession } from '../services/syncSessionService';
 import { SanitySdkExplorer } from './SanitySdkExplorer';
 import { SanityStudioEmbed } from './SanityStudioEmbed';
 
@@ -85,9 +86,11 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
       return;
     }
 
+    const session = getSyncSession(config);
     setIsLoadingList(true);
     try {
       const docs = await fetchSanityDocumentsList(config);
+      if (getSyncSession(config) !== session) return;
       setDocuments(docs);
       // Auto-select first document if nothing selected
       if (!selectedDocId && docs.length > 0) {
@@ -105,6 +108,7 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
   useEffect(() => {
     const updateLocalConfig = () => {
       const latest = getSanityConfig();
+      setDocuments([]); setSelectedDocId(null); setSelectedDoc(null); setFormState({}); setIsDirty(false);
       setConfig(latest);
     };
 
@@ -139,7 +143,7 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
         setFormState({ ...doc });
         setIsDirty(false);
       }
-    });
+    }).catch((error) => { if (isMounted) { setIsLoadingDoc(false); onShowToast(error.message, 'error'); } });
 
     return () => {
       isMounted = false;
@@ -199,13 +203,16 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
 
   const handleSaveDocument = async () => {
     if (!selectedDocId || !isConfigured) return;
+    const session = getSyncSession(config);
     setIsSaving(true);
 
     try {
       const res = await saveSanityDocument(formState, config);
+      if (getSyncSession(config) !== session) return;
       if (res.ok) {
         onShowToast('Documento publicado con éxito en Sanity', 'success');
         setSelectedDoc(res.document || formState);
+        setFormState(res.document || formState);
         setIsDirty(false);
         loadDocuments();
       } else {
@@ -221,9 +228,11 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
   const handleConfirmDelete = async () => {
     if (!selectedDocId) return;
     setIsConfirmDeleteOpen(false);
+    const session = getSyncSession(config);
     setIsDeleting(true);
     try {
       const res = await deleteDocumentFromSanity(selectedDocId, config);
+      if (getSyncSession(config) !== session) return;
       if (res.ok) {
         onShowToast('Documento eliminado de Sanity', 'info');
         setSelectedDocId(null);
@@ -356,7 +365,12 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
         ? (customTaskSectionInput.trim() || 'General')
         : (newTaskSectionInput.trim() || (availableSecs[0] || 'General'));
 
+      const targetBranch = selectedWs?.branches?.find((b: any) => b.name === selectedWs.activeBranchName) || selectedWs?.branches?.[0];
+      const targetDoc = targetBranch?.taskDocuments?.find((d: any) => d.id === targetBranch.activeDocumentId) || targetBranch?.taskDocuments?.[0];
+      if (selectedWs && !targetDoc) throw new Error('El workspace no contiene un documento de tareas');
       const res = await writeTestingTaskToSanity(config, {
+        documentKey: targetDoc ? `${targetBranch.name}::${targetDoc.id}` : undefined,
+        branchName: targetBranch?.name, documentPath: targetDoc?.path,
         title: newTaskTitleInput.trim(),
         taskId: 'task-' + Date.now().toString(36),
         priority: newTaskPriorityInput,

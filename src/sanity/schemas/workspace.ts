@@ -10,6 +10,8 @@ export const workspaceSchema = {
   title: 'Workspace',
   type: 'document',
   fields: [
+    { name: 'syncOwner', type: 'string', hidden: true, readOnly: true, initialValue: (_params: any, context: any) => context.currentUser?.id },
+    { name: 'syncDeleted', type: 'boolean', hidden: true, readOnly: true },
     {
       name: 'workspaceId',
       title: 'Workspace ID',
