@@ -1,5 +1,5 @@
 import { createClient } from '@sanity/client';
-import { diffArrays } from 'diff';
+import { diffLines, diffWordsWithSpace } from 'diff';
 import { scanTaskBlocks, addTaskToMarkdown, updateTaskInMarkdown, deleteTaskFromMarkdown, moveTaskToGroupInMarkdown } from '../utils/markdownSync';
 import type { SanityConfig } from './sanityService';
 import { assertSyncSession, getSyncSession, type SyncSession } from './syncSessionService';
@@ -67,45 +67,72 @@ export function applyTaskToMarkdown(markdown: string, task: any): string {
     status: task.status, priority: task.priority, tags: task.tags || [], blockedBy: task.blockedBy || '' });
 }
 
-// Rebase character insertions/deletions onto the common base. Independent
-// edits to a title or Markdown line can coexist; overlapping replacements
-// remain explicit conflicts rather than silently dropping either version.
+// Rebase insertions/deletions onto the common base. Independent
+// edits to Markdown lines can coexist without freezing the main thread.
 export function mergeText(base: string, local: string, remote: string): string {
   if (local === base || local === remote) return remote;
   if (remote === base) return local;
-  const original = Array.from(base);
-  type Edit = { start: number; end: number; characters: string[] };
-  const edits = (value: string): Edit[] => {
+
+  const isMultiLine = base.includes('\n') || local.includes('\n') || remote.includes('\n');
+  const diffFn = isMultiLine ? diffLines : diffWordsWithSpace;
+
+  type Edit = { start: number; end: number; pieces: string[] };
+  const getEdits = (value: string): Edit[] => {
     const result: Edit[] = [];
     let position = 0;
-    for (const part of diffArrays(original, Array.from(value))) {
-      if (!part.added && !part.removed) { position += part.value.length; continue; }
+    for (const part of diffFn(base, value)) {
+      const partLen = part.value.length;
+      if (!part.added && !part.removed) {
+        position += partLen;
+        continue;
+      }
       const previous = result[result.length - 1];
-      if (part.added && previous?.end === position) previous.characters.push(...part.value);
-      else result.push({ start: position, end: position + (part.removed ? part.value.length : 0), characters: part.added ? part.value : [] });
-      if (part.removed) position += part.value.length;
+      if (part.added && previous && previous.end === position) {
+        previous.pieces.push(part.value);
+      } else {
+        result.push({
+          start: position,
+          end: position + (part.removed ? partLen : 0),
+          pieces: part.added ? [part.value] : [],
+        });
+      }
+      if (part.removed) position += partLen;
     }
     return result;
   };
-  const combined = edits(local);
-  for (const incoming of edits(remote)) {
+
+  const localEdits = getEdits(local);
+  const remoteEdits = getEdits(remote);
+  const combined = [...localEdits];
+
+  for (const incoming of remoteEdits) {
     let duplicate = false;
     for (const existing of combined) {
-      if (equal(existing, incoming)) { duplicate = true; break; }
-      if (existing.start === existing.end && incoming.start === incoming.end && existing.start === incoming.start) {
-        existing.characters = Array.from([existing.characters.join(''), incoming.characters.join('')].sort().join(''));
-        duplicate = true; break;
+      if (existing.start === incoming.start && existing.end === incoming.end && existing.pieces.join('') === incoming.pieces.join('')) {
+        duplicate = true;
+        break;
       }
-      if (Math.max(existing.start, incoming.start) < Math.min(existing.end, incoming.end) ||
-          (existing.start === existing.end && existing.start > incoming.start && existing.start < incoming.end) ||
-          (incoming.start === incoming.end && incoming.start > existing.start && incoming.start < existing.end)) {
+      if (existing.start === existing.end && incoming.start === incoming.end && existing.start === incoming.start) {
+        existing.pieces.push(...incoming.pieces);
+        duplicate = true;
+        break;
+      }
+      if (
+        Math.max(existing.start, incoming.start) < Math.min(existing.end, incoming.end) ||
+        (existing.start === existing.end && existing.start > incoming.start && existing.start < incoming.end) ||
+        (incoming.start === incoming.end && incoming.start > existing.start && incoming.start < existing.end)
+      ) {
         throw new SyncConflict('Conflicto en el mismo fragmento de texto');
       }
     }
     if (!duplicate) combined.push(incoming);
   }
-  for (const edit of combined.sort((a, b) => b.start - a.start || b.end - a.end)) original.splice(edit.start, edit.end - edit.start, ...edit.characters);
-  return original.join('');
+
+  let result = base;
+  for (const edit of combined.sort((a, b) => b.start - a.start || b.end - a.end)) {
+    result = result.slice(0, edit.start) + edit.pieces.join('') + result.slice(edit.end);
+  }
+  return result;
 }
 
 export const mergeMarkdown = mergeText;

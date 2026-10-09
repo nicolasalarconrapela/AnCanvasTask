@@ -1318,35 +1318,50 @@ export default function App() {
     [editor, triggerDebouncedVisualSave]
   );
 
-  // Keep workspaceStore synced whenever markdownInput changes (guarding against doc switches)
+  // Keep workspaceStore synced whenever markdownInput changes (guarding against doc switches with debouncing)
+  const markdownStoreSyncDebounceRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (isSwitchingDocRef.current || workspaceStoreRef.current.scope === 'loading') return;
-    setWorkspaceStore((prevStore) => {
-      let hasChanges = false;
-      const nextWs = prevStore.workspaces.map((ws) => {
-        if (ws.id !== prevStore.activeWorkspaceId) return ws;
-        const nextBranches = ws.branches.map((b) => {
-          if (b.name !== ws.activeBranchName) return b;
-          const nextDocs = b.taskDocuments.map((d) => {
-            if (d.id !== b.activeDocumentId) return d;
-            if (d.content === markdownInput) return d;
-            hasChanges = true;
-            return {
-              ...d,
-              content: markdownInput,
-              updatedAt: new Date().toISOString(),
-            };
-          });
-          return { ...b, taskDocuments: nextDocs };
-        });
-        return { ...ws, branches: nextBranches, updatedAt: new Date().toISOString() };
-      });
 
-      if (!hasChanges) return prevStore;
-      const nextStore = { ...prevStore, workspaces: nextWs };
-      saveWorkspaceStore(nextStore, 350);
-      return nextStore;
-    });
+    if (markdownStoreSyncDebounceRef.current) {
+      clearTimeout(markdownStoreSyncDebounceRef.current);
+    }
+
+    markdownStoreSyncDebounceRef.current = setTimeout(() => {
+      setWorkspaceStore((prevStore) => {
+        let hasChanges = false;
+        const nextWs = prevStore.workspaces.map((ws) => {
+          if (ws.id !== prevStore.activeWorkspaceId) return ws;
+          const nextBranches = ws.branches.map((b) => {
+            if (b.name !== ws.activeBranchName) return b;
+            const nextDocs = b.taskDocuments.map((d) => {
+              if (d.id !== b.activeDocumentId) return d;
+              if (d.content === markdownInput) return d;
+              hasChanges = true;
+              return {
+                ...d,
+                content: markdownInput,
+                updatedAt: new Date().toISOString(),
+              };
+            });
+            return { ...b, taskDocuments: nextDocs };
+          });
+          return { ...ws, branches: nextBranches, updatedAt: new Date().toISOString() };
+        });
+
+        if (!hasChanges) return prevStore;
+        const nextStore = { ...prevStore, workspaces: nextWs };
+        workspaceStoreRef.current = nextStore;
+        saveWorkspaceStore(nextStore, 350);
+        return nextStore;
+      });
+    }, 200);
+
+    return () => {
+      if (markdownStoreSyncDebounceRef.current) {
+        clearTimeout(markdownStoreSyncDebounceRef.current);
+      }
+    };
   }, [markdownInput]);
 
   // Persist buffered edits before leaving the page or unmounting the editor.
