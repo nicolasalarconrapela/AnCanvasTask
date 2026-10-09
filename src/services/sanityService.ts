@@ -987,7 +987,8 @@ export interface SanityLiveChangeEvent {
  */
 export function subscribeToSanityLiveChanges(
   onMutation: (event: SanityLiveChangeEvent) => void,
-  configOverride?: Partial<SanityConfig>
+  configOverride?: Partial<SanityConfig>,
+  clientFactory: (config: SanityConfig) => any = createClient
 ): () => void {
   const config = { ...getSanityConfig(), ...configOverride };
   if (!config.projectId || !config.dataset) {
@@ -995,7 +996,7 @@ export function subscribeToSanityLiveChanges(
   }
 
   try {
-    const client = createClient({
+    const client = clientFactory({
       projectId: config.projectId,
       dataset: config.dataset,
       apiVersion: config.apiVersion || '2024-03-01',
@@ -1005,7 +1006,13 @@ export function subscribeToSanityLiveChanges(
 
     const session = getSyncSession(config);
     if (!session) return () => {};
-    const subscription = client
+    let stopped = false;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let subscription: { unsubscribe(): void } | undefined;
+    const connect = () => {
+      if (stopped || getSyncSession(config) !== session) return;
+      subscription = client
       .listen(
         `*[syncOwner == $owner && _type in ["task", "workspace", "canvasVisualState", "syncDeletion"]]`,
         { owner: session.owner },
@@ -1015,6 +1022,7 @@ export function subscribeToSanityLiveChanges(
         next: (update: any) => {
           if (!update || getSyncSession(config) !== session) return;
           if (update.type === 'welcome' || update.type === 'reconnect') {
+            attempt = 0;
             onMutation({ type: 'reconnect', transition: 'update', documentId: '' });
             return;
           }
@@ -1039,13 +1047,20 @@ export function subscribeToSanityLiveChanges(
         },
         error: (err: any) => {
           console.warn('Sanity live subscription warning:', err);
-          if (getSyncSession(config) === session) onMutation({ type: 'connection_error', transition: 'update', documentId: '' });
+          if (!stopped && getSyncSession(config) === session) {
+            onMutation({ type: 'connection_error', transition: 'update', documentId: '' });
+            timer = setTimeout(connect, Math.min(1000 * 2 ** attempt++, 30000));
+          }
         },
       });
+    };
+    connect();
 
     return () => {
+      stopped = true;
+      clearTimeout(timer);
       try {
-        subscription.unsubscribe();
+        subscription?.unsubscribe();
       } catch {
         // ignore cleanup errors
       }

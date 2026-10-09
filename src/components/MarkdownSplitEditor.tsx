@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import CodeMirror, { ReactCodeMirrorRef, ExternalChange, Transaction } from '@uiw/react-codemirror';
+import { diffChars } from 'diff';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView } from '@codemirror/view';
@@ -45,6 +46,25 @@ export function MarkdownSplitEditor({
   const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
   const [isTyping, setIsTyping] = useState(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Apply remote changes before the controlled editor replaces its whole value.
+  // CodeMirror maps the cursor through these edits and excludes them from undo.
+  useLayoutEffect(() => {
+    const view = editorRef.current?.view;
+    if (!view || view.state.doc.toString() === value) return;
+    const changes: Array<{ from: number; to: number; insert: string }> = [];
+    let position = 0;
+    for (const part of diffChars(view.state.doc.toString(), value)) {
+      if (!part.added && !part.removed) { position += part.value.length; continue; }
+      const previous = changes[changes.length - 1];
+      if (previous?.to === position) {
+        if (part.added) previous.insert += part.value;
+        else previous.to += part.value.length;
+      } else changes.push({ from: position, to: position + (part.removed ? part.value.length : 0), insert: part.added ? part.value : '' });
+      if (part.removed) position += part.value.length;
+    }
+    view.dispatch({ changes, annotations: [ExternalChange.of(true), Transaction.addToHistory.of(false)] });
+  }, [value]);
 
   // Validation report in real time
   const validationReport: MarkdownValidationReport = useMemo(

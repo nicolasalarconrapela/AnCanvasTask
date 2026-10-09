@@ -3,7 +3,7 @@ import { beforeEach, afterEach, test } from 'node:test';
 import { DocumentSync, SyncConflict, mergeSyncValue, mergeMarkdown, buildTaskDocumentId, deletionMarkerId } from '../src/services/documentSyncService';
 import { beginSyncSession, getSyncSession, invalidateSyncSession } from '../src/services/syncSessionService';
 import { createEmptyWorkspace, loadWorkspaceStore, saveWorkspaceStore, sanitizeWorkspace } from '../src/services/workspaceService';
-import { applyRemoteTask, clearSanityConfig, getSanityConfig, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments } from '../src/services/sanityService';
+import { applyRemoteTask, clearSanityConfig, getSanityConfig, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments, subscribeToSanityLiveChanges } from '../src/services/sanityService';
 import { scanTaskBlocks, updateTaskInMarkdown } from '../src/utils/markdownSync';
 
 class MemoryStorage implements Storage {
@@ -409,11 +409,11 @@ test('two offline tabs retain independent bases and report competing edits on re
   const base = task(); server.documents.set(base._id, base);
   const a = new DocumentSync(server.client, 'tab-a'), b = new DocumentSync(server.client, 'tab-b');
   a.observe(base); b.observe(base); server.offline = true;
-  await assert.rejects(a.write({ ...base, title: 'Tab A' }, config), /offline/);
-  await assert.rejects(b.write({ ...base, title: 'Tab B' }, config), /offline/);
+  await assert.rejects(a.write({ ...base, title: 'B' }, config), /offline/);
+  await assert.rejects(b.write({ ...base, title: 'C' }, config), /offline/);
   server.offline = false;
   await assert.rejects(a.flush(getSyncSession()!), SyncConflict);
-  assert.equal(server.documents.get(base._id).title, 'Tab A');
+  assert.equal(server.documents.get(base._id).title, 'B');
 });
 
 test('removing an optional field persists the deletion without dropping unrelated fields', async () => {
@@ -422,4 +422,76 @@ test('removing an optional field persists the deletion without dropping unrelate
   const { description, ...next } = base;
   const saved = await sync.write(next, config);
   assert.equal(saved.description, undefined); assert.equal(saved.custom, 'Keep this');
+});
+
+test('acknowledging a workspace save adopts its revision before editing the same task again', async () => {
+  const original = { ...workspace(), _createdAt: '2026-10-09T09:00:00Z' }; server.documents.set(original._id, original); sync.observe(original);
+  const base = normalizeSanityWorkspaceDoc(original);
+  const local = structuredClone(base); local.branches[0].taskDocuments[0].content = markdown.replace('[ ] A', '[ ] B');
+  const intention = { ...original, branches: local.branches };
+  const saved = await sync.write(intention, config);
+  const remote = normalizeSanityWorkspaceDoc(saved);
+  const acknowledged = mergeSyncValue(base, local, remote, '/workspace');
+  assert.equal(acknowledged._rev, saved._rev);
+  acknowledged.branches[0].taskDocuments[0].content = acknowledged.branches[0].taskDocuments[0].content.replace('[ ] B', '[ ] C');
+  await sync.write({ ...saved, _rev: acknowledged._rev, branches: acknowledged.branches }, config);
+  assert(server.documents.get(original._id).branches[0].taskDocuments[0].content.includes('[ ] C'));
+});
+
+test('receiving a remote revision preserves an unsaved compatible edit and rebases its next save', async () => {
+  const original = workspace(); server.documents.set(original._id, original); sync.observe(original);
+  const base = normalizeSanityWorkspaceDoc(original);
+  const local = structuredClone(base); local.branches[0].taskDocuments[0].content = markdown.replace('P1', 'P0');
+  const other = structuredClone(original); other.branches[0].taskDocuments[0].content = markdown.replace('[ ] A', '[ ] B');
+  const saved = await sync.write(other, config);
+  const remote = normalizeSanityWorkspaceDoc(saved);
+  const merged = mergeSyncValue(base, local, remote, '/workspace');
+  assert.equal(merged._rev, saved._rev);
+  assert(merged.branches[0].taskDocuments[0].content.includes('P0'));
+  await sync.write({ ...saved, branches: merged.branches }, config);
+  assert.equal(server.documents.get(buildTaskDocumentId('x', 'w', 'main::d')).priority, 'P0');
+});
+
+test('two clients combine edits to different parts of the same task title', async () => {
+  const base = { ...task(), title: 'Write report' }; server.documents.set(base._id, base); sync.observe(base);
+  const other = new DocumentSync(server.client, 'other-browser'); other.observe(base);
+  await sync.write({ ...base, title: 'Write final report' }, config);
+  const merged = await other.write({ ...base, title: 'Write report today' }, config);
+  assert.equal(merged.title, 'Write final report today');
+});
+
+test('equal remote content still advances the revision of a locally edited workspace', () => {
+  const base = { _id: 'workspace-w', _rev: 'old', name: 'W' };
+  const merged = mergeSyncValue([base], [{ ...base, name: 'Local edit' }], [{ ...base, _rev: 'new' }], '/workspaces');
+  assert.equal(merged[0].name, 'Local edit'); assert.equal(merged[0]._rev, 'new');
+});
+
+test('compatible edits inside the same Markdown task line combine without blocking sync', () => {
+  const base = markdown.replace('[ ] A', '[ ] Write report');
+  const a = base.replace('Write report', 'Write final report');
+  const b = base.replace('Write report', 'Write report today');
+  assert(mergeMarkdown(base, a, b).includes('Write final report today'));
+  assert.equal(mergeMarkdown(base, a, b), mergeMarkdown(base, b, a));
+});
+
+test('insertions at the same text position converge in both arrival orders', () => {
+  const base = markdown.replace('[ ] A', '[ ] Report');
+  const a = base.replace('Report', 'Final Report'), b = base.replace('Report', 'Annual Report');
+  const result = mergeMarkdown(base, a, b);
+  assert(result.includes('Annual ')); assert(result.includes('Final '));
+  assert.equal(result, mergeMarkdown(base, b, a));
+});
+
+test('live listener reconnects after an error and stops retrying when its session closes', context => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const observers: any[] = [], events: string[] = [];
+  const close = subscribeToSanityLiveChanges(event => events.push(event.type), config, () => ({
+    listen: () => ({ subscribe: (observer: any) => { observers.push(observer); return { unsubscribe() {} }; } }),
+  }));
+  observers[0].error(new Error('connection lost'));
+  assert.deepEqual(events, ['connection_error']);
+  context.mock.timers.tick(1000); assert.equal(observers.length, 2);
+  observers[1].next({ type: 'welcome' }); assert.equal(events.at(-1), 'reconnect');
+  observers[1].error(new Error('connection lost')); close();
+  context.mock.timers.tick(30000); assert.equal(observers.length, 2);
 });

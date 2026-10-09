@@ -1224,9 +1224,10 @@ export default function App() {
                 return {
                   ...d,
                   visualState: {
-                    _id: `canvasVisualState-${d.id}`,
+                    ...d.visualState,
+                    _id: `canvasVisualState-${sanitizeSanityDocId(currentDocKey)}`,
                     _type: 'canvasVisualState' as const,
-                    projectId: d.id,
+                    projectId: sanitizeSanityDocId(currentDocKey),
                     tasks: visualState.tasks,
                     groups: visualState.groups,
                     updatedAt: new Date().toISOString(),
@@ -3441,7 +3442,7 @@ export default function App() {
   useEffect(() => {
     if (!syncReady || !activeSanityConfig.token || !activeSanityConfig.projectId) return;
     const session = getSyncSession(activeSanityConfig);
-    if (!session || workspaceStore.scope !== session.scope || isSwitchingDocRef.current) return;
+    if (!session || workspaceStore.scope !== session.scope || markdownInput !== activeDocument.content) return;
     const baseWs = workspaceStore.remoteBase?.find(w => w.id === activeWorkspace.id);
     if (JSON.stringify(syncComparable(baseWs)) === JSON.stringify(syncComparable(activeWorkspace))) return;
     const normalized = autoAssignAllMissingTaskIds(markdownInput).updatedMarkdown;
@@ -3460,7 +3461,7 @@ export default function App() {
       } catch (error: any) {
         if (getSyncSession() === session) { setSyncStatus('local'); pushToast(error.message, 'warning'); }
       }
-    }, 1200);
+    }, 250);
     debouncedSanityTasksRef.current = timer;
     return () => clearTimeout(timer);
   }, [markdownInput, activeSanityConfig, syncReady, currentDocKey, activeWorkspace, workspaceStore.remoteBase]);

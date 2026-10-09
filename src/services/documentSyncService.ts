@@ -67,22 +67,22 @@ export function applyTaskToMarkdown(markdown: string, task: any): string {
     status: task.status, priority: task.priority, tags: task.tags || [], blockedBy: task.blockedBy || '' });
 }
 
-export function mergeMarkdown(base: string, local: string, remote: string): string {
-  // Checkbox and title are independent fields even though Markdown puts them
-  // on the same line. Preserve arbitrary metadata, prose, notes and subtasks.
-  const split = (text: string) => text.split(/\r?\n/).flatMap(line => {
-    const task = line.match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/);
-    return task ? [`\u0000check:${task[1]}${task[2]}${task[3]}`, `\u0000title:${task[4]}`] : [line];
-  });
-  const original = split(base);
-  const edits = (text: string) => {
-    const result: Array<{ start: number; end: number; lines: string[] }> = [];
+// Rebase character insertions/deletions onto the common base. Independent
+// edits to a title or Markdown line can coexist; overlapping replacements
+// remain explicit conflicts rather than silently dropping either version.
+export function mergeText(base: string, local: string, remote: string): string {
+  if (local === base || local === remote) return remote;
+  if (remote === base) return local;
+  const original = Array.from(base);
+  type Edit = { start: number; end: number; characters: string[] };
+  const edits = (value: string): Edit[] => {
+    const result: Edit[] = [];
     let position = 0;
-    for (const part of diffArrays(original, split(text))) {
+    for (const part of diffArrays(original, Array.from(value))) {
       if (!part.added && !part.removed) { position += part.value.length; continue; }
       const previous = result[result.length - 1];
-      if (part.added && previous?.end === position) previous.lines.push(...part.value);
-      else result.push({ start: position, end: position + (part.removed ? part.value.length : 0), lines: part.added ? part.value : [] });
+      if (part.added && previous?.end === position) previous.characters.push(...part.value);
+      else result.push({ start: position, end: position + (part.removed ? part.value.length : 0), characters: part.added ? part.value : [] });
       if (part.removed) position += part.value.length;
     }
     return result;
@@ -92,28 +92,43 @@ export function mergeMarkdown(base: string, local: string, remote: string): stri
     let duplicate = false;
     for (const existing of combined) {
       if (equal(existing, incoming)) { duplicate = true; break; }
+      if (existing.start === existing.end && incoming.start === incoming.end && existing.start === incoming.start) {
+        existing.characters = Array.from([existing.characters.join(''), incoming.characters.join('')].sort().join(''));
+        duplicate = true; break;
+      }
       if (Math.max(existing.start, incoming.start) < Math.min(existing.end, incoming.end) ||
-          existing.start === incoming.start ||
           (existing.start === existing.end && existing.start > incoming.start && existing.start < incoming.end) ||
           (incoming.start === incoming.end && incoming.start > existing.start && incoming.start < existing.end)) {
-        throw new SyncConflict('Conflicto en el mismo campo del documento Markdown');
+        throw new SyncConflict('Conflicto en el mismo fragmento de texto');
       }
     }
     if (!duplicate) combined.push(incoming);
   }
-  for (const edit of combined.sort((a, b) => b.start - a.start)) original.splice(edit.start, edit.end - edit.start, ...edit.lines);
-  return original.map((line, index) => line.startsWith('\u0000check:')
-    ? line.slice(7) + (original[index + 1]?.slice(7) || '') : line)
-    .filter(line => !line.startsWith('\u0000title:')).join('\n');
+  for (const edit of combined.sort((a, b) => b.start - a.start || b.end - a.end)) original.splice(edit.start, edit.end - edit.start, ...edit.characters);
+  return original.join('');
 }
 
-// Three-way merge. Arrays of entities merge by identity; concurrent edits to
-// the same scalar (including Markdown content) require an explicit decision.
+export const mergeMarkdown = mergeText;
+
+function withRemoteRevisions(local: any, remote: any): any {
+  const identity = (value: any) => value?.id || value?._id || value?._key || value?.name || value?.taskId || value?.groupTitle;
+  if (Array.isArray(local) && Array.isArray(remote)) return local.map(value =>
+    withRemoteRevisions(value, identity(value) ? remote.find(item => identity(item) === identity(value)) : undefined));
+  if (local && remote && typeof local === 'object' && typeof remote === 'object' && !Array.isArray(local)) {
+    return Object.fromEntries(Object.entries(local).map(([key, value]) => [key,
+      ['_rev', '_createdAt', '_updatedAt'].includes(key) ? remote[key] : withRemoteRevisions(value, remote[key])])
+      .concat(Object.entries(remote).filter(([key]) => ['_rev', '_createdAt', '_updatedAt'].includes(key) && !(key in local))));
+  }
+  return local;
+}
+
+// Three-way merge. Entity arrays merge by identity and text by character edits;
+// incompatible changes require an explicit decision.
 export function mergeSyncValue(base: any, local: any, remote: any, path = ''): any {
-  if (equal(local, base)) return remote;
-  if (equal(remote, base) || equal(local, remote)) return local;
-  if (path.endsWith('/content') && [base, local, remote].every(v => typeof v === 'string')) {
-    return mergeMarkdown(base, local, remote);
+  if (equal(local, base) || equal(local, remote)) return remote;
+  if (equal(remote, base)) return withRemoteRevisions(local, remote);
+  if (['/content', '/title', '/description'].some(field => path.endsWith(field)) && [base, local, remote].every(v => typeof v === 'string')) {
+    return mergeText(base, local, remote);
   }
   if (Array.isArray(local) && Array.isArray(remote) && Array.isArray(base)) {
     const key = (v: any) => v?.id || v?._key || v?.name || v?.taskId || v?.groupTitle;
