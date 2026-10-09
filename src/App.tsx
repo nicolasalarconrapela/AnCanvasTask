@@ -908,8 +908,36 @@ export default function App() {
               const remote = workspacesFromSanityDocuments(docs);
               const local = previous.workspaces.filter(w => !w.isPlaceholder || w.name !== 'Mi Workspace' ||
                 w.branches.some(b => b.taskDocuments.some(d => d.content.trim() !== '# Tareas\n\n## General')));
+
+              const activeWs = previous.workspaces.find(w => w.id === previous.activeWorkspaceId);
+              const activeBr = activeWs?.branches.find(b => b.name === activeWs.activeBranchName) || activeWs?.branches[0];
+              const activeDoc = activeBr?.taskDocuments.find(d => d.id === activeBr.activeDocumentId) || activeBr?.taskDocuments[0];
+
               const merged = mergeSyncValue(previous.remoteBase || [], local, remote, '/workspaces') as Workspace[];
-              const workspaces = merged.length ? merged : [previous.workspaces.find(w => w.isPlaceholder) || createEmptyWorkspace()];
+              const baseWorkspaces = merged.length ? merged : [previous.workspaces.find(w => w.isPlaceholder) || createEmptyWorkspace()];
+
+              // Keep the active document and navigation intact in this browser session
+              const workspaces = baseWorkspaces.map(w => {
+                if (w.id !== previous.activeWorkspaceId) return w;
+                return {
+                  ...w,
+                  activeBranchName: activeWs?.activeBranchName || w.activeBranchName,
+                  branches: w.branches.map(b => {
+                    if (b.name !== activeBr?.name) return b;
+                    return {
+                      ...b,
+                      activeDocumentId: activeBr.activeDocumentId || b.activeDocumentId,
+                      taskDocuments: b.taskDocuments.map(d => {
+                        if (activeDoc && (d.id === activeDoc.id || d.path === activeDoc.path)) {
+                          return { ...d, content: activeDoc.content, lastSavedContent: activeDoc.lastSavedContent };
+                        }
+                        return d;
+                      }),
+                    };
+                  }),
+                };
+              });
+
               const next: WorkspaceStoreState = { ...previous, scope: session.scope, workspaces,
                 remoteBase: remote, remoteDocuments: docs,
                 activeWorkspaceId: workspaces.some(w => w.id === previous.activeWorkspaceId) ? previous.activeWorkspaceId : workspaces[0].id };

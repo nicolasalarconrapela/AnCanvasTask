@@ -129,7 +129,7 @@ export function mergeSyncValue(base: any, local: any, remote: any, path = ''): a
   if (equal(remote, base)) return withRemoteRevisions(local, remote);
   // Navigation can change independently while both clients create content.
   // Keep the caller's selection instead of blocking compatible branch saves.
-  if (path.endsWith('/activeBranchName') || path.endsWith('/activeDocumentId')) return local;
+  if (path.endsWith('/activeBranchName') || path.endsWith('/activeDocumentId') || path.endsWith('/activeWorkspaceId')) return local;
   if (['/content', '/title', '/description'].some(field => path.endsWith(field)) && [base, local, remote].every(v => typeof v === 'string')) {
     return mergeText(base, local, remote);
   }
