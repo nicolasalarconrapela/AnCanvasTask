@@ -51,6 +51,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   const [resolvingItemId, setResolvingItemId] = useState<string | null>(null);
   const [confirmDeleteItemId, setConfirmDeleteItemId] = useState<string | null>(null);
   const [deleteScope, setDeleteScope] = useState<'local' | 'remote' | 'both'>('local');
+  const [activeTab, setActiveTab] = useState<'elements' | 'summary'>('elements');
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<Set<string>>(new Set());
   const [collapsedDocKeys, setCollapsedDocKeys] = useState<Set<string>>(new Set());
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
@@ -1475,414 +1476,725 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
           </div>
         </div>
 
-        {/* 2. TOOLBAR */}
+        {/* TAB NAVIGATION BAR */}
         <div
-          id="sync-modal-toolbar"
-          className="px-4 py-2 bg-[var(--surface)] border-b border-[var(--outline)]/50 flex flex-wrap items-center justify-between gap-3 shrink-0"
+          id="sync-modal-tabs"
+          className="px-4 border-b border-[var(--outline)]/50 bg-[var(--surface)] flex items-center gap-1 shrink-0"
         >
-          {/* Select All & Filters */}
-          <div className="flex items-center gap-2 text-xs overflow-x-auto max-w-full py-0.5">
-            {filteredItems.length > 0 && (
-              <label
-                className="flex items-center gap-1.5 text-xs text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer select-none pr-2 border-r border-[var(--outline)]/40 shrink-0"
-                title={i18n._(msg`Seleccionar o deseleccionar todos los elementos visibles`)}
-              >
-                <input
-                  type="checkbox"
-                  id="sync-select-all-checkbox"
-                  checked={filteredItems.length > 0 && filteredItems.every((item) => selectedItemIds.has(item.id))}
-                  onChange={toggleSelectAll}
-                  className="w-4 h-4 rounded border-[var(--outline)] accent-indigo-500 cursor-pointer"
-                />
-                <span className="font-medium text-[11px]">{i18n._(msg`Todos`)}</span>
-              </label>
-            )}
+          <button
+            type="button"
+            id="tab-btn-sync-elements"
+            onClick={() => setActiveTab('elements')}
+            className={`px-3.5 py-2.5 text-xs font-medium border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
+              activeTab === 'elements'
+                ? 'border-indigo-500 text-[var(--on-surface)] font-semibold'
+                : 'border-transparent text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">account_tree</span>
+            <span>{i18n._(msg`Elementos y Tareas`)}</span>
+            <span className="font-mono text-[11px] opacity-75 px-1.5 py-0.5 rounded bg-[var(--surface-container-high)]">
+              {filteredItems.length}
+            </span>
+          </button>
 
-            <button
-              id="btn-sync-filter-all"
-              type="button"
-              onClick={() => setFilterType('all')}
-              className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
-                filterType === 'all'
-                  ? 'bg-[var(--surface-container-high)] text-[var(--on-surface)] font-semibold'
-                  : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
-              }`}
-            >
-              <span>{i18n._(msg`Filtro: Todos`)}</span>
-              <span className="font-mono text-[11px] opacity-70">{result?.counts.total || 0}</span>
-            </button>
-
-            <button
-              id="btn-sync-filter-pending"
-              type="button"
-              onClick={() => setFilterType('pending')}
-              className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
-                filterType === 'pending'
-                  ? 'bg-[var(--surface-container-high)] text-[var(--on-surface)] font-semibold'
-                  : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
-              }`}
-            >
-              <span>{i18n._(msg`Con diferencias`)}</span>
-              <span className="font-mono text-[11px] opacity-70">
-                {(result?.counts.total || 0) - (result?.counts.synced || 0)}
-              </span>
-            </button>
-
-            <button
-              id="btn-sync-filter-local"
-              type="button"
-              onClick={() => setFilterType('local_override')}
-              className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
-                filterType === 'local_override'
-                  ? 'bg-[var(--surface-container-high)] text-sky-400 font-semibold'
-                  : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
-              }`}
-            >
-              <span>{i18n._(msg`Local`)}</span>
-              <span className="font-mono text-[11px] opacity-70">{result?.counts.localOverrides || 0}</span>
-            </button>
-
-            <button
-              id="btn-sync-filter-remote"
-              type="button"
-              onClick={() => setFilterType('remote_override')}
-              className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
-                filterType === 'remote_override'
-                  ? 'bg-[var(--surface-container-high)] text-amber-400 font-semibold'
-                  : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
-              }`}
-            >
-              <span>{i18n._(msg`Remoto`)}</span>
-              <span className="font-mono text-[11px] opacity-70">{result?.counts.remoteOverrides || 0}</span>
-            </button>
-
+          <button
+            type="button"
+            id="tab-btn-sync-summary"
+            onClick={() => setActiveTab('summary')}
+            className={`px-3.5 py-2.5 text-xs font-medium border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
+              activeTab === 'summary'
+                ? 'border-indigo-500 text-[var(--on-surface)] font-semibold'
+                : 'border-transparent text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">summarize</span>
+            <span>{i18n._(msg`Resumen`)}</span>
             {(result?.counts.conflicts || 0) > 0 && (
-              <button
-                id="btn-sync-filter-conflicts"
-                type="button"
-                onClick={() => setFilterType('conflicts')}
-                className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
-                  filterType === 'conflicts'
-                    ? 'bg-[var(--surface-container-high)] text-rose-400 font-semibold'
-                    : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
-                }`}
-              >
-                <span>{i18n._(msg`Conflictos`)}</span>
-                <span className="font-mono text-[11px] opacity-70">{result?.counts.conflicts || 0}</span>
-              </button>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-900/60 text-rose-300 border border-rose-500/40">
+                {result?.counts.conflicts} {i18n._(msg`conflicto(s)`)}
+              </span>
             )}
-          </div>
-
-          {/* Batch Actions */}
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              id="btn-sync-batch-smart"
-              type="button"
-              disabled={isProcessing || !result?.hasPendingChanges || !isSanityConfigured}
-              onClick={() => handleBatchSyncAction('smart')}
-              className="btn-m3-primary text-xs px-3 py-1.5 flex items-center gap-1.5 font-medium cursor-pointer disabled:opacity-40 shadow-none"
-              title={i18n._(msg`Resuelve automáticamente aplicando los cambios más recientes en ambas direcciones`)}
-            >
-              <span className="material-symbols-outlined text-[15px]">auto_fix_high</span>
-              <span>{i18n._(msg`Smart Sync`)}</span>
-            </button>
-
-            <button
-              id="btn-sync-batch-push-all"
-              type="button"
-              disabled={isProcessing || !isSanityConfigured || !result}
-              onClick={() => handleBatchSyncAction('push_all')}
-              className="btn-m3-secondary text-xs px-2.5 py-1.5 flex items-center gap-1 cursor-pointer disabled:opacity-40"
-              title={i18n._(msg`Sobrescribe Sanity con el estado local de todos los workspaces`)}
-            >
-              <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
-              <span>{i18n._(msg`Subir todo`)}</span>
-            </button>
-
-            <button
-              id="btn-sync-batch-pull-all"
-              type="button"
-              disabled={isProcessing || !isSanityConfigured || !result}
-              onClick={() => handleBatchSyncAction('pull_all')}
-              className="btn-m3-secondary text-xs px-2.5 py-1.5 flex items-center gap-1 cursor-pointer disabled:opacity-40"
-              title={i18n._(msg`Sobrescribe el estado local con los datos almacenados en Sanity`)}
-            >
-              <span className="material-symbols-outlined text-[14px]">arrow_downward</span>
-              <span>{i18n._(msg`Descargar todo`)}</span>
-            </button>
-          </div>
+          </button>
         </div>
 
-        {/* 2.1 SELECTION ACTION BAR */}
-        {selectedItemIds.size > 0 && (
-          <div
-            id="sync-modal-selection-bar"
-            className="px-4 py-2 bg-indigo-950/40 border-b border-indigo-900/50 flex flex-wrap items-center justify-between gap-3 text-xs animate-fade-in shrink-0"
-          >
-            <div className="flex items-center gap-2 text-indigo-200 font-medium">
-              <span className="material-symbols-outlined text-[16px] text-indigo-400">check_circle</span>
-              <span>{i18n._(msg`${selectedItemIds.size} elemento(s) seleccionado(s)`)}</span>
-              <button
-                type="button"
-                onClick={clearSelection}
-                className="text-xs text-indigo-300 hover:text-white underline ml-2 cursor-pointer"
-              >
-                {i18n._(msg`Deseleccionar todo`)}
-              </button>
-            </div>
+        {/* =================== TAB 1: ELEMENTOS Y TAREAS =================== */}
+        {activeTab === 'elements' && (
+          <>
+            {/* 2. TOOLBAR */}
+            <div
+              id="sync-modal-toolbar"
+              className="px-4 py-2 bg-[var(--surface)] border-b border-[var(--outline)]/50 flex flex-wrap items-center justify-between gap-3 shrink-0"
+            >
+              {/* Select All & Filters */}
+              <div className="flex items-center gap-2 text-xs overflow-x-auto max-w-full py-0.5">
+                {filteredItems.length > 0 && (
+                  <label
+                    className="flex items-center gap-1.5 text-xs text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer select-none pr-2 border-r border-[var(--outline)]/40 shrink-0"
+                    title={i18n._(msg`Seleccionar o deseleccionar todos los elementos visibles`)}
+                  >
+                    <input
+                      type="checkbox"
+                      id="sync-select-all-checkbox"
+                      checked={filteredItems.length > 0 && filteredItems.every((item) => selectedItemIds.has(item.id))}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded border-[var(--outline)] accent-indigo-500 cursor-pointer"
+                    />
+                    <span className="font-medium text-[11px]">{i18n._(msg`Todos`)}</span>
+                  </label>
+                )}
 
-            {!confirmBulkDelete ? (
-              <div className="flex items-center gap-2">
                 <button
+                  id="btn-sync-filter-all"
                   type="button"
-                  onClick={() => setConfirmBulkDelete(true)}
-                  className="px-2.5 py-1 text-xs rounded font-medium bg-rose-600 hover:bg-rose-500 text-white transition cursor-pointer flex items-center gap-1 shadow-sm"
+                  onClick={() => setFilterType('all')}
+                  className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
+                    filterType === 'all'
+                      ? 'bg-[var(--surface-container-high)] text-[var(--on-surface)] font-semibold'
+                      : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
+                  }`}
                 >
-                  <span className="material-symbols-outlined text-[14px]">delete</span>
-                  <span>{i18n._(msg`Eliminar seleccionados (${selectedItemIds.size})`)}</span>
+                  <span>{i18n._(msg`Filtro: Todos`)}</span>
+                  <span className="font-mono text-[11px] opacity-70">{result?.counts.total || 0}</span>
+                </button>
+
+                <button
+                  id="btn-sync-filter-pending"
+                  type="button"
+                  onClick={() => setFilterType('pending')}
+                  className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
+                    filterType === 'pending'
+                      ? 'bg-[var(--surface-container-high)] text-[var(--on-surface)] font-semibold'
+                      : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
+                  }`}
+                >
+                  <span>{i18n._(msg`Con diferencias`)}</span>
+                  <span className="font-mono text-[11px] opacity-70">
+                    {(result?.counts.total || 0) - (result?.counts.synced || 0)}
+                  </span>
+                </button>
+
+                <button
+                  id="btn-sync-filter-local"
+                  type="button"
+                  onClick={() => setFilterType('local_override')}
+                  className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
+                    filterType === 'local_override'
+                      ? 'bg-[var(--surface-container-high)] text-sky-400 font-semibold'
+                      : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
+                  }`}
+                >
+                  <span>{i18n._(msg`Local`)}</span>
+                  <span className="font-mono text-[11px] opacity-70">{result?.counts.localOverrides || 0}</span>
+                </button>
+
+                <button
+                  id="btn-sync-filter-remote"
+                  type="button"
+                  onClick={() => setFilterType('remote_override')}
+                  className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
+                    filterType === 'remote_override'
+                      ? 'bg-[var(--surface-container-high)] text-amber-400 font-semibold'
+                      : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
+                  }`}
+                >
+                  <span>{i18n._(msg`Remoto`)}</span>
+                  <span className="font-mono text-[11px] opacity-70">{result?.counts.remoteOverrides || 0}</span>
+                </button>
+
+                {(result?.counts.conflicts || 0) > 0 && (
+                  <button
+                    id="btn-sync-filter-conflicts"
+                    type="button"
+                    onClick={() => setFilterType('conflicts')}
+                    className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
+                      filterType === 'conflicts'
+                        ? 'bg-[var(--surface-container-high)] text-rose-400 font-semibold'
+                        : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
+                    }`}
+                  >
+                    <span>{i18n._(msg`Conflictos`)}</span>
+                    <span className="font-mono text-[11px] opacity-70">{result?.counts.conflicts || 0}</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Batch Actions */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  id="btn-sync-batch-smart"
+                  type="button"
+                  disabled={isProcessing || !result?.hasPendingChanges || !isSanityConfigured}
+                  onClick={() => handleBatchSyncAction('smart')}
+                  className="btn-m3-primary text-xs px-3 py-1.5 flex items-center gap-1.5 font-medium cursor-pointer disabled:opacity-40 shadow-none"
+                  title={i18n._(msg`Resuelve automáticamente aplicando los cambios más recientes en ambas direcciones`)}
+                >
+                  <span className="material-symbols-outlined text-[15px]">auto_fix_high</span>
+                  <span>{i18n._(msg`Smart Sync`)}</span>
+                </button>
+
+                <button
+                  id="btn-sync-batch-push-all"
+                  type="button"
+                  disabled={isProcessing || !isSanityConfigured || !result}
+                  onClick={() => handleBatchSyncAction('push_all')}
+                  className="btn-m3-secondary text-xs px-2.5 py-1.5 flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                  title={i18n._(msg`Sobrescribe Sanity con el estado local de todos los workspaces`)}
+                >
+                  <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
+                  <span>{i18n._(msg`Subir todo`)}</span>
+                </button>
+
+                <button
+                  id="btn-sync-batch-pull-all"
+                  type="button"
+                  disabled={isProcessing || !isSanityConfigured || !result}
+                  onClick={() => handleBatchSyncAction('pull_all')}
+                  className="btn-m3-secondary text-xs px-2.5 py-1.5 flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                  title={i18n._(msg`Sobrescribe el estado local con los datos almacenados en Sanity`)}
+                >
+                  <span className="material-symbols-outlined text-[14px]">arrow_downward</span>
+                  <span>{i18n._(msg`Descargar todo`)}</span>
                 </button>
               </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-rose-300 font-medium">{i18n._(msg`Eliminar en:`)}</span>
-                <div className="flex items-center gap-1 bg-[var(--surface)] p-0.5 rounded border border-[var(--outline)] text-[11px]">
+            </div>
+
+            {/* 2.1 SELECTION ACTION BAR */}
+            {selectedItemIds.size > 0 && (
+              <div
+                id="sync-modal-selection-bar"
+                className="px-4 py-2 bg-indigo-950/40 border-b border-indigo-900/50 flex flex-wrap items-center justify-between gap-3 text-xs animate-fade-in shrink-0"
+              >
+                <div className="flex items-center gap-2 text-indigo-200 font-medium">
+                  <span className="material-symbols-outlined text-[16px] text-indigo-400">check_circle</span>
+                  <span>{i18n._(msg`${selectedItemIds.size} elemento(s) seleccionado(s)`)}</span>
                   <button
                     type="button"
-                    onClick={() => setBulkDeleteScope('local')}
-                    className={`px-2 py-0.5 rounded transition cursor-pointer ${
-                      bulkDeleteScope === 'local' ? 'bg-sky-600 text-white font-medium' : 'text-[var(--on-surface-variant)]'
-                    }`}
+                    onClick={clearSelection}
+                    className="text-xs text-indigo-300 hover:text-white underline ml-2 cursor-pointer"
                   >
-                    {i18n._(msg`Local`)}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBulkDeleteScope('remote')}
-                    className={`px-2 py-0.5 rounded transition cursor-pointer ${
-                      bulkDeleteScope === 'remote' ? 'bg-amber-600 text-white font-medium' : 'text-[var(--on-surface-variant)]'
-                    }`}
-                  >
-                    {i18n._(msg`Sanity`)}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBulkDeleteScope('both')}
-                    className={`px-2 py-0.5 rounded transition cursor-pointer ${
-                      bulkDeleteScope === 'both' ? 'bg-rose-600 text-white font-medium' : 'text-[var(--on-surface-variant)]'
-                    }`}
-                  >
-                    {i18n._(msg`Ambos`)}
+                    {i18n._(msg`Deseleccionar todo`)}
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setConfirmBulkDelete(false)}
-                  className="btn-m3-secondary px-2 py-1 text-xs cursor-pointer"
-                >
-                  {i18n._(msg`Cancelar`)}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDeleteSelected}
-                  className="px-2.5 py-1 text-xs rounded font-medium bg-rose-600 hover:bg-rose-500 text-white transition cursor-pointer flex items-center gap-1 shadow-sm"
-                >
-                  {i18n._(msg`Confirmar Eliminación (${selectedItemIds.size})`)}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* 3. CONTENT (Main Scrollable Divider List) */}
-        <div
-          id="sync-modal-content-list"
-          className="flex-1 overflow-y-auto min-h-0 divide-y divide-[var(--outline)]/40 custom-modal-scrollbar"
-        >
-          {filteredItems.length === 0 ? (
-            <div className="p-12 text-center text-[var(--on-surface-variant)] flex flex-col items-center justify-center gap-2">
-              <span className="material-symbols-outlined text-3xl text-emerald-400">check_circle</span>
-              <p className="text-sm font-medium text-[var(--on-surface)]">
-                {filterType === 'pending'
-                  ? i18n._(msg`No hay diferencias pendientes`)
-                  : filterType === 'conflicts'
-                  ? i18n._(msg`No hay conflictos divergentes`)
-                  : filterType === 'local_override'
-                  ? i18n._(msg`No hay cambios locales pendientes`)
-                  : filterType === 'remote_override'
-                  ? i18n._(msg`No hay cambios remotos pendientes`)
-                  : i18n._(msg`Todos los elementos están sincronizados`)}
-              </p>
-              <p className="text-xs text-[var(--on-surface-variant)]">
-                {i18n._(msg`El almacenamiento local y Sanity Cloud coinciden plenamente.`)}
-              </p>
-            </div>
-          ) : (
-            groupedWorkspaces.map((group) => {
-              const isWorkspaceCollapsed = collapsedWorkspaceIds.has(group.workspaceId);
-              const totalWorkspaceTasks =
-                group.documents.reduce((acc, d) => acc + d.tasks.length, 0) +
-                group.orphanTasks.length;
-              const hasContent = group.documents.length > 0 || group.orphanTasks.length > 0;
-
-              return (
-                <div key={group.workspaceId} className="flex flex-col">
-                  {/* Workspace Row */}
-                  {group.workspaceItem ? (
-                    renderItemRow(group.workspaceItem, false)
-                  ) : (
-                    /* Default Workspace Header Row if no direct workspace item */
-                    <div className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-[var(--surface-container-high)]/40 transition-colors">
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="material-symbols-outlined text-[17px] text-[var(--on-surface-variant)] shrink-0 opacity-80">
-                          folder
-                        </span>
-                        <div className="min-w-0">
-                          <span className="text-sm font-semibold text-[var(--on-surface)] truncate">
-                            {group.workspaceName}
-                          </span>
-                          <p className="text-xs text-[var(--on-surface-variant)] font-mono">
-                            {i18n._(msg`Workspace sincronizado`)}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="shrink-0 flex items-center">
-                        <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-medium">
-                          <span className="material-symbols-outlined text-[15px]">check</span>
-                          <span>{i18n._(msg`Sincronizado`)}</span>
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Workspace Content (Markdown Documents + Tasks) */}
-                  {hasContent && (
-                    <div className="flex flex-col">
-                      {/* Workspace Sub-header Toggle */}
+                {!confirmBulkDelete ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmBulkDelete(true)}
+                      className="px-2.5 py-1 text-xs rounded font-medium bg-rose-600 hover:bg-rose-500 text-white transition cursor-pointer flex items-center gap-1 shadow-sm"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">delete</span>
+                      <span>{i18n._(msg`Eliminar seleccionados (${selectedItemIds.size})`)}</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-rose-300 font-medium">{i18n._(msg`Eliminar en:`)}</span>
+                    <div className="flex items-center gap-1 bg-[var(--surface)] p-0.5 rounded border border-[var(--outline)] text-[11px]">
                       <button
                         type="button"
-                        onClick={() => toggleWorkspaceCollapse(group.workspaceId)}
-                        className="flex items-center justify-between px-4 py-1.5 bg-[var(--surface-container-low)]/20 text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]/30 text-xs font-medium cursor-pointer transition-colors border-t border-[var(--outline)]/20 select-none"
+                        onClick={() => setBulkDeleteScope('local')}
+                        className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                          bulkDeleteScope === 'local' ? 'bg-sky-600 text-white font-medium' : 'text-[var(--on-surface-variant)]'
+                        }`}
                       >
-                        <div className="flex items-center gap-1.5 pl-4">
-                          <span className="material-symbols-outlined text-[15px]">
-                            {isWorkspaceCollapsed ? 'chevron_right' : 'expand_more'}
-                          </span>
-                          <span>{i18n._(msg`Documentos y tareas del Workspace`)}</span>
-                          <span className="font-mono text-[11px] opacity-70">
-                            ({group.documents.length}{' '}
-                            {group.documents.length === 1
-                              ? i18n._(msg`archivo`)
-                              : i18n._(msg`archivos`)}
-                            , {totalWorkspaceTasks}{' '}
-                            {totalWorkspaceTasks === 1
-                              ? i18n._(msg`tarea`)
-                              : i18n._(msg`tareas`)}
-                            )
-                          </span>
-                        </div>
-                        <span className="text-[11px] opacity-70">
-                          {isWorkspaceCollapsed ? i18n._(msg`Mostrar`) : i18n._(msg`Ocultar`)}
-                        </span>
+                        {i18n._(msg`Local`)}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkDeleteScope('remote')}
+                        className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                          bulkDeleteScope === 'remote' ? 'bg-amber-600 text-white font-medium' : 'text-[var(--on-surface-variant)]'
+                        }`}
+                      >
+                        {i18n._(msg`Sanity`)}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkDeleteScope('both')}
+                        className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                          bulkDeleteScope === 'both' ? 'bg-rose-600 text-white font-medium' : 'text-[var(--on-surface-variant)]'
+                        }`}
+                      >
+                        {i18n._(msg`Ambos`)}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmBulkDelete(false)}
+                      className="btn-m3-secondary px-2 py-1 text-xs cursor-pointer"
+                    >
+                      {i18n._(msg`Cancelar`)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeleteSelected}
+                      className="px-2.5 py-1 text-xs rounded font-medium bg-rose-600 hover:bg-rose-500 text-white transition cursor-pointer flex items-center gap-1 shadow-sm"
+                    >
+                      {i18n._(msg`Confirmar Eliminación (${selectedItemIds.size})`)}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
-                      {/* Render Markdown Document Groups under Workspace */}
-                      {!isWorkspaceCollapsed && (
+            {/* 3. CONTENT (Main Scrollable Divider List) */}
+            <div
+              id="sync-modal-content-list"
+              className="flex-1 overflow-y-auto min-h-0 divide-y divide-[var(--outline)]/40 custom-modal-scrollbar"
+            >
+              {filteredItems.length === 0 ? (
+                <div className="p-12 text-center text-[var(--on-surface-variant)] flex flex-col items-center justify-center gap-2">
+                  <span className="material-symbols-outlined text-3xl text-emerald-400">check_circle</span>
+                  <p className="text-sm font-medium text-[var(--on-surface)]">
+                    {filterType === 'pending'
+                      ? i18n._(msg`No hay diferencias pendientes`)
+                      : filterType === 'conflicts'
+                      ? i18n._(msg`No hay conflictos divergentes`)
+                      : filterType === 'local_override'
+                      ? i18n._(msg`No hay cambios locales pendientes`)
+                      : filterType === 'remote_override'
+                      ? i18n._(msg`No hay cambios remotos pendientes`)
+                      : i18n._(msg`Todos los elementos están sincronizados`)}
+                  </p>
+                  <p className="text-xs text-[var(--on-surface-variant)]">
+                    {i18n._(msg`El almacenamiento local y Sanity Cloud coinciden plenamente.`)}
+                  </p>
+                </div>
+              ) : (
+                groupedWorkspaces.map((group) => {
+                  const isWorkspaceCollapsed = collapsedWorkspaceIds.has(group.workspaceId);
+                  const totalWorkspaceTasks =
+                    group.documents.reduce((acc, d) => acc + d.tasks.length, 0) +
+                    group.orphanTasks.length;
+                  const hasContent = group.documents.length > 0 || group.orphanTasks.length > 0;
+
+                  return (
+                    <div key={group.workspaceId} className="flex flex-col">
+                      {/* Workspace Row */}
+                      {group.workspaceItem ? (
+                        renderItemRow(group.workspaceItem, false)
+                      ) : (
+                        /* Default Workspace Header Row if no direct workspace item */
+                        <div className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-[var(--surface-container-high)]/40 transition-colors">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <span className="material-symbols-outlined text-[17px] text-[var(--on-surface-variant)] shrink-0 opacity-80">
+                              folder
+                            </span>
+                            <div className="min-w-0">
+                              <span className="text-sm font-semibold text-[var(--on-surface)] truncate">
+                                {group.workspaceName}
+                              </span>
+                              <p className="text-xs text-[var(--on-surface-variant)] font-mono">
+                                {i18n._(msg`Workspace sincronizado`)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 flex items-center">
+                            <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-medium">
+                              <span className="material-symbols-outlined text-[15px]">check</span>
+                              <span>{i18n._(msg`Sincronizado`)}</span>
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Workspace Content (Markdown Documents + Tasks) */}
+                      {hasContent && (
                         <div className="flex flex-col">
-                          {group.documents.map((docGroup) => {
-                            const isDocCollapsed = collapsedDocKeys.has(docGroup.docKey);
+                          {/* Workspace Sub-header Toggle */}
+                          <button
+                            type="button"
+                            onClick={() => toggleWorkspaceCollapse(group.workspaceId)}
+                            className="flex items-center justify-between px-4 py-1.5 bg-[var(--surface-container-low)]/20 text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]/30 text-xs font-medium cursor-pointer transition-colors border-t border-[var(--outline)]/20 select-none"
+                          >
+                            <div className="flex items-center gap-1.5 pl-4">
+                              <span className="material-symbols-outlined text-[15px]">
+                                {isWorkspaceCollapsed ? 'chevron_right' : 'expand_more'}
+                              </span>
+                              <span>{i18n._(msg`Documentos y tareas del Workspace`)}</span>
+                              <span className="font-mono text-[11px] opacity-70">
+                                ({group.documents.length}{' '}
+                                {group.documents.length === 1
+                                  ? i18n._(msg`archivo`)
+                                  : i18n._(msg`archivos`)}
+                                , {totalWorkspaceTasks}{' '}
+                                {totalWorkspaceTasks === 1
+                                  ? i18n._(msg`tarea`)
+                                  : i18n._(msg`tareas`)}
+                                )
+                              </span>
+                            </div>
+                            <span className="text-[11px] opacity-70">
+                              {isWorkspaceCollapsed ? i18n._(msg`Mostrar`) : i18n._(msg`Ocultar`)}
+                            </span>
+                          </button>
 
-                            return (
-                              <div
-                                key={docGroup.docKey}
-                                data-document-path={docGroup.documentPath}
-                                className="flex flex-col border-t border-[var(--outline)]/20"
-                              >
-                                {/* Markdown Document Header with Collapse/Expand */}
-                                <button
-                                  type="button"
-                                  onClick={() => toggleDocCollapse(docGroup.docKey)}
-                                  className="flex items-center justify-between gap-3 pl-8 pr-4 py-2 bg-[var(--surface-container-low)]/40 hover:bg-[var(--surface-container-high)]/40 transition-colors text-xs font-medium cursor-pointer select-none text-left w-full"
-                                  aria-expanded={!isDocCollapsed}
-                                >
-                                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                                    <span className="material-symbols-outlined text-[16px] text-[var(--on-surface-variant)] transition-transform shrink-0">
-                                      {isDocCollapsed ? 'chevron_right' : 'expand_more'}
+                          {/* Render Markdown Document Groups under Workspace */}
+                          {!isWorkspaceCollapsed && (
+                            <div className="flex flex-col">
+                              {group.documents.map((docGroup) => {
+                                const isDocCollapsed = collapsedDocKeys.has(docGroup.docKey);
+
+                                return (
+                                  <div
+                                    key={docGroup.docKey}
+                                    data-document-path={docGroup.documentPath}
+                                    className="flex flex-col border-t border-[var(--outline)]/20"
+                                  >
+                                    {/* Markdown Document Header with Collapse/Expand */}
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleDocCollapse(docGroup.docKey)}
+                                      className="flex items-center justify-between gap-3 pl-8 pr-4 py-2 bg-[var(--surface-container-low)]/40 hover:bg-[var(--surface-container-high)]/40 transition-colors text-xs font-medium cursor-pointer select-none text-left w-full"
+                                      aria-expanded={!isDocCollapsed}
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                                        <span className="material-symbols-outlined text-[16px] text-[var(--on-surface-variant)] transition-transform shrink-0">
+                                          {isDocCollapsed ? 'chevron_right' : 'expand_more'}
+                                        </span>
+                                        <span className="material-symbols-outlined text-[16px] text-indigo-400 shrink-0">
+                                          description
+                                        </span>
+                                        <span className="font-mono text-xs font-semibold text-[var(--on-surface)] truncate">
+                                          {docGroup.documentPath}
+                                        </span>
+                                        {docGroup.branchName && (
+                                          <span className="text-[10px] text-[var(--on-surface-variant)] px-1.5 py-0.5 rounded bg-[var(--surface-container-high)] font-mono border border-[var(--outline)]/20 shrink-0">
+                                            {docGroup.branchName}
+                                          </span>
+                                        )}
+                                        <span className="text-[11px] text-[var(--on-surface-variant)] font-mono opacity-75 shrink-0">
+                                          ({docGroup.tasks.length}{' '}
+                                          {docGroup.tasks.length === 1
+                                            ? i18n._(msg`tarea`)
+                                            : i18n._(msg`tareas`)}
+                                          )
+                                        </span>
+                                      </div>
+
+                                      <div className="shrink-0 flex items-center gap-3">
+                                        {docGroup.documentItem &&
+                                          getDiffStatus(docGroup.documentItem.diffType)}
+                                        <span className="text-[11px] text-[var(--on-surface-variant)] opacity-70 hidden sm:inline">
+                                          {isDocCollapsed ? i18n._(msg`Expandir`) : i18n._(msg`Colapsar`)}
+                                        </span>
+                                      </div>
+                                    </button>
+
+                                    {/* Child Tasks under this Markdown Document */}
+                                    {!isDocCollapsed &&
+                                      (docGroup.tasks.length > 0 ? (
+                                        <div className="divide-y divide-[var(--outline)]/15">
+                                          {docGroup.tasks.map((taskItem) =>
+                                            renderItemRow(taskItem, true)
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className="pl-14 pr-4 py-2 text-xs text-[var(--on-surface-variant)] italic bg-[var(--surface-container-lowest)]/10">
+                                          {i18n._(msg`No hay tareas en este documento`)}
+                                        </div>
+                                      ))}
+                                  </div>
+                                );
+                              })}
+
+                              {/* Unassigned / Orphan Tasks */}
+                              {group.orphanTasks.length > 0 && (
+                                <div className="flex flex-col border-t border-[var(--outline)]/20">
+                                  <div className="flex items-center gap-2 pl-8 pr-4 py-2 bg-[var(--surface-container-low)]/30 text-xs text-[var(--on-surface-variant)] font-medium">
+                                    <span className="material-symbols-outlined text-[16px] text-[var(--on-surface-variant)]">
+                                      checklist
                                     </span>
-                                    <span className="material-symbols-outlined text-[16px] text-indigo-400 shrink-0">
-                                      description
+                                    <span>{i18n._(msg`Otras tareas sin documento`)}</span>
+                                    <span className="font-mono text-[11px] opacity-70">
+                                      ({group.orphanTasks.length})
                                     </span>
-                                    <span className="font-mono text-xs font-semibold text-[var(--on-surface)] truncate">
-                                      {docGroup.documentPath}
-                                    </span>
-                                    {docGroup.branchName && (
-                                      <span className="text-[10px] text-[var(--on-surface-variant)] px-1.5 py-0.5 rounded bg-[var(--surface-container-high)] font-mono border border-[var(--outline)]/20 shrink-0">
-                                        {docGroup.branchName}
-                                      </span>
+                                  </div>
+                                  <div className="divide-y divide-[var(--outline)]/15">
+                                    {group.orphanTasks.map((taskItem) =>
+                                      renderItemRow(taskItem, true)
                                     )}
-                                    <span className="text-[11px] text-[var(--on-surface-variant)] font-mono opacity-75 shrink-0">
-                                      ({docGroup.tasks.length}{' '}
-                                      {docGroup.tasks.length === 1
-                                        ? i18n._(msg`tarea`)
-                                        : i18n._(msg`tareas`)}
-                                      )
-                                    </span>
                                   </div>
-
-                                  <div className="shrink-0 flex items-center gap-3">
-                                    {docGroup.documentItem &&
-                                      getDiffStatus(docGroup.documentItem.diffType)}
-                                    <span className="text-[11px] text-[var(--on-surface-variant)] opacity-70 hidden sm:inline">
-                                      {isDocCollapsed ? i18n._(msg`Expandir`) : i18n._(msg`Colapsar`)}
-                                    </span>
-                                  </div>
-                                </button>
-
-                                {/* Child Tasks under this Markdown Document */}
-                                {!isDocCollapsed &&
-                                  (docGroup.tasks.length > 0 ? (
-                                    <div className="divide-y divide-[var(--outline)]/15">
-                                      {docGroup.tasks.map((taskItem) =>
-                                        renderItemRow(taskItem, true)
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <div className="pl-14 pr-4 py-2 text-xs text-[var(--on-surface-variant)] italic bg-[var(--surface-container-lowest)]/10">
-                                      {i18n._(msg`No hay tareas en este documento`)}
-                                    </div>
-                                  ))}
-                              </div>
-                            );
-                          })}
-
-                          {/* Unassigned / Orphan Tasks */}
-                          {group.orphanTasks.length > 0 && (
-                            <div className="flex flex-col border-t border-[var(--outline)]/20">
-                              <div className="flex items-center gap-2 pl-8 pr-4 py-2 bg-[var(--surface-container-low)]/30 text-xs text-[var(--on-surface-variant)] font-medium">
-                                <span className="material-symbols-outlined text-[16px] text-[var(--on-surface-variant)]">
-                                  checklist
-                                </span>
-                                <span>{i18n._(msg`Otras tareas sin documento`)}</span>
-                                <span className="font-mono text-[11px] opacity-70">
-                                  ({group.orphanTasks.length})
-                                </span>
-                              </div>
-                              <div className="divide-y divide-[var(--outline)]/15">
-                                {group.orphanTasks.map((taskItem) =>
-                                  renderItemRow(taskItem, true)
-                                )}
-                              </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
                       )}
                     </div>
-                  )}
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
+
+        {/* =================== TAB 2: RESUMEN =================== */}
+        {activeTab === 'summary' && (
+          <div
+            id="sync-modal-summary-content"
+            className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-5 flex flex-col gap-4 text-xs custom-modal-scrollbar"
+          >
+            {/* 1. Global Sync Health Banner */}
+            <div className="p-4 rounded-lg bg-[var(--surface-container-low)] border border-[var(--outline)]/40 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span
+                  className={`material-symbols-outlined text-2xl ${
+                    (result?.counts.conflicts || 0) > 0
+                      ? 'text-rose-400'
+                      : result?.hasPendingChanges
+                      ? 'text-amber-400'
+                      : 'text-emerald-400'
+                  }`}
+                >
+                  {(result?.counts.conflicts || 0) > 0
+                    ? 'warning'
+                    : result?.hasPendingChanges
+                    ? 'sync_problem'
+                    : 'check_circle'}
+                </span>
+                <div>
+                  <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                    {(result?.counts.conflicts || 0) > 0
+                      ? i18n._(msg`Se requieren resoluciones de conflicto`)
+                      : result?.hasPendingChanges
+                      ? i18n._(msg`Existen diferencias pendientes de sincronizar`)
+                      : i18n._(msg`Todo el espacio está sincronizado`)}
+                  </h3>
+                  <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                    {(result?.counts.conflicts || 0) > 0
+                      ? i18n._(
+                          msg`Hay ${result?.counts.conflicts} elemento(s) con cambios incompatibles en local y Sanity Cloud.`
+                        )
+                      : result?.hasPendingChanges
+                      ? i18n._(
+                          msg`Hay ${(result?.counts.total || 0) - (result?.counts.synced || 0)} cambio(s) listos para sincronizar.`
+                        )
+                      : i18n._(msg`Todos los Workspaces, documentos Markdown y tareas coinciden plenamente.`)}
+                  </p>
                 </div>
-              );
-            })
-          )}
-        </div>
+              </div>
+
+              {/* Quick Batch Sync Actions */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isProcessing || !result?.hasPendingChanges || !isSanityConfigured}
+                  onClick={() => handleBatchSyncAction('smart')}
+                  className="btn-m3-primary text-xs px-3 py-1.5 flex items-center gap-1.5 font-medium cursor-pointer disabled:opacity-40 shadow-none"
+                  title={i18n._(msg`Resuelve automáticamente aplicando los cambios más recientes`)}
+                >
+                  <span className="material-symbols-outlined text-[15px]">auto_fix_high</span>
+                  <span>{i18n._(msg`Smart Sync`)}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isProcessing || !isSanityConfigured || !result}
+                  onClick={() => handleBatchSyncAction('push_all')}
+                  className="btn-m3-secondary text-xs px-2.5 py-1.5 flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                  title={i18n._(msg`Subir todo a Sanity Cloud`)}
+                >
+                  <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
+                  <span>{i18n._(msg`Subir todo`)}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isProcessing || !isSanityConfigured || !result}
+                  onClick={() => handleBatchSyncAction('pull_all')}
+                  className="btn-m3-secondary text-xs px-2.5 py-1.5 flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                  title={i18n._(msg`Descargar todo de Sanity Cloud`)}
+                >
+                  <span className="material-symbols-outlined text-[14px]">arrow_downward</span>
+                  <span>{i18n._(msg`Descargar todo`)}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 2. Key Metrics Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+              <div className="p-3 rounded-md bg-[var(--surface)] border border-[var(--outline)]/40 flex flex-col">
+                <span className="text-[11px] text-[var(--on-surface-variant)]">{i18n._(msg`Total analizados`)}</span>
+                <span className="text-lg font-bold font-mono text-[var(--on-surface)] mt-0.5">
+                  {result?.counts.total || 0}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-md bg-[var(--surface)] border border-emerald-500/20 flex flex-col">
+                <span className="text-[11px] text-emerald-400">{i18n._(msg`Sincronizados`)}</span>
+                <span className="text-lg font-bold font-mono text-emerald-400 mt-0.5">
+                  {result?.counts.synced || 0}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-md bg-[var(--surface)] border border-sky-500/20 flex flex-col">
+                <span className="text-[11px] text-sky-400">{i18n._(msg`Cambios locales`)}</span>
+                <span className="text-lg font-bold font-mono text-sky-400 mt-0.5">
+                  {(result?.counts.localOverrides || 0) + (result?.counts.onlyLocal || 0)}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-md bg-[var(--surface)] border border-amber-500/20 flex flex-col">
+                <span className="text-[11px] text-amber-400">{i18n._(msg`Cambios remotos`)}</span>
+                <span className="text-lg font-bold font-mono text-amber-400 mt-0.5">
+                  {(result?.counts.remoteOverrides || 0) + (result?.counts.onlyRemote || 0)}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-md bg-[var(--surface)] border border-rose-500/20 flex flex-col">
+                <span className="text-[11px] text-rose-400">{i18n._(msg`Conflictos`)}</span>
+                <span className="text-lg font-bold font-mono text-rose-400 mt-0.5">
+                  {result?.counts.conflicts || 0}
+                </span>
+              </div>
+            </div>
+
+            {/* 3. Conflicting Items Section (if any) */}
+            {(result?.counts.conflicts || 0) > 0 && (
+              <div className="p-3.5 rounded-lg bg-rose-950/20 border border-rose-900/40 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-rose-300 font-semibold text-xs">
+                    <span className="material-symbols-outlined text-[16px] text-rose-400">priority_high</span>
+                    <span>{i18n._(msg`Conflictos pendientes de resolución (${result?.counts.conflicts})`)}</span>
+                  </div>
+                </div>
+
+                <div className="divide-y divide-rose-900/30 rounded border border-rose-900/30 bg-[var(--surface)]">
+                  {(result?.items || [])
+                    .filter((i) => i.diffType === 'conflict')
+                    .map((conflictItem) => (
+                      <div key={conflictItem.id} className="p-3 flex flex-col gap-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="material-symbols-outlined text-[16px] text-rose-400">
+                              {conflictItem.entityType === 'workspace' ? 'folder' : 'task_alt'}
+                            </span>
+                            <span className="font-semibold text-[var(--on-surface)] truncate">
+                              {conflictItem.title.replace(/^(Workspace:\s*|Tarea:\s*)/, '')}
+                            </span>
+                            {conflictItem.documentPath && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-container-high)] text-[var(--on-surface-variant)]">
+                                {conflictItem.documentPath}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              disabled={isResolving || !isSanityConfigured}
+                              onClick={() => handleResolveSingle(conflictItem, 'keep_local')}
+                              className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium text-sky-400 hover:bg-sky-950/40 flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                              title={i18n._(msg`Conservar local`)}
+                            >
+                              <span className="material-symbols-outlined text-[13px]">arrow_upward</span>
+                              <span>{i18n._(msg`Mantener Local`)}</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isResolving || !isSanityConfigured || !conflictItem.remoteData}
+                              onClick={() => handleResolveSingle(conflictItem, 'keep_remote')}
+                              className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium text-amber-400 hover:bg-amber-950/40 flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                              title={i18n._(msg`Aceptar versión de Sanity`)}
+                            >
+                              <span className="material-symbols-outlined text-[13px]">arrow_downward</span>
+                              <span>{i18n._(msg`Aceptar Remoto`)}</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isResolving || !isSanityConfigured}
+                              onClick={() => handleResolveSingle(conflictItem, 'merge')}
+                              className="px-2.5 py-1 text-xs rounded font-medium bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                              title={i18n._(msg`Fusionar (3-way merge)`)}
+                            >
+                              <span className="material-symbols-outlined text-[13px]">call_merge</span>
+                              <span>{i18n._(msg`Fusionar`)}</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {conflictItem.summaryChanges.length > 0 && (
+                          <ul className="list-disc list-inside text-[11px] font-mono text-[var(--on-surface-variant)] pl-2 space-y-0.5">
+                            {conflictItem.summaryChanges.map((change, idx) => (
+                              <li key={idx}>{change}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {/* 4. Markdown Files Distribution Table */}
+            <div className="rounded-lg border border-[var(--outline)]/40 bg-[var(--surface)] overflow-hidden flex flex-col">
+              <div className="px-4 py-2.5 bg-[var(--surface-container-high)]/40 border-b border-[var(--outline)]/40 flex items-center justify-between">
+                <span className="text-xs font-semibold text-[var(--on-surface)]">
+                  {i18n._(msg`Distribución de Documentos Markdown y Tareas`)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('elements')}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer"
+                >
+                  <span>{i18n._(msg`Ver en Explorador`)}</span>
+                  <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse font-sans">
+                  <thead>
+                    <tr className="border-b border-[var(--outline)]/30 text-[11px] text-[var(--on-surface-variant)] bg-[var(--surface-container-low)]/30">
+                      <th className="py-2 px-3 font-semibold">{i18n._(msg`Workspace`)}</th>
+                      <th className="py-2 px-3 font-semibold">{i18n._(msg`Documento Markdown`)}</th>
+                      <th className="py-2 px-3 font-semibold">{i18n._(msg`Rama`)}</th>
+                      <th className="py-2 px-3 font-semibold text-center">{i18n._(msg`Tareas`)}</th>
+                      <th className="py-2 px-3 font-semibold">{i18n._(msg`Estado Sincronización`)}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--outline)]/20 text-[11px]">
+                    {groupedWorkspaces.flatMap((wsGroup) =>
+                      wsGroup.documents.map((doc) => (
+                        <tr key={doc.docKey} className="hover:bg-[var(--surface-container-high)]/30 transition-colors">
+                          <td className="py-2 px-3 font-medium text-[var(--on-surface)]">
+                            {wsGroup.workspaceName}
+                          </td>
+                          <td className="py-2 px-3 font-mono font-semibold text-[var(--on-surface)]">
+                            <div className="flex items-center gap-1.5">
+                              <span className="material-symbols-outlined text-[15px] text-indigo-400">description</span>
+                              <span>{doc.documentPath}</span>
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 font-mono text-[var(--on-surface-variant)]">
+                            {doc.branchName || 'main'}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-center text-[var(--on-surface)] font-semibold">
+                            {doc.tasks.length}
+                          </td>
+                          <td className="py-2 px-3">
+                            {doc.documentItem
+                              ? getDiffStatus(doc.documentItem.diffType)
+                              : (
+                                <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-medium">
+                                  <span className="material-symbols-outlined text-[15px]">check</span>
+                                  <span>{i18n._(msg`Sincronizado`)}</span>
+                                </span>
+                              )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
