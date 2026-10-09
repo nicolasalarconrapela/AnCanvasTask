@@ -7,6 +7,7 @@ import {
   testSanityConnection,
   SanityConnectionTestResult,
 } from '../services/sanityService';
+import { APP_VERSION, APP_ENV } from '../version';
 
 export interface WelcomeModalProps {
   isOpen: boolean;
@@ -159,7 +160,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
               >
                 <span>{i18n._(msg`Bienvenido a AnCanvasTask`)}</span>
                 <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] border border-[var(--outline)]">
-                  v1.0
+                  v{APP_VERSION}
+                </span>
+                <span
+                  className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border flex items-center gap-1 ${APP_ENV.badgeClass}`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.dotClass}`} />
+                  <span>{APP_ENV.label}</span>
                 </span>
               </h2>
               <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">

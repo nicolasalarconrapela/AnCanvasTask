@@ -3,6 +3,7 @@ import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { SUPPORTED_LANGUAGES, SupportedLanguageCode, dynamicActivate } from '../i18n';
+import { APP_VERSION, APP_ENV } from '../version';
 import {
   AppUserSettings,
   clearRecentFilesHistory,
@@ -677,9 +678,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Modal Footer */}
         <div id="div-settingsmodal-59" className="px-5 py-3 bg-[var(--surface)] border-t border-[var(--outline)] flex items-center justify-between shrink-0">
-          <span className="text-[11px] text-[var(--on-surface-variant)] font-mono">
-            AnTaskCanvas
-          </span>
+          <div className="flex items-center gap-2 text-[11px] text-[var(--on-surface-variant)] font-mono">
+            <span>Tasks Canvas v{APP_VERSION}</span>
+            <span>•</span>
+            <div className={`flex items-center gap-1 px-1.5 py-0.2 rounded border ${APP_ENV.badgeClass}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.dotClass}`} />
+              <span className="capitalize">{APP_ENV.label}</span>
+            </div>
+          </div>
           <button
             id="btn-settings-done-footer"
             type="button"
