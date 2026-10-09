@@ -7,6 +7,11 @@ export const taskSchema = {
   title: 'Task',
   type: 'document',
   fields: [
+    { name: 'documentKey', type: 'string', hidden: true },
+    { name: 'branchName', type: 'string' },
+    { name: 'documentPath', type: 'string' },
+    { name: 'syncOwner', type: 'string', hidden: true, readOnly: true, initialValue: (_params: any, context: any) => context.currentUser?.id },
+    { name: 'syncDeleted', type: 'boolean', hidden: true, readOnly: true },
     {
       name: 'taskId',
       title: 'Task ID',

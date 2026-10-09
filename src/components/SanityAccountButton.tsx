@@ -72,7 +72,7 @@ export function SanityAccountButton({
 
   const refreshStatus = (cfg?: SanityConfig) => {
     checkSanityAccountStatus(cfg || config).then((status) => {
-      setAccountStatus(status);
+      if (getSanityConfig().token === (cfg || config).token && getSanityConfig().projectId === (cfg || config).projectId && getSanityConfig().dataset === (cfg || config).dataset) setAccountStatus(status);
     });
     setSavedProfiles(getSavedSanityProfiles());
     setActiveProfileId(getActiveSanityProfileId());

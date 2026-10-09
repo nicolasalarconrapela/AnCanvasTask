@@ -449,19 +449,47 @@ textarea:focus-visible,
 }
 
 /* Custom scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--on-surface-variant) rgba(0, 0, 0, 0.15);
+}
+
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--outline);
+  background: var(--on-surface-variant);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--on-surface-variant);
+  background: var(--primary);
+}
+
+/* Highly visible scrollbar for complex lists and modals */
+.custom-modal-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(129, 140, 248, 0.7) rgba(0, 0, 0, 0.35);
+}
+.custom-modal-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+.custom-modal-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  margin: 4px 0;
+}
+.custom-modal-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(129, 140, 248, 0.65);
+  border-radius: 6px;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+}
+.custom-modal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(129, 140, 248, 0.95);
 }
 
 /* Tldraw Canvas M3 Theme Integration (DESIGN.md Section 4 & 14) */

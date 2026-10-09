@@ -1,7 +1,7 @@
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import React, { useState, useEffect } from 'react';
-import { formatDocumentPath, TaskDocument } from '../services/workspaceService';
+import { createTaskDocument, formatDocumentPath, TaskDocument } from '../services/workspaceService';
 
 interface NewTaskDocumentModalProps {
   isOpen: boolean;
@@ -50,15 +50,7 @@ export const NewTaskDocumentModal: React.FC<NewTaskDocumentModalProps> = ({
 
     const starterContent = `# ${cleanName}${cleanFolder ? ` - ${cleanFolder}` : ''}\n\n## General\n- [ ] Tarea inicial\n  id: task_1\n  priority: P1\n`;
 
-    const newDoc: TaskDocument = {
-      id: `doc_${Date.now()}`,
-      name: cleanName,
-      folder: cleanFolder,
-      path: finalPath,
-      content: starterContent,
-      lastSavedContent: starterContent,
-      updatedAt: new Date().toISOString(),
-    };
+    const newDoc = createTaskDocument(cleanName, starterContent, cleanFolder);
 
     onCreateDocument(newDoc);
     onShowToast(_(msg`Archivo "${finalPath}" creado con éxito`), 'success');

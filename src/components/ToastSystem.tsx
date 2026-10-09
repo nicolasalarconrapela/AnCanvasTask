@@ -40,16 +40,28 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onDismis
 const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toast, onDismiss }) => {
   const { _ } = useLingui();
   const [isClosing, setIsClosing] = useState(false);
+  const duration = toast.duration || (toast.action ? 6000 : 3500);
+  const totalSeconds = Math.ceil(duration / 1000);
+  const [secondsLeft, setSecondsLeft] = useState(totalSeconds);
 
   useEffect(() => {
-    const duration = toast.duration || (toast.action ? 6000 : 3500);
     const timer = setTimeout(() => {
       setIsClosing(true);
       setTimeout(onDismiss, 200);
     }, duration);
 
-    return () => clearTimeout(timer);
-  }, [toast, onDismiss]);
+    let interval: NodeJS.Timeout | undefined;
+    if (duration >= 10000) {
+      interval = setInterval(() => {
+        setSecondsLeft((prev) => Math.max(0, prev - 1));
+      }, 1000);
+    }
+
+    return () => {
+      clearTimeout(timer);
+      if (interval) clearInterval(interval);
+    };
+  }, [duration, onDismiss]);
 
   const handleManualDismiss = () => {
     setIsClosing(true);
@@ -92,11 +104,17 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
 
   const config = typeConfig[toast.type || 'info'];
 
+  const actionLabel = toast.action
+    ? duration >= 10000 && /\(\d+s\)/.test(toast.action.label)
+      ? toast.action.label.replace(/\(\d+s\)/, `(${secondsLeft}s)`)
+      : toast.action.label
+    : '';
+
   return (
     <div
       id={`toast-card-${toast.id}`}
       role={toast.type === 'error' ? 'alert' : 'status'}
-      className={`pointer-events-auto flex items-center justify-between gap-3 px-3 py-2 rounded-md border ${config.borderClass} ${config.bgClass} shadow-md text-xs font-sans text-[var(--on-surface)] transition-all duration-150 ${
+      className={`pointer-events-auto relative overflow-hidden flex items-center justify-between gap-3 px-3 py-2 rounded-md border ${config.borderClass} ${config.bgClass} shadow-md text-xs font-sans text-[var(--on-surface)] transition-all duration-150 ${
         isClosing ? 'opacity-0 translate-y-1' : 'opacity-100 translate-y-0'
       }`}
     >
@@ -118,9 +136,10 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
               toast.action?.onClick();
               handleManualDismiss();
             }}
-            className="px-2 py-0.5 rounded bg-[var(--primary)] text-[var(--on-primary)] font-medium text-[11px] hover:brightness-110 active:opacity-90 transition-opacity cursor-pointer"
+            className="px-2 py-0.5 rounded bg-[var(--primary)] text-[var(--on-primary)] font-medium text-[11px] hover:brightness-110 active:opacity-90 transition-opacity cursor-pointer flex items-center gap-1"
           >
-            {toast.action.label}
+            <span className="material-symbols-outlined text-[13px]">undo</span>
+            <span>{actionLabel}</span>
           </button>
         )}
 
@@ -134,6 +153,18 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
           <span className="material-symbols-outlined text-[15px]">close</span>
         </button>
       </div>
+
+      {duration >= 10000 && (
+        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-black/30 overflow-hidden">
+          <div
+            className="h-full bg-amber-400 transition-all ease-linear"
+            style={{
+              width: `${(secondsLeft / totalSeconds) * 100}%`,
+              transitionDuration: '1000ms',
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };

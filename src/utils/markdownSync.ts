@@ -1,4 +1,4 @@
-import { TaskPriority } from '../shapes/TaskShapeUtil';
+import type { TaskPriority } from './taskMarkdown';
 
 export interface TaskUpdatePayload {
   id?: string;
@@ -543,160 +543,29 @@ export function findDependentTasks(
  * Updates a specific task's title, completed status, or priority in a markdown string
  * while preserving unknown metadata, surrounding text, comments, and structure.
  */
-export function updateTaskInMarkdown(
-  markdown: string,
-  taskId: string,
-  updates: TaskUpdatePayload,
-  taskTitle?: string
-): string {
+export function updateTaskInMarkdown(markdown: string, taskId: string, updates: TaskUpdatePayload, taskTitle?: string): string {
   const lines = markdown.split(/\r?\n/);
-  const { taskBlocks } = scanTaskBlocks(markdown);
-
-  const targetBlock = findMatchingTaskBlock(taskBlocks, taskId, taskTitle || updates.title);
-
-  if (!targetBlock) {
-    return markdown;
-  }
-
-  const resultLines = [...lines];
-
-  // 1. Update task line (status / title)
-  const taskLine = resultLines[targetBlock.taskLineIndex];
-  const taskLineMatch = taskLine.match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/);
-
-  if (taskLineMatch) {
-    const prefix = taskLineMatch[1];
-    let checkChar = taskLineMatch[2];
-    const suffix = taskLineMatch[3];
-    let titleContent = taskLineMatch[4];
-
-    if (updates.completed !== undefined) {
-      checkChar = updates.completed ? 'x' : ' ';
-    } else if (updates.status !== undefined) {
-      checkChar = updates.status === 'done' ? 'x' : ' ';
-    }
-
-    if (updates.title !== undefined) {
-      titleContent = updates.title;
-    }
-
-    resultLines[targetBlock.taskLineIndex] = `${prefix}${checkChar}${suffix}${titleContent}`;
-  }
-
-  // 2. Update priority line or add one if changed
-  if (updates.priority !== undefined) {
-    let foundPriority = false;
-    for (let i = targetBlock.taskLineIndex + 1; i <= targetBlock.endLineIndex; i++) {
-      if (resultLines[i].match(/^\s*(?:[-*]\s*)?Priority\s*:\s*(.+)$/i)) {
-        resultLines[i] = resultLines[i].replace(
-          /(Priority\s*:\s*)(.+)$/i,
-          `$1${updates.priority}`
-        );
-        foundPriority = true;
-        break;
-      }
-    }
-
-    if (!foundPriority) {
-      const baseIndent = targetBlock.indentation ? `${targetBlock.indentation}  ` : '  ';
-      const newPriorityLine = `${baseIndent}- Priority: ${updates.priority}`;
-      resultLines.splice(targetBlock.taskLineIndex + 1, 0, newPriorityLine);
-    }
-  }
-
-  // 3. Update status line if explicitly given
-  if (updates.status !== undefined) {
-    let foundStatus = false;
-    for (let i = targetBlock.taskLineIndex + 1; i <= targetBlock.endLineIndex; i++) {
-      if (resultLines[i].match(/^\s*(?:[-*]\s*)?Status\s*:\s*(.+)$/i)) {
-        resultLines[i] = resultLines[i].replace(
-          /(Status\s*:\s*)(.+)$/i,
-          `$1${updates.status}`
-        );
-        foundStatus = true;
-        break;
-      }
-    }
-
-    if (!foundStatus && !['todo', 'done'].includes(updates.status)) {
-      const baseIndent = targetBlock.indentation ? `${targetBlock.indentation}  ` : '  ';
-      const newStatusLine = `${baseIndent}- Status: ${updates.status}`;
-      resultLines.splice(targetBlock.taskLineIndex + 1, 0, newStatusLine);
-    }
-  }
-
-  // 4. Update tags line if given
-  if (updates.tags !== undefined) {
-    let foundTags = false;
-    for (let i = targetBlock.taskLineIndex + 1; i <= targetBlock.endLineIndex; i++) {
-      if (resultLines[i] && resultLines[i].match(/^\s*(?:[-*]\s*)?(?:Tags|Labels)\s*:\s*(.+)$/i)) {
-        if (updates.tags.length > 0) {
-          resultLines[i] = resultLines[i].replace(
-            /((?:Tags|Labels)\s*:\s*)(.+)$/i,
-            `$1${updates.tags.join(', ')}`
-          );
-        } else {
-          resultLines.splice(i, 1);
-        }
-        foundTags = true;
-        break;
-      }
-    }
-
-    if (!foundTags && updates.tags.length > 0) {
-      const baseIndent = targetBlock.indentation ? `${targetBlock.indentation}  ` : '  ';
-      const newTagsLine = `${baseIndent}- Tags: ${updates.tags.join(', ')}`;
-      resultLines.splice(targetBlock.taskLineIndex + 1, 0, newTagsLine);
-    }
-  }
-
-  // 5. Update blockedBy line if given
-  if (updates.blockedBy !== undefined) {
-    let foundBlockedBy = false;
-    for (let i = targetBlock.taskLineIndex + 1; i <= targetBlock.endLineIndex; i++) {
-      if (resultLines[i] && resultLines[i].match(/^\s*(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:\s*(.+)$/i)) {
-        if (updates.blockedBy.trim().length > 0) {
-          resultLines[i] = resultLines[i].replace(
-            /(Blocked\s*(?:by|-by)?\s*:\s*)(.+)$/i,
-            `$1${updates.blockedBy.trim()}`
-          );
-        } else {
-          resultLines.splice(i, 1);
-        }
-        foundBlockedBy = true;
-        break;
-      }
-    }
-
-    if (!foundBlockedBy && updates.blockedBy.trim().length > 0) {
-      const baseIndent = targetBlock.indentation ? `${targetBlock.indentation}  ` : '  ';
-      const newBlockedLine = `${baseIndent}- Blocked by: ${updates.blockedBy.trim()}`;
-      resultLines.splice(targetBlock.taskLineIndex + 1, 0, newBlockedLine);
-    }
-  }
-
-  // 6. Update or insert ID line if given
-  if (updates.id !== undefined && updates.id.trim().length > 0) {
-    let foundId = false;
-    for (let i = targetBlock.taskLineIndex + 1; i <= targetBlock.endLineIndex; i++) {
-      if (resultLines[i] && resultLines[i].match(/^(?:[-*]\s*)?ID\s*:\s*(.+)$/i)) {
-        resultLines[i] = resultLines[i].replace(
-          /(ID\s*:\s*)(.+)$/i,
-          `$1${updates.id.trim()}`
-        );
-        foundId = true;
-        break;
-      }
-    }
-
-    if (!foundId) {
-      const baseIndent = targetBlock.indentation ? `${targetBlock.indentation}  ` : '  ';
-      const newIdLine = `${baseIndent}- ID: ${updates.id.trim()}`;
-      resultLines.splice(targetBlock.taskLineIndex + 1, 0, newIdLine);
-    }
-  }
-
-  return resultLines.join('\n');
+  const block = findMatchingTaskBlock(scanTaskBlocks(markdown).taskBlocks, taskId, taskTitle || updates.title);
+  if (!block) return markdown;
+  const taskLine = lines[block.taskLineIndex].match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/)!;
+  const completed = updates.completed ?? (updates.status !== undefined ? updates.status === 'done' : /[xX]/.test(taskLine[2]));
+  lines[block.taskLineIndex] = `${taskLine[1]}${completed ? 'x' : ' '}${taskLine[3]}${updates.title ?? taskLine[4]}`;
+  const body = lines.slice(block.taskLineIndex + 1, block.endLineIndex + 1);
+  const metadata = (pattern: RegExp, label: string, value: string | undefined, insert = true) => {
+    if (value === undefined) return;
+    const index = body.findIndex(line => pattern.test(line));
+    if (index >= 0) {
+      if (value) body[index] = body[index].replace(pattern, (_, prefix) => prefix + value);
+      else body.splice(index, 1);
+    } else if (value && insert) body.unshift(`${block.indentation}  - ${label}: ${value}`);
+  };
+  metadata(/^(\s*(?:[-*]\s*)?Priority\s*:\s*).*$/i, 'Priority', updates.priority);
+  metadata(/^(\s*(?:[-*]\s*)?Status\s*:\s*).*$/i, 'Status', updates.status, !['todo', 'done'].includes(updates.status || ''));
+  metadata(/^(\s*(?:[-*]\s*)?(?:Tags|Labels)\s*:\s*).*$/i, 'Tags', updates.tags?.join(', '));
+  metadata(/^(\s*(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:\s*).*$/i, 'Blocked by', updates.blockedBy?.trim());
+  metadata(/^(\s*(?:[-*]\s*)?ID\s*:\s*).*$/i, 'ID', updates.id?.trim());
+  lines.splice(block.taskLineIndex + 1, block.endLineIndex - block.taskLineIndex, ...body);
+  return lines.join('\n');
 }
 
 /**

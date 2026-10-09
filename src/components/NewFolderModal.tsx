@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
-import { formatDocumentPath, TaskDocument } from '../services/workspaceService';
+import { createTaskDocument, formatDocumentPath, TaskDocument } from '../services/workspaceService';
 
 interface NewFolderModalProps {
   isOpen: boolean;
@@ -36,19 +36,10 @@ export const NewFolderModal: React.FC<NewFolderModalProps> = ({
     }
 
     const cleanDocName = docName.trim() || 'TASKS.md';
-    const finalPath = formatDocumentPath(cleanFolder, cleanDocName);
 
     const starterContent = `# ${cleanDocName} - ${cleanFolder}\n\n## Tareas Iniciales\n- [ ] Configurar módulo ${cleanFolder}\n  id: ${cleanFolder.replace(/[^a-zA-Z0-9]/g, '_')}_init\n  priority: P0\n`;
 
-    const newDoc: TaskDocument = {
-      id: `doc_${Date.now()}`,
-      name: cleanDocName,
-      folder: cleanFolder,
-      path: finalPath,
-      content: starterContent,
-      lastSavedContent: starterContent,
-      updatedAt: new Date().toISOString(),
-    };
+    const newDoc = createTaskDocument(cleanDocName, starterContent, cleanFolder);
 
     onCreateFolderWithDoc(newDoc);
     onShowToast(i18n._(msg`Carpeta "${cleanFolder}/" creada con "${cleanDocName}"`), 'success');

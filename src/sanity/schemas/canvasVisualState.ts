@@ -7,6 +7,8 @@ export const canvasVisualStateSchema = {
   title: 'Canvas Visual State',
   type: 'document',
   fields: [
+    { name: 'syncOwner', type: 'string', hidden: true, readOnly: true, initialValue: (_params: any, context: any) => context.currentUser?.id },
+    { name: 'syncDeleted', type: 'boolean', hidden: true, readOnly: true },
     {
       name: 'projectId',
       title: 'Project ID',
