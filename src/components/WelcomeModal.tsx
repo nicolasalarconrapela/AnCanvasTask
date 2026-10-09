@@ -163,13 +163,9 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                   v{APP_VERSION}
                 </span>
                 <span
-                  className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border flex items-center gap-1 ${
-                    APP_ENV.isDev
-                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                      : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                  }`}
+                  className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border flex items-center gap-1 ${APP_ENV.badgeClass}`}
                 >
-                  <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.isDev ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                  <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.dotClass}`} />
                   <span>{APP_ENV.label}</span>
                 </span>
               </h2>

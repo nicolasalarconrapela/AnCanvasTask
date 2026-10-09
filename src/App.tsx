@@ -4326,14 +4326,10 @@ export default function App() {
               </span>
               <span
                 id="badge-app-env"
-                className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.2 rounded border flex items-center gap-1 ${
-                  APP_ENV.isDev
-                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                }`}
-                title={`Entorno: ${APP_ENV.mode}`}
+                className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.2 rounded border flex items-center gap-1 ${APP_ENV.badgeClass}`}
+                title={`Entorno: ${APP_ENV.label} (${APP_ENV.mode})`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.isDev ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.dotClass}`} />
                 <span className="hidden sm:inline">{APP_ENV.label}</span>
               </span>
             </div>
@@ -4672,9 +4668,9 @@ export default function App() {
                 {/* Application Version & Environment info row */}
                 <div id="div-header-more-menu-version-info" className="px-3 py-2 border-t border-[var(--outline)] mt-1 flex items-center justify-between text-[10px] text-[var(--on-surface-variant)] font-mono">
                   <span>v{APP_VERSION}</span>
-                  <div className="flex items-center gap-1 capitalize px-1.5 py-0.2 rounded bg-[var(--surface)] border border-[var(--outline)]">
-                    <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.isDev ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-                    <span>{APP_ENV.mode}</span>
+                  <div className={`flex items-center gap-1 px-1.5 py-0.2 rounded border ${APP_ENV.badgeClass}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.dotClass}`} />
+                    <span className="capitalize">{APP_ENV.label}</span>
                   </div>
                 </div>
               </div>
@@ -4958,9 +4954,9 @@ export default function App() {
               className="mt-auto pt-2.5 border-t border-[var(--outline)] flex items-center justify-between text-[10px] text-[var(--on-surface-variant)] font-mono shrink-0"
             >
               <span className="text-[10px] text-[var(--on-surface-variant)]">v{APP_VERSION}</span>
-              <div className="flex items-center gap-1">
-                <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.isDev ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-                <span className="capitalize">{APP_ENV.mode}</span>
+              <div className={`flex items-center gap-1 px-1.5 py-0.2 rounded border ${APP_ENV.badgeClass}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.dotClass}`} />
+                <span className="capitalize">{APP_ENV.label}</span>
               </div>
             </div>
           </aside>

@@ -681,9 +681,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="flex items-center gap-2 text-[11px] text-[var(--on-surface-variant)] font-mono">
             <span>Tasks Canvas v{APP_VERSION}</span>
             <span>•</span>
-            <div className="flex items-center gap-1">
-              <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.isDev ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-              <span className="capitalize">{APP_ENV.mode}</span>
+            <div className={`flex items-center gap-1 px-1.5 py-0.2 rounded border ${APP_ENV.badgeClass}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${APP_ENV.dotClass}`} />
+              <span className="capitalize">{APP_ENV.label}</span>
             </div>
           </div>
           <button
