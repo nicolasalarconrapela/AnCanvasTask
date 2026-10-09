@@ -1179,7 +1179,7 @@ export function normalizeSanityWorkspaceDoc(doc: any): any {
     const taskDocuments = rawDocs.length > 0
       ? rawDocs.map((d: any) => ({
           ...d,
-          id: d.id || `doc_${sanitizeSanityDocId(d.path || d.name || 'TASKS.md')}`,
+          id: d.id || d._key || `doc_${sanitizeSanityDocId(d.path || d.name || 'TASKS.md')}`,
           name: d.name || 'TASKS.md',
           folder: d.folder || '',
           path: d.path || (d.folder ? `${d.folder}/${d.name || 'TASKS.md'}` : d.name || 'TASKS.md'),

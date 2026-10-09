@@ -99,11 +99,12 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
 
   const toggleSelectAll = () => {
     if (filteredItems.length === 0) return;
-    const allSelected = filteredItems.every((item) => selectedItemIds.has(item.id));
+    const actionableItems = filteredItems.filter(item => item.entityType !== 'task_document');
+    const allSelected = actionableItems.every((item) => selectedItemIds.has(item.id));
     if (allSelected) {
       clearSelection();
     } else {
-      setSelectedItemIds(new Set(filteredItems.map((item) => item.id)));
+      setSelectedItemIds(new Set(actionableItems.map((item) => item.id)));
     }
   };
 
@@ -643,7 +644,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
 
     // 2. Map all task items into matching workspace groups
     for (const item of filteredItems) {
-      if (item.entityType === 'task') {
+      if (item.entityType === 'task' || item.entityType === 'task_document') {
         const rawWsId = item.workspaceId || 'unassigned';
         const cleanWsId = rawWsId.replace(/^ws_/, '').replace(/^workspace-/, '');
         const cleanWsName = (item.workspaceName || '').trim().toLowerCase();
@@ -678,6 +679,15 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   }, [filteredItems, i18n]);
 
   const renderItemRow = (item: SyncItemDiff, isChildTask = false) => {
+    if (item.entityType === 'task_document') return (
+      <div key={item.id} data-document-path={item.documentPath} className="flex items-center justify-between gap-3 pl-10 pr-4 py-2 border-b border-[var(--outline)]/10">
+        <div className="min-w-0">
+          <div className="text-sm text-[var(--on-surface)] truncate">{item.documentPath}</div>
+          <div className="text-xs text-[var(--on-surface-variant)]">{item.branchName}</div>
+        </div>
+        {getDiffStatus(item.diffType)}
+      </div>
+    );
     const isExpanded = expandedItemId === item.id;
     const isResolving = resolvingItemId === item.id;
     const isMenuOpen = activeMenuId === item.id;

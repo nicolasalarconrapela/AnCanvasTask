@@ -159,10 +159,21 @@ try {
   assert(typingStoreWrites <= 1, `Typing serialized the workspace ${typingStoreWrites} times`);
   assert.equal(mutations, beforeTyping, 'Typing triggered remote saves before the debounce settled');
   await waitUntil(async () => (await b.content()).includes('today typingburst'), 'Debounced edits did not reach the other browser');
+  for (const [name, content] of [['README.md', '# First readme\n'], ['README.md', '# Second readme\n']]) {
+    await a.evaluate(`(()=>{const input=document.querySelector('#div-app-root > input[type=file]');const transfer=new DataTransfer();transfer.items.add(new File([${JSON.stringify(content)}],${JSON.stringify(name)},{type:'text/markdown'}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await waitUntil(async () => await b.content() === content, 'Imported Markdown did not reach the other browser');
+  }
+  const savedDocs = documents.get('workspace-w').branches[0].taskDocuments;
+  assert.equal(savedDocs.length, 3, 'Import replaced an existing document');
+  assert.equal(new Set(savedDocs.map(doc => doc.id)).size, 3, 'Imported document identities collided');
+  assert(savedDocs[0].content.includes('today typingburst'), 'Import overwrote the original task document');
+  assert.deepEqual(savedDocs.slice(1).map(doc => doc.content), ['# First readme\n', '# Second readme\n']);
+  await a.evaluate("[...document.querySelectorAll('button')].find(button=>button.innerText.includes('Sync & Override'))?.click()");
+  await waitUntil(() => a.evaluate("document.querySelectorAll('[data-document-path=\"README.md\"]').length===2"), 'Sync view did not distinguish both Markdown files');
   assert.deepEqual(a.errors, []); assert.deepEqual(b.errors, []);
   console.log(JSON.stringify({ browsers: ['Edge', 'Chrome'], isolatedProfiles: true, sequentialEdits: true,
     bidirectionalRealtime: true, concurrentTitleEdits: true, cursorPreserved: true, typingStoreWrites,
-    typingDebounced: true, mutations, uncaughtErrors: 0 }));
+    typingDebounced: true, separateMarkdownFiles: true, mutations, uncaughtErrors: 0 }));
 } catch(error) {
   for (const browser of browsers) {
     try { console.error(JSON.stringify({errors:browser.errors,body:await browser.evaluate("document.body?.innerText.slice(-1800)")})); }

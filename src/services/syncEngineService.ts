@@ -64,6 +64,37 @@ export interface SyncComparisonResult {
   hasPendingChanges: boolean;
 }
 
+// Markdown files retain their own identity even when names or task IDs repeat.
+export function compareMarkdownDocuments(store: WorkspaceStoreState, remote: Workspace[]): SyncItemDiff[] {
+  const items: SyncItemDiff[] = [];
+  const comparable = (doc: any) => doc && JSON.stringify([doc.id, doc.name, doc.folder || '', doc.path, doc.content]);
+  for (const workspaceId of new Set([...store.workspaces, ...remote].map(ws => ws.id))) {
+    const localWs = store.workspaces.find(ws => ws.id === workspaceId);
+    const remoteWs = remote.find(ws => ws.id === workspaceId);
+    for (const branchName of new Set([...(localWs?.branches || []), ...(remoteWs?.branches || [])].map(branch => branch.name))) {
+      const localDocs = localWs?.branches.find(branch => branch.name === branchName)?.taskDocuments || [];
+      const remoteDocs = remoteWs?.branches.find(branch => branch.name === branchName)?.taskDocuments || [];
+      const baseDocs = store.remoteBase?.find(ws => ws.id === workspaceId)?.branches.find(branch => branch.name === branchName)?.taskDocuments || [];
+      for (const id of new Set([...localDocs, ...remoteDocs].map(doc => doc.id))) {
+        const local = localDocs.find(doc => doc.id === id), cloud = remoteDocs.find(doc => doc.id === id);
+        const base = baseDocs.find(doc => doc.id === id);
+        let diffType: SyncDifferenceType = !local ? 'only_remote' : !cloud ? 'only_local' : 'synced';
+        if (local && cloud && comparable(local) !== comparable(cloud)) {
+          diffType = !base ? 'conflict' : comparable(local) === comparable(base) ? 'remote_override'
+            : comparable(cloud) === comparable(base) ? 'local_override' : 'conflict';
+        }
+        const doc = local || cloud!;
+        items.push({ id: `md_${JSON.stringify([workspaceId, branchName, id])}`, entityType: 'task_document',
+          title: doc.path, subtitle: branchName, workspaceId, workspaceName: localWs?.name || remoteWs?.name,
+          branchName, documentPath: doc.path, diffType, localData: local, remoteData: cloud,
+          localTimestamp: local?.updatedAt, remoteTimestamp: cloud?.updatedAt,
+          summaryChanges: [], resolutionStrategy: diffType === 'only_remote' || diffType === 'remote_override' ? 'keep_remote' : 'keep_local' });
+      }
+    }
+  }
+  return items;
+}
+
 /**
  * Calculates human readable relative time (Spanish)
  */
@@ -185,9 +216,12 @@ export async function analyzeSyncDifferences(
         }
 
         for (const lDoc of (lb.taskDocuments || [])) {
-          const rDoc = rb.taskDocuments?.find((d: any) => d.id === lDoc.id || d.path === lDoc.path);
+          const rDoc = rb.taskDocuments?.find((d: any) => d.id === lDoc.id);
           if (!rDoc) {
             changes.push(`Documento local "${lDoc.path}" (${lb.name}) pendiente de subir`);
+            contentDiffers = true;
+          } else if (lDoc.path !== rDoc.path || lDoc.name !== rDoc.name || lDoc.folder !== rDoc.folder) {
+            changes.push(`Documento "${lDoc.id}": ${rDoc.path} → ${lDoc.path}`);
             contentDiffers = true;
           } else if ((lDoc.content || '').trim() !== (rDoc.content || '').trim()) {
             contentDiffers = true;
@@ -260,6 +294,8 @@ export async function analyzeSyncDifferences(
       });
     }
   }
+
+  items.push(...compareMarkdownDocuments(workspaceStore, remoteWorkspaces));
 
   // 3. Compare Individual Tasks grouped by Workspace & Document vs Sanity Task Documents
   const remoteTasks = remoteSanityDocs.filter((d) => d._type === 'task');
@@ -496,6 +532,8 @@ export async function executeBatchSync(
 
   try {
     for (const item of items) {
+      // Files are displayed individually but persisted with their workspace.
+      if (item.entityType === 'task_document') continue;
       if (item.diffType === 'synced' && mode === 'smart') continue;
 
       let strategy: 'keep_local' | 'keep_remote' | 'merge' = item.resolutionStrategy;

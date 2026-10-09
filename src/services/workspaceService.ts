@@ -296,8 +296,13 @@ export const logWorkspaceWarn = (action: string, details?: any) => {
 };
 
 // Sanitization & Safe Defaults
+export function createTaskDocument(name: string, content: string, folder = ''): TaskDocument {
+  return sanitizeTaskDocument({ id: `doc_${crypto.randomUUID()}`, name, folder,
+    path: formatDocumentPath(folder, name), content, lastSavedContent: content });
+}
+
 export function sanitizeTaskDocument(rawDoc: any, fallbackId?: string): TaskDocument {
-  const id = rawDoc?.id || fallbackId || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const id = rawDoc?.id || rawDoc?._key || fallbackId || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const name = rawDoc?.name || 'TASKS.md';
   const folder = rawDoc?.folder || '';
   const path = rawDoc?.path || formatDocumentPath(folder, name);

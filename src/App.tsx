@@ -95,6 +95,7 @@ import { dynamicActivate, formatTime, formatTaskCount, formatSectionCount, forma
 import {
   loadWorkspaceStore,
   saveWorkspaceStore,
+  createTaskDocument,
   flushWorkspaceStoreSaves,
   getActiveWorkspace,
   getActiveBranch,
@@ -2091,15 +2092,10 @@ export default function App() {
         setMarkdownInput(newDoc.content);
         setLastSavedMarkdown(newDoc.lastSavedContent);
 
-        if (editor) {
-          loadTasksFromMarkdown(editor, newDoc.content, newDoc.visualState);
-          triggerDebouncedVisualSave(editor);
-        }
-
         return nextStore;
       });
     },
-    [editor, triggerDebouncedVisualSave]
+    []
   );
 
   const handleRenameTaskDocument = useCallback(
@@ -3004,37 +3000,15 @@ export default function App() {
         const fileKey = activeDocKeyRef.current;
         const text = await file.text();
         if (getSyncSession() !== fileSession || activeDocKeyRef.current !== fileKey) return;
-        setCurrentFileName(file.name);
-        setMarkdownInput(text);
-        setLastSavedMarkdown(text);
-
-        if (editor) {
-          const scheduledSession = getSyncSession();
-        const scheduledKey = activeDocKeyRef.current;
-        const savedVisualState = await loadCanvasVisualState(scheduledKey);
-        if (getSyncSession() !== scheduledSession || activeDocKeyRef.current !== scheduledKey) return;
-          const { taskCount, groupCount } = loadTasksFromMarkdown(
-            editor,
-            text,
-            savedVisualState
-          );
-          const recents = recordRecentFile(file.name, taskCount, groupCount);
-          setUserSettings((prev) => ({ ...prev, recentFiles: recents }));
-
-          if (taskCount > 0 || groupCount > 0) {
-            triggerDebouncedVisualSave(editor);
-            pushToast(i18n._(msg`"${file.name}" cargado (${taskCount} tareas en ${groupCount} secciones)`), 'success');
-          } else {
-            pushToast(i18n._(msg`"${file.name}" cargado, pero no contiene tareas válidas (- [ ] ...)`), 'warning');
-          }
-        } else {
-          pushToast(i18n._(msg`"${file.name}" cargado en memoria`), 'info');
-        }
+        handleCreateTaskDocument(createTaskDocument(file.name, text));
+        const groups = parseTasksMarkdown(text);
+        const recents = recordRecentFile(file.name, groups.reduce((count, group) => count + group.tasks.length, 0), groups.length);
+        setUserSettings((prev) => ({ ...prev, recentFiles: recents }));
       } catch (err) {
         pushToast(i18n._(msg`Error al leer "${file.name}"`), 'error');
       }
     },
-    [editor, triggerDebouncedVisualSave, pushToast]
+    [handleCreateTaskDocument, pushToast]
   );
 
   const handleImportMarkdownFromModal = useCallback(

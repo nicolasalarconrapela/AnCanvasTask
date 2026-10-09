@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { beforeEach, afterEach, test } from 'node:test';
 import { DocumentSync, SyncConflict, mergeSyncValue, mergeMarkdown, buildTaskDocumentId, deletionMarkerId } from '../src/services/documentSyncService';
 import { beginSyncSession, getSyncSession, invalidateSyncSession } from '../src/services/syncSessionService';
-import { createEmptyWorkspace, loadWorkspaceStore, saveWorkspaceStore, flushWorkspaceStoreSaves, sanitizeWorkspace } from '../src/services/workspaceService';
+import { createEmptyWorkspace, createTaskDocument, loadWorkspaceStore, saveWorkspaceStore, flushWorkspaceStoreSaves, sanitizeWorkspace } from '../src/services/workspaceService';
+import { compareMarkdownDocuments } from '../src/services/syncEngineService';
 import { applyRemoteTask, clearSanityConfig, getSanityConfig, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments, subscribeToSanityLiveChanges } from '../src/services/sanityService';
 import { scanTaskBlocks, updateTaskInMarkdown } from '../src/utils/markdownSync';
 
@@ -128,6 +129,45 @@ test('first login has an empty isolated workspace and does not publish examples'
   assert.equal(store.scope, getSyncSession()!.scope);
   assert.equal(scanTaskBlocks(store.workspaces[0].branches[0].taskDocuments[0].content).taskBlocks.length, 0);
   assert.equal(server.commits, 0);
+});
+
+test('Markdown files with the same name retain separate IDs and sync entries without tasks', async () => {
+  const first = createTaskDocument('README.md', '# First document\n');
+  const second = createTaskDocument('README.md', '# Second document\n', 'docs');
+  assert.notEqual(first.id, second.id);
+  const raw = workspace(); raw.branches[0].taskDocuments = [first, second] as any;
+  server.documents.set(raw._id, raw); sync.observe(raw);
+  const result = await sync.write(raw, config);
+  const cloud = workspacesFromSanityDocuments([result]);
+  assert.deepEqual(cloud[0].branches[0].taskDocuments.map((doc: any) => doc.content), [first.content, second.content]);
+  const store = { scope: getSyncSession()!.scope, workspaces: [cloud[0]], activeWorkspaceId: 'w', remoteBase: cloud };
+  const entries = compareMarkdownDocuments(store, cloud);
+  assert.equal(entries.length, 2); assert.equal(new Set(entries.map(entry => entry.id)).size, 2);
+  assert.deepEqual(entries.map(entry => entry.documentPath), ['README.md', 'docs/README.md']);
+  assert(entries.every(entry => entry.diffType === 'synced'));
+});
+
+test('Sanity array keys distinguish two documents named README.md without application IDs', () => {
+  const raw = workspace(); raw.branches[0].taskDocuments = [
+    { _key: 'first', name: 'README.md', path: 'README.md', content: '# First' },
+    { _key: 'second', name: 'README.md', path: 'README.md', content: '# Second' },
+  ] as any;
+  const normalized = normalizeSanityWorkspaceDoc(raw);
+  assert.deepEqual(normalized.branches[0].taskDocuments.map((doc: any) => doc.id), ['first', 'second']);
+  assert.equal(mergeSyncValue([], normalized.branches[0].taskDocuments, normalized.branches[0].taskDocuments).length, 2);
+});
+
+test('tasks with the same ID in separate Markdown files are saved and hydrated independently', async () => {
+  const raw = workspace(); const other = { ...raw.branches[0].taskDocuments[0], id: 'other', name: 'README.md', path: 'docs/README.md', content: markdown.replace('[ ] A', '[ ] B') };
+  raw.branches[0].taskDocuments.push(other);
+  server.documents.set(raw._id, raw); sync.observe(raw);
+  const result = await sync.write(raw, config);
+  assert.equal(server.documents.get(buildTaskDocumentId('x', 'w', 'main::d')).title, 'A');
+  assert.equal(server.documents.get(buildTaskDocumentId('x', 'w', 'main::other')).title, 'B');
+  const hydrated = workspacesFromSanityDocuments([...server.documents.values()]);
+  assert(hydrated[0].branches[0].taskDocuments[0].content.includes('[ ] A'));
+  assert(hydrated[0].branches[0].taskDocuments[1].content.includes('[ ] B'));
+  assert.equal(result.branches[0].taskDocuments.length, 2);
 });
 
 test('A -> logout -> B -> A isolates and restores browser state', async () => {
