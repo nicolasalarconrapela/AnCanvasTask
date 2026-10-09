@@ -516,6 +516,72 @@ export async function resolveSyncItem(
       taskDocuments: b.taskDocuments.map(d => d.id === doc.id ? { ...d, content: applyTaskToMarkdown(d.content, task) } : d) } : b) };
     const parent = documentSync.base(ws._id || `workspace-${ws.id}`, session);
     if (parent?._rev) { resolved._rev = parent._rev; baseline = normalizeSanityWorkspaceDoc(parent); }
+  } else if (item.entityType === 'task_document') {
+    const ws = workspaceStore.workspaces.find(w => w.id === item.workspaceId) ||
+      (item.remoteData ? workspaceStore.workspaces.find(w => w.id === item.remoteData.workspaceId) : undefined) ||
+      workspaceStore.workspaces[0];
+    if (!ws) return { success: false, message: 'No se encontró el workspace asociado al documento' };
+
+    const branchName = item.branchName || ws.activeBranchName || 'main';
+    let branch = ws.branches.find(b => b.name === branchName);
+    if (!branch) {
+      branch = { name: branchName, taskDocuments: [] };
+      ws.branches.push(branch);
+    }
+
+    if (strategy === 'keep_remote') {
+      if (!item.remoteData) return { success: false, message: 'No hay datos remotos para importar' };
+      const docId = item.remoteData.id || item.localData?.id || `doc-${Date.now()}`;
+      const existingIndex = branch.taskDocuments.findIndex(d => d.id === docId || d.path === item.documentPath);
+      const updatedDoc = {
+        ...item.remoteData,
+        id: docId,
+        path: item.documentPath || item.remoteData.path || item.title,
+        updatedAt: item.remoteData.updatedAt || new Date().toISOString(),
+      };
+      const updatedDocs = existingIndex >= 0
+        ? branch.taskDocuments.map((d, i) => i === existingIndex ? updatedDoc : d)
+        : [...branch.taskDocuments, updatedDoc];
+
+      resolved = {
+        ...ws,
+        branches: ws.branches.map(b => b.name === branchName ? { ...b, taskDocuments: updatedDocs } : b),
+      };
+      documentSync.discardPending(ws._id || `workspace-${ws.id}`, session);
+    } else {
+      if (!item.localData && strategy !== 'merge') return { success: false, message: 'No hay datos locales para enviar' };
+      let finalDoc = item.localData || item.remoteData;
+      if (strategy === 'merge') {
+        const localContent = item.localData?.content || '';
+        const remoteContent = item.remoteData?.content || '';
+        const mergedContent = localContent || remoteContent;
+        finalDoc = { ...(item.localData || item.remoteData), content: mergedContent, updatedAt: new Date().toISOString() };
+      }
+
+      const existingIndex = branch.taskDocuments.findIndex(d => d.id === finalDoc.id || d.path === finalDoc.path);
+      const updatedDocs = existingIndex >= 0
+        ? branch.taskDocuments.map((d, i) => i === existingIndex ? finalDoc : d)
+        : [...branch.taskDocuments, finalDoc];
+
+      const updatedWs = {
+        ...ws,
+        branches: ws.branches.map(b => b.name === branchName ? { ...b, taskDocuments: updatedDocs } : b),
+      };
+
+      const id = updatedWs._id || `workspace-${updatedWs.id}`;
+      const document = await documentSync.resolve({
+        ...documentSync.base(id, session),
+        _id: id,
+        _type: 'workspace',
+        workspaceId: updatedWs.id,
+        name: updatedWs.name,
+        githubRepo: updatedWs.githubRepo,
+        branches: updatedWs.branches,
+        activeBranchName: updatedWs.activeBranchName,
+        createdAt: updatedWs.createdAt,
+      }, config);
+      resolved = normalizeSanityWorkspaceDoc(document);
+    }
   } else return { success: false, message: 'Tipo de elemento no compatible' };
   assertSyncSession(session);
   const replace = (list: Workspace[], value = resolved) => [...list.filter(w => w.id !== resolved.id), value];
@@ -755,6 +821,70 @@ export async function deleteSyncItem(
     return {
       success: true,
       message: `Tarea "${item.title.replace(/^Tarea:\s*(\[[^\]]+\]\s*)?/, '')}" eliminada ${scopeLabel}`,
+      updatedStore,
+    };
+  }
+
+  if (item.entityType === 'task_document') {
+    let updatedStore: WorkspaceStoreState | undefined;
+
+    if (scope === 'local' || scope === 'both') {
+      const updatedWorkspaces = workspaceStore.workspaces.map((w) => {
+        if (w.id !== item.workspaceId) return w;
+        return {
+          ...w,
+          branches: w.branches.map((b) => {
+            if (item.branchName && b.name !== item.branchName) return b;
+            return {
+              ...b,
+              taskDocuments: b.taskDocuments.filter((d) => d.path !== item.documentPath && d.id !== item.localData?.id),
+            };
+          }),
+        };
+      });
+      updatedStore = {
+        ...workspaceStore,
+        workspaces: updatedWorkspaces,
+      };
+      saveWorkspaceStore(updatedStore);
+    }
+
+    if (scope === 'remote' || scope === 'both') {
+      if (config.projectId && config.dataset && config.token) {
+        const ws = (updatedStore || workspaceStore).workspaces.find((w) => w.id === item.workspaceId);
+        if (ws) {
+          const id = ws._id || `workspace-${ws.id}`;
+          const session = getSyncSession(config);
+          await documentSync.resolve({
+            ...documentSync.base(id, session),
+            _id: id,
+            _type: 'workspace',
+            workspaceId: ws.id,
+            name: ws.name,
+            githubRepo: ws.githubRepo,
+            branches: ws.branches,
+            activeBranchName: ws.activeBranchName,
+            createdAt: ws.createdAt,
+          }, config);
+        }
+      } else {
+        return {
+          success: false,
+          message: 'Configura el API Token de Sanity para eliminar en remoto',
+        };
+      }
+    }
+
+    const scopeLabel =
+      scope === 'both'
+        ? 'localmente y en Sanity Cloud'
+        : scope === 'remote'
+        ? 'en Sanity Cloud'
+        : 'en local';
+
+    return {
+      success: true,
+      message: `Documento "${item.title}" eliminado ${scopeLabel}`,
       updatedStore,
     };
   }
