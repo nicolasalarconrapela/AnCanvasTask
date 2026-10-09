@@ -52,10 +52,20 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   const [confirmDeleteItemId, setConfirmDeleteItemId] = useState<string | null>(null);
   const [deleteScope, setDeleteScope] = useState<'local' | 'remote' | 'both'>('local');
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<Set<string>>(new Set());
+  const [collapsedDocKeys, setCollapsedDocKeys] = useState<Set<string>>(new Set());
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState<boolean>(false);
   const [bulkDeleteScope, setBulkDeleteScope] = useState<'local' | 'remote' | 'both'>('local');
+
+  const toggleDocCollapse = (docKey: string) => {
+    setCollapsedDocKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(docKey)) next.delete(docKey);
+      else next.add(docKey);
+      return next;
+    });
+  };
 
   const pendingDeletionsRef = useRef<
     Map<
@@ -616,62 +626,160 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     }
   };
 
+  interface MarkdownDocumentGroup {
+    docKey: string;
+    docId: string;
+    documentPath: string;
+    branchName: string;
+    documentItem?: SyncItemDiff;
+    tasks: SyncItemDiff[];
+  }
+
+  interface WorkspaceGroup {
+    workspaceItem?: SyncItemDiff;
+    workspaceId: string;
+    workspaceName: string;
+    documents: MarkdownDocumentGroup[];
+    orphanTasks: SyncItemDiff[];
+  }
+
   const groupedWorkspaces = useMemo(() => {
-    interface WorkspaceGroup {
-      workspaceItem?: SyncItemDiff;
-      workspaceId: string;
-      workspaceName: string;
-      tasks: SyncItemDiff[];
-    }
     const wsMap = new Map<string, WorkspaceGroup>();
+
+    const getOrCreateWorkspaceGroup = (wsId: string, wsName?: string): WorkspaceGroup => {
+      const cleanWsId = wsId.replace(/^ws_/, '').replace(/^workspace-/, '');
+      const cleanWsName = (wsName || '').trim().toLowerCase();
+
+      let targetKey = wsId;
+      for (const [key, group] of wsMap.entries()) {
+        const groupCleanKey = key.replace(/^ws_/, '').replace(/^workspace-/, '');
+        const groupCleanName = (group.workspaceName || '').trim().toLowerCase();
+        if (
+          key === wsId ||
+          groupCleanKey === cleanWsId ||
+          (cleanWsName && groupCleanName === cleanWsName)
+        ) {
+          targetKey = key;
+          break;
+        }
+      }
+
+      let existing = wsMap.get(targetKey);
+      if (!existing) {
+        existing = {
+          workspaceId: targetKey,
+          workspaceName:
+            wsName ||
+            (targetKey === 'unassigned'
+              ? i18n._(msg`Sanity Cloud (Sin Workspace local)`)
+              : targetKey),
+          documents: [],
+          orphanTasks: [],
+        };
+        wsMap.set(targetKey, existing);
+      } else if (wsName && (!existing.workspaceName || existing.workspaceName === targetKey)) {
+        existing.workspaceName = wsName;
+      }
+      return existing;
+    };
 
     // 1. Identify all workspace items first
     for (const item of filteredItems) {
       if (item.entityType === 'workspace') {
         const wsId = item.workspaceId || item.id.replace(/^ws_/, '');
-        const existing: WorkspaceGroup = wsMap.get(wsId) || {
-          workspaceId: wsId,
-          workspaceName: item.localData?.name || item.remoteData?.name || item.title.replace(/^Workspace:\s*/, ''),
-          tasks: [],
-        };
-        existing.workspaceItem = item;
-        if (item.localData?.name || item.remoteData?.name) {
-          existing.workspaceName = item.localData?.name || item.remoteData?.name;
-        }
-        wsMap.set(wsId, existing);
+        const wsName =
+          item.localData?.name || item.remoteData?.name || item.title.replace(/^Workspace:\s*/, '');
+        const group = getOrCreateWorkspaceGroup(wsId, wsName);
+        group.workspaceItem = item;
       }
     }
 
-    // 2. Map all task items into matching workspace groups
+    // 2. Identify all task_document items (each document retains its individual identity)
     for (const item of filteredItems) {
-      if (item.entityType === 'task' || item.entityType === 'task_document') {
-        const rawWsId = item.workspaceId || 'unassigned';
-        const cleanWsId = rawWsId.replace(/^ws_/, '').replace(/^workspace-/, '');
-        const cleanWsName = (item.workspaceName || '').trim().toLowerCase();
+      if (item.entityType === 'task_document') {
+        const wsId = item.workspaceId || 'unassigned';
+        const group = getOrCreateWorkspaceGroup(wsId, item.workspaceName);
+        const docPath = item.documentPath || item.title || 'TASKS.md';
+        const branchName = item.branchName || 'main';
+        let parsedDocId = item.localData?.id || item.remoteData?.id;
+        if (!parsedDocId && item.id.startsWith('md_')) {
+          try {
+            parsedDocId = JSON.parse(item.id.slice(3))[2];
+          } catch {
+            parsedDocId = item.id;
+          }
+        }
+        const docId = String(parsedDocId || item.id || docPath);
+        const docKey = `${group.workspaceId}::${branchName}::${docId}`;
 
-        let targetKey = rawWsId;
-        for (const [key, group] of wsMap.entries()) {
-          const groupCleanKey = key.replace(/^ws_/, '').replace(/^workspace-/, '');
-          const groupCleanName = (group.workspaceName || '').trim().toLowerCase();
-          if (
-            key === rawWsId ||
-            groupCleanKey === cleanWsId ||
-            (cleanWsName && groupCleanName === cleanWsName)
-          ) {
-            targetKey = key;
-            break;
+        let docGroup = group.documents.find(
+          (d) => d.docKey === docKey || (d.docId === docId && d.branchName === branchName)
+        );
+        if (!docGroup) {
+          docGroup = {
+            docKey,
+            docId,
+            documentPath: docPath,
+            branchName,
+            documentItem: item,
+            tasks: [],
+          };
+          group.documents.push(docGroup);
+        } else {
+          docGroup.documentItem = item;
+          docGroup.documentPath = docPath;
+          docGroup.branchName = branchName;
+        }
+      }
+    }
+
+    // 3. Map all task items into matching document groups inside their workspace
+    for (const item of filteredItems) {
+      if (item.entityType === 'task') {
+        const rawWsId = item.workspaceId || 'unassigned';
+        const group = getOrCreateWorkspaceGroup(rawWsId, item.workspaceName);
+        const docPath =
+          item.documentPath ||
+          item.remoteData?.documentPath ||
+          item.subtitle?.match(/Doc:\s*"([^"]+)"/)?.[1] ||
+          '';
+        const branchName = item.branchName || item.remoteData?.branchName || '';
+
+        // Determine matching document ID for the task
+        let taskDocId = '';
+        if (item.remoteData?.documentKey) {
+          taskDocId = item.remoteData.documentKey.split('::')[1] || '';
+        }
+        if (!taskDocId && item.id.startsWith('task_')) {
+          const parts = item.id.split('_');
+          if (parts.length >= 5) {
+            taskDocId = parts[parts.length - 2];
           }
         }
 
-        const existing: WorkspaceGroup = wsMap.get(targetKey) || {
-          workspaceId: targetKey,
-          workspaceName:
-            item.workspaceName ||
-            (targetKey === 'unassigned' ? i18n._(msg`Sanity Cloud (Sin Workspace local)`) : targetKey),
-          tasks: [],
-        };
-        existing.tasks.push(item);
-        wsMap.set(targetKey, existing);
+        if (docPath || taskDocId) {
+          const resolvedBranch = branchName || 'main';
+          let docGroup = group.documents.find(
+            (d) =>
+              (taskDocId && d.docId === taskDocId) ||
+              (d.documentPath === docPath && (!branchName || d.branchName === branchName))
+          );
+          if (!docGroup) {
+            const docId = taskDocId || docPath;
+            const docKey = `${group.workspaceId}::${resolvedBranch}::${docId}`;
+            docGroup = {
+              docKey,
+              docId,
+              documentPath: docPath || 'TASKS.md',
+              branchName: resolvedBranch,
+              tasks: [],
+            };
+            group.documents.push(docGroup);
+          }
+          docGroup.tasks.push(item);
+        } else {
+          group.orphanTasks.push(item);
+        }
       }
     }
 
@@ -1372,8 +1480,11 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
             </div>
           ) : (
             groupedWorkspaces.map((group) => {
-              const isCollapsed = collapsedWorkspaceIds.has(group.workspaceId);
-              const hasChildTasks = group.tasks.length > 0;
+              const isWorkspaceCollapsed = collapsedWorkspaceIds.has(group.workspaceId);
+              const totalWorkspaceTasks =
+                group.documents.reduce((acc, d) => acc + d.tasks.length, 0) +
+                group.orphanTasks.length;
+              const hasContent = group.documents.length > 0 || group.orphanTasks.length > 0;
 
               return (
                 <div key={group.workspaceId} className="flex flex-col">
@@ -1406,31 +1517,125 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                     </div>
                   )}
 
-                  {/* Tasks list under workspace */}
-                  {hasChildTasks && (
+                  {/* Workspace Content (Markdown Documents + Tasks) */}
+                  {hasContent && (
                     <div className="flex flex-col">
-                      {/* Sub-header toggle for tasks */}
+                      {/* Workspace Sub-header Toggle */}
                       <button
                         type="button"
                         onClick={() => toggleWorkspaceCollapse(group.workspaceId)}
-                        className="flex items-center justify-between px-4 py-1.5 bg-[var(--surface-container-low)]/20 text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]/30 text-xs font-medium cursor-pointer transition-colors border-t border-[var(--outline)]/20"
+                        className="flex items-center justify-between px-4 py-1.5 bg-[var(--surface-container-low)]/20 text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]/30 text-xs font-medium cursor-pointer transition-colors border-t border-[var(--outline)]/20 select-none"
                       >
-                        <div className="flex items-center gap-1.5 pl-6">
+                        <div className="flex items-center gap-1.5 pl-4">
                           <span className="material-symbols-outlined text-[15px]">
-                            {isCollapsed ? 'chevron_right' : 'expand_more'}
+                            {isWorkspaceCollapsed ? 'chevron_right' : 'expand_more'}
                           </span>
-                          <span>{i18n._(msg`Tareas del Workspace`)}</span>
-                          <span className="font-mono text-[11px] opacity-70">({group.tasks.length})</span>
+                          <span>{i18n._(msg`Documentos y tareas del Workspace`)}</span>
+                          <span className="font-mono text-[11px] opacity-70">
+                            ({group.documents.length}{' '}
+                            {group.documents.length === 1
+                              ? i18n._(msg`archivo`)
+                              : i18n._(msg`archivos`)}
+                            , {totalWorkspaceTasks}{' '}
+                            {totalWorkspaceTasks === 1
+                              ? i18n._(msg`tarea`)
+                              : i18n._(msg`tareas`)}
+                            )
+                          </span>
                         </div>
                         <span className="text-[11px] opacity-70">
-                          {isCollapsed ? i18n._(msg`Mostrar`) : i18n._(msg`Ocultar`)}
+                          {isWorkspaceCollapsed ? i18n._(msg`Mostrar`) : i18n._(msg`Ocultar`)}
                         </span>
                       </button>
 
-                      {/* Render Child Tasks */}
-                      {!isCollapsed && (
-                        <div className="divide-y divide-[var(--outline)]/20">
-                          {group.tasks.map((taskItem) => renderItemRow(taskItem, true))}
+                      {/* Render Markdown Document Groups under Workspace */}
+                      {!isWorkspaceCollapsed && (
+                        <div className="flex flex-col">
+                          {group.documents.map((docGroup) => {
+                            const isDocCollapsed = collapsedDocKeys.has(docGroup.docKey);
+
+                            return (
+                              <div
+                                key={docGroup.docKey}
+                                data-document-path={docGroup.documentPath}
+                                className="flex flex-col border-t border-[var(--outline)]/20"
+                              >
+                                {/* Markdown Document Header with Collapse/Expand */}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDocCollapse(docGroup.docKey)}
+                                  className="flex items-center justify-between gap-3 pl-8 pr-4 py-2 bg-[var(--surface-container-low)]/40 hover:bg-[var(--surface-container-high)]/40 transition-colors text-xs font-medium cursor-pointer select-none text-left w-full"
+                                  aria-expanded={!isDocCollapsed}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    <span className="material-symbols-outlined text-[16px] text-[var(--on-surface-variant)] transition-transform shrink-0">
+                                      {isDocCollapsed ? 'chevron_right' : 'expand_more'}
+                                    </span>
+                                    <span className="material-symbols-outlined text-[16px] text-indigo-400 shrink-0">
+                                      description
+                                    </span>
+                                    <span className="font-mono text-xs font-semibold text-[var(--on-surface)] truncate">
+                                      {docGroup.documentPath}
+                                    </span>
+                                    {docGroup.branchName && (
+                                      <span className="text-[10px] text-[var(--on-surface-variant)] px-1.5 py-0.5 rounded bg-[var(--surface-container-high)] font-mono border border-[var(--outline)]/20 shrink-0">
+                                        {docGroup.branchName}
+                                      </span>
+                                    )}
+                                    <span className="text-[11px] text-[var(--on-surface-variant)] font-mono opacity-75 shrink-0">
+                                      ({docGroup.tasks.length}{' '}
+                                      {docGroup.tasks.length === 1
+                                        ? i18n._(msg`tarea`)
+                                        : i18n._(msg`tareas`)}
+                                      )
+                                    </span>
+                                  </div>
+
+                                  <div className="shrink-0 flex items-center gap-3">
+                                    {docGroup.documentItem &&
+                                      getDiffStatus(docGroup.documentItem.diffType)}
+                                    <span className="text-[11px] text-[var(--on-surface-variant)] opacity-70 hidden sm:inline">
+                                      {isDocCollapsed ? i18n._(msg`Expandir`) : i18n._(msg`Colapsar`)}
+                                    </span>
+                                  </div>
+                                </button>
+
+                                {/* Child Tasks under this Markdown Document */}
+                                {!isDocCollapsed &&
+                                  (docGroup.tasks.length > 0 ? (
+                                    <div className="divide-y divide-[var(--outline)]/15">
+                                      {docGroup.tasks.map((taskItem) =>
+                                        renderItemRow(taskItem, true)
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="pl-14 pr-4 py-2 text-xs text-[var(--on-surface-variant)] italic bg-[var(--surface-container-lowest)]/10">
+                                      {i18n._(msg`No hay tareas en este documento`)}
+                                    </div>
+                                  ))}
+                              </div>
+                            );
+                          })}
+
+                          {/* Unassigned / Orphan Tasks */}
+                          {group.orphanTasks.length > 0 && (
+                            <div className="flex flex-col border-t border-[var(--outline)]/20">
+                              <div className="flex items-center gap-2 pl-8 pr-4 py-2 bg-[var(--surface-container-low)]/30 text-xs text-[var(--on-surface-variant)] font-medium">
+                                <span className="material-symbols-outlined text-[16px] text-[var(--on-surface-variant)]">
+                                  checklist
+                                </span>
+                                <span>{i18n._(msg`Otras tareas sin documento`)}</span>
+                                <span className="font-mono text-[11px] opacity-70">
+                                  ({group.orphanTasks.length})
+                                </span>
+                              </div>
+                              <div className="divide-y divide-[var(--outline)]/15">
+                                {group.orphanTasks.map((taskItem) =>
+                                  renderItemRow(taskItem, true)
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
