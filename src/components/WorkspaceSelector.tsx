@@ -1,7 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
-import { Trans } from '@lingui/react/macro';
 import { Workspace, BranchConfig, logWorkspaceTrace } from '../services/workspaceService';
 
 interface WorkspaceSelectorProps {
@@ -10,7 +9,7 @@ interface WorkspaceSelectorProps {
   activeBranch: BranchConfig;
   onSelectWorkspace: (workspaceId: string) => void;
   onSelectBranch: (branchName: string) => void;
-  onOpenWorkspaceManager: () => void;
+  onOpenWorkspaceManager: (tab?: 'workspaces' | 'branches' | 'create') => void;
   onOpenCreateBranch: () => void;
   onOpenGitHubSync?: () => void;
 }
@@ -27,6 +26,9 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
   const { i18n } = useLingui();
   const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
+
+  const [wsFilter, setWsFilter] = useState('');
+  const [branchFilter, setBranchFilter] = useState('');
 
   const wsDropdownRef = useRef<HTMLDivElement>(null);
   const branchDropdownRef = useRef<HTMLDivElement>(null);
@@ -45,6 +47,18 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const filteredWorkspaces = useMemo(() => {
+    if (!wsFilter.trim()) return allWorkspaces || [];
+    const q = wsFilter.toLowerCase();
+    return (allWorkspaces || []).filter((w) => w.name.toLowerCase().includes(q));
+  }, [allWorkspaces, wsFilter]);
+
+  const filteredBranches = useMemo(() => {
+    if (!branchFilter.trim()) return workspace?.branches || [];
+    const q = branchFilter.toLowerCase();
+    return (workspace?.branches || []).filter((b) => b.name.toLowerCase().includes(q));
+  }, [workspace, branchFilter]);
+
   return (
     <div id="div-workspaceselector-1" className="flex items-center gap-1 sm:gap-1.5 shrink-0">
       {/* Workspace Picker Dropdown */}
@@ -55,6 +69,7 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
           onClick={() => {
             setIsWorkspaceMenuOpen((prev) => !prev);
             setIsBranchMenuOpen(false);
+            setWsFilter('');
           }}
           className="btn-m3-secondary flex items-center gap-1.5 px-2 sm:px-2.5 py-1 text-xs font-sans font-medium cursor-pointer shrink-0"
           title={`Workspace: ${workspace?.name || 'Principal'}`}
@@ -87,7 +102,7 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
                   e.stopPropagation();
                   logWorkspaceTrace('Clic en botón Administrar desde Barra Superior -> abriendo WorkspaceManagerModal');
                   setIsWorkspaceMenuOpen(false);
-                  onOpenWorkspaceManager();
+                  onOpenWorkspaceManager('workspaces');
                 }}
                 className="text-[10px] text-[var(--primary)] hover:underline cursor-pointer font-medium"
               >
@@ -95,8 +110,20 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
               </button>
             </div>
 
+            {(allWorkspaces || []).length > 3 && (
+              <div className="px-2 pt-1 pb-1">
+                <input
+                  type="text"
+                  value={wsFilter}
+                  onChange={(e) => setWsFilter(e.target.value)}
+                  placeholder={i18n._(msg`Filtrar workspaces...`)}
+                  className="w-full px-2 py-1 text-xs rounded bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+            )}
+
             <div id="div-workspaceselector-5" className="max-h-56 overflow-y-auto py-1">
-              {(allWorkspaces || []).map((ws) => {
+              {filteredWorkspaces.map((ws) => {
                 const isCurrent = ws.id === workspace?.id;
                 const totalDocs = (ws.branches || []).reduce(
                   (acc, b) => acc + (b.taskDocuments?.length || 0),
@@ -152,7 +179,7 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
                   e.stopPropagation();
                   logWorkspaceTrace('Clic en + Nuevo Workspace desde Barra Superior -> abriendo WorkspaceManagerModal');
                   setIsWorkspaceMenuOpen(false);
-                  onOpenWorkspaceManager();
+                  onOpenWorkspaceManager('create');
                 }}
                 className="btn-m3-secondary w-full py-1 text-xs justify-center cursor-pointer"
               >
@@ -172,6 +199,7 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
           onClick={() => {
             setIsBranchMenuOpen((prev) => !prev);
             setIsWorkspaceMenuOpen(false);
+            setBranchFilter('');
           }}
           className="btn-m3-secondary flex items-center gap-1.5 px-2 sm:px-2.5 py-1 text-xs font-mono font-medium cursor-pointer shrink-0"
           title={`${i18n._(msg`Rama actual`)}: ${activeBranch?.name || 'main'}`}
@@ -194,10 +222,34 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
               <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--on-surface-variant)]">
                 {i18n._(msg`Ramas`)} ({(workspace?.branches || []).length})
               </span>
+              <button
+                id="btn-manage-branches-header"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsBranchMenuOpen(false);
+                  onOpenWorkspaceManager('branches');
+                }}
+                className="text-[10px] text-sky-400 hover:underline cursor-pointer font-medium"
+              >
+                {i18n._(msg`Administrar`)}
+              </button>
             </div>
 
+            {(workspace?.branches || []).length > 3 && (
+              <div className="px-2 pt-1 pb-1">
+                <input
+                  type="text"
+                  value={branchFilter}
+                  onChange={(e) => setBranchFilter(e.target.value)}
+                  placeholder={i18n._(msg`Filtrar ramas...`)}
+                  className="w-full px-2 py-1 text-xs rounded bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+            )}
+
             <div id="div-workspaceselector-13" className="max-h-56 overflow-y-auto py-1">
-              {(workspace?.branches || []).map((b) => {
+              {filteredBranches.map((b) => {
                 const isCurrent = b.name === activeBranch?.name;
                 const docCount = b.taskDocuments?.length || 0;
                 return (
@@ -242,7 +294,7 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
               })}
             </div>
 
-            <div id="div-workspaceselector-16" className="pt-1 border-t border-[var(--outline)] px-2 py-1">
+            <div id="div-workspaceselector-16" className="pt-1 border-t border-[var(--outline)] px-2 py-1 flex items-center gap-1.5">
               <button
                 id="btn-new-branch-dropdown"
                 type="button"
@@ -250,7 +302,7 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
                   setIsBranchMenuOpen(false);
                   onOpenCreateBranch();
                 }}
-                className="btn-m3-secondary w-full py-1 text-xs justify-center cursor-pointer"
+                className="btn-m3-secondary flex-1 py-1 text-xs justify-center cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[14px]">add</span>
                 <span>+ {i18n._(msg`Nueva rama`)}</span>

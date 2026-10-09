@@ -319,6 +319,149 @@ export function createWorkspaceBranch(workspace: Workspace, name: string, source
     activeDocumentId: documents[Math.max(0, activeIndex)].id };
 }
 
+export function cloneWorkspace(workspace: Workspace, newName: string): Workspace {
+  const newWsId = `ws_${crypto.randomUUID()}`;
+  const clonedBranches: BranchConfig[] = workspace.branches.map((branch) => {
+    const docIdMap = new Map<string, string>();
+    const clonedDocs: TaskDocument[] = branch.taskDocuments.map((doc) => {
+      const newDocId = `doc_${crypto.randomUUID()}`;
+      docIdMap.set(doc.id, newDocId);
+      return {
+        ...doc,
+        id: newDocId,
+        visualState: doc.visualState
+          ? {
+              tasks: structuredClone(doc.visualState.tasks),
+              groups: structuredClone(doc.visualState.groups),
+              updatedAt: new Date().toISOString(),
+            }
+          : null,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    const newActiveDocId = docIdMap.get(branch.activeDocumentId) || clonedDocs[0]?.id || `doc_${crypto.randomUUID()}`;
+
+    return {
+      ...branch,
+      taskDocuments: clonedDocs,
+      activeDocumentId: newActiveDocId,
+    };
+  });
+
+  return sanitizeWorkspace({
+    id: newWsId,
+    name: newName.trim(),
+    githubRepo: {
+      ...workspace.githubRepo,
+      fullName: `local/${newName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'workspace'}`,
+    },
+    branches: clonedBranches,
+    activeBranchName: workspace.activeBranchName,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function deleteBranchFromWorkspace(workspace: Workspace, branchNameToDelete: string): Workspace {
+  if (workspace.branches.length <= 1) {
+    throw new Error('No se puede eliminar la única rama del workspace.');
+  }
+
+  const remainingBranches = workspace.branches.filter(
+    (b) => b.name.toLowerCase() !== branchNameToDelete.toLowerCase()
+  );
+
+  if (remainingBranches.length === workspace.branches.length) {
+    return workspace;
+  }
+
+  const nextActiveBranchName =
+    workspace.activeBranchName.toLowerCase() === branchNameToDelete.toLowerCase()
+      ? remainingBranches.find((b) => b.name === 'main')?.name || remainingBranches[0].name
+      : workspace.activeBranchName;
+
+  return {
+    ...workspace,
+    branches: remainingBranches,
+    activeBranchName: nextActiveBranchName,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function renameBranchInWorkspace(
+  workspace: Workspace,
+  oldBranchName: string,
+  newBranchName: string
+): Workspace {
+  const cleanNewName = newBranchName.trim().replace(/\s+/g, '-');
+  if (!cleanNewName) {
+    throw new Error('El nombre de la rama no puede estar vacío.');
+  }
+
+  if (
+    cleanNewName.toLowerCase() !== oldBranchName.toLowerCase() &&
+    workspace.branches.some((b) => b.name.toLowerCase() === cleanNewName.toLowerCase())
+  ) {
+    throw new Error(`Ya existe una rama llamada "${cleanNewName}".`);
+  }
+
+  const updatedBranches = workspace.branches.map((branch) => {
+    if (branch.name.toLowerCase() !== oldBranchName.toLowerCase()) {
+      return branch;
+    }
+    return {
+      ...branch,
+      name: cleanNewName,
+    };
+  });
+
+  const nextActiveBranchName =
+    workspace.activeBranchName.toLowerCase() === oldBranchName.toLowerCase()
+      ? cleanNewName
+      : workspace.activeBranchName;
+
+  return {
+    ...workspace,
+    branches: updatedBranches,
+    activeBranchName: nextActiveBranchName,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function toggleBranchProtectionInWorkspace(workspace: Workspace, branchName: string): Workspace {
+  const updatedBranches = workspace.branches.map((branch) => {
+    if (branch.name.toLowerCase() !== branchName.toLowerCase()) {
+      return branch;
+    }
+    return {
+      ...branch,
+      isProtected: !branch.isProtected,
+    };
+  });
+
+  return {
+    ...workspace,
+    branches: updatedBranches,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function duplicateBranchInWorkspace(
+  workspace: Workspace,
+  sourceBranchName: string,
+  newBranchName: string
+): Workspace {
+  const newBranch = createWorkspaceBranch(workspace, newBranchName, sourceBranchName);
+  return {
+    ...workspace,
+    branches: [...workspace.branches, newBranch],
+    activeBranchName: newBranch.name,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+
 export function sanitizeTaskDocument(rawDoc: any, fallbackId?: string): TaskDocument {
   const id = rawDoc?.id || rawDoc?._key || fallbackId || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const name = rawDoc?.name || 'TASKS.md';

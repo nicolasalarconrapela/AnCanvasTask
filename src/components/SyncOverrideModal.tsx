@@ -1967,7 +1967,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                   <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
                     {(result?.counts.conflicts || 0) > 0
                       ? i18n._(
-                          msg`Hay ${result?.counts.conflicts} elemento(s) con cambios incompatibles en local y Sanity Cloud.`
+                          msg`Hay ${result!.counts.conflicts} elemento(s) con cambios incompatibles en local y Sanity Cloud.`
                         )
                       : result?.hasPendingChanges
                       ? i18n._(
@@ -2059,7 +2059,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-rose-300 font-semibold text-xs">
                     <span className="material-symbols-outlined text-[16px] text-rose-400">priority_high</span>
-                    <span>{i18n._(msg`Conflictos pendientes de resolución (${result?.counts.conflicts})`)}</span>
+                    <span>{i18n._(msg`Conflictos pendientes de resolución (${result?.counts.conflicts ?? 0})`)}</span>
                   </div>
                 </div>
 
@@ -2086,7 +2086,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
-                              disabled={isResolving || !isSanityConfigured}
+                              disabled={isProcessing || !isSanityConfigured}
                               onClick={() => handleResolveSingle(conflictItem, 'keep_local')}
                               className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium text-sky-400 hover:bg-sky-950/40 flex items-center gap-1 cursor-pointer disabled:opacity-40"
                               title={i18n._(msg`Conservar local`)}
@@ -2096,7 +2096,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                             </button>
                             <button
                               type="button"
-                              disabled={isResolving || !isSanityConfigured || !conflictItem.remoteData}
+                              disabled={isProcessing || !isSanityConfigured || !conflictItem.remoteData}
                               onClick={() => handleResolveSingle(conflictItem, 'keep_remote')}
                               className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium text-amber-400 hover:bg-amber-950/40 flex items-center gap-1 cursor-pointer disabled:opacity-40"
                               title={i18n._(msg`Aceptar versión de Sanity`)}
@@ -2106,7 +2106,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
                             </button>
                             <button
                               type="button"
-                              disabled={isResolving || !isSanityConfigured}
+                              disabled={isProcessing || !isSanityConfigured}
                               onClick={() => handleResolveSingle(conflictItem, 'merge')}
                               className="px-2.5 py-1 text-xs rounded font-medium bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1 cursor-pointer disabled:opacity-40"
                               title={i18n._(msg`Fusionar (3-way merge)`)}

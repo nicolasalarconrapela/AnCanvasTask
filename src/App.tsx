@@ -97,6 +97,10 @@ import {
   saveWorkspaceStore,
   createTaskDocument,
   createWorkspaceBranch,
+  cloneWorkspace,
+  deleteBranchFromWorkspace,
+  renameBranchInWorkspace,
+  toggleBranchProtectionInWorkspace,
   flushWorkspaceStoreSaves,
   getActiveWorkspace,
   getActiveBranch,
@@ -2028,6 +2032,126 @@ export default function App() {
         return nextStore;
       });
       pushToast(i18n._(msg`Rama "${branchName}" creada y activada`), 'success');
+    },
+    [pushToast]
+  );
+
+  // Branch CRUD handlers that operate on any workspace (not just the active one)
+  const handleManagerSelectBranch = useCallback(
+    (workspaceId: string, branchName: string) => {
+      logWorkspaceTrace(`WorkspaceManager: Activando rama "${branchName}" en workspace "${workspaceId}"`);
+      setWorkspaceStore((prev) => {
+        const nextWsList = prev.workspaces.map((ws) => {
+          if (ws.id !== workspaceId) return ws;
+          if (ws.activeBranchName === branchName) return ws;
+          return { ...ws, activeBranchName: branchName, updatedAt: new Date().toISOString() };
+        });
+        const nextStore = { ...prev, workspaces: nextWsList };
+        saveWorkspaceStore(nextStore);
+        return nextStore;
+      });
+      pushToast(i18n._(msg`Rama "${branchName}" activada`), 'info');
+    },
+    [pushToast]
+  );
+
+  const handleManagerCreateBranch = useCallback(
+    (workspaceId: string, branchName: string, sourceBranchName: string | null) => {
+      logWorkspaceTrace(`WorkspaceManager: Creando rama "${branchName}" en workspace "${workspaceId}"`);
+      setWorkspaceStore((prev) => {
+        const targetWs = prev.workspaces.find((w) => w.id === workspaceId);
+        if (!targetWs) return prev;
+        const newBranch = createWorkspaceBranch(targetWs, branchName, sourceBranchName);
+        const nextWsList = prev.workspaces.map((ws) => {
+          if (ws.id !== workspaceId) return ws;
+          return {
+            ...ws,
+            activeBranchName: branchName,
+            branches: [...ws.branches, newBranch],
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        const nextStore = { ...prev, workspaces: nextWsList };
+        saveWorkspaceStore(nextStore);
+        return nextStore;
+      });
+      pushToast(i18n._(msg`Rama "${branchName}" creada`), 'success');
+    },
+    [pushToast]
+  );
+
+  const handleManagerRenameBranch = useCallback(
+    (workspaceId: string, oldBranchName: string, newBranchName: string) => {
+      logWorkspaceTrace(`WorkspaceManager: Renombrando rama "${oldBranchName}" → "${newBranchName}" en workspace "${workspaceId}"`);
+      setWorkspaceStore((prev) => {
+        const targetWs = prev.workspaces.find((w) => w.id === workspaceId);
+        if (!targetWs) return prev;
+        try {
+          const updatedWs = renameBranchInWorkspace(targetWs, oldBranchName, newBranchName);
+          const nextWsList = prev.workspaces.map((ws) => (ws.id !== workspaceId ? ws : updatedWs));
+          const nextStore = { ...prev, workspaces: nextWsList };
+          saveWorkspaceStore(nextStore);
+          return nextStore;
+        } catch (err) {
+          pushToast((err as Error).message, 'error');
+          return prev;
+        }
+      });
+      pushToast(i18n._(msg`Rama renombrada a "${newBranchName}"`), 'success');
+    },
+    [pushToast]
+  );
+
+  const handleManagerDeleteBranch = useCallback(
+    (workspaceId: string, branchName: string) => {
+      logWorkspaceTrace(`WorkspaceManager: Eliminando rama "${branchName}" de workspace "${workspaceId}"`);
+      setWorkspaceStore((prev) => {
+        const targetWs = prev.workspaces.find((w) => w.id === workspaceId);
+        if (!targetWs) return prev;
+        try {
+          const updatedWs = deleteBranchFromWorkspace(targetWs, branchName);
+          const nextWsList = prev.workspaces.map((ws) => (ws.id !== workspaceId ? ws : updatedWs));
+          const nextStore = { ...prev, workspaces: nextWsList };
+          saveWorkspaceStore(nextStore);
+          return nextStore;
+        } catch (err) {
+          pushToast((err as Error).message, 'error');
+          return prev;
+        }
+      });
+      pushToast(i18n._(msg`Rama "${branchName}" eliminada`), 'info');
+    },
+    [pushToast]
+  );
+
+  const handleManagerToggleBranchProtection = useCallback(
+    (workspaceId: string, branchName: string) => {
+      logWorkspaceTrace(`WorkspaceManager: Alternando protección de rama "${branchName}" en workspace "${workspaceId}"`);
+      setWorkspaceStore((prev) => {
+        const targetWs = prev.workspaces.find((w) => w.id === workspaceId);
+        if (!targetWs) return prev;
+        const updatedWs = toggleBranchProtectionInWorkspace(targetWs, branchName);
+        const nextWsList = prev.workspaces.map((ws) => (ws.id !== workspaceId ? ws : updatedWs));
+        const nextStore = { ...prev, workspaces: nextWsList };
+        saveWorkspaceStore(nextStore);
+        return nextStore;
+      });
+    },
+    []
+  );
+
+  const handleCloneWorkspace = useCallback(
+    (workspaceId: string) => {
+      logWorkspaceTrace(`WorkspaceManager: Clonando workspace "${workspaceId}"`);
+      setWorkspaceStore((prev) => {
+        const targetWs = prev.workspaces.find((w) => w.id === workspaceId);
+        if (!targetWs) return prev;
+        const clonedWs = cloneWorkspace(targetWs, `${targetWs.name} (Copia)`);
+        const nextStore = { ...prev, workspaces: [...prev.workspaces, clonedWs] };
+        saveWorkspaceStore(nextStore);
+        return nextStore;
+      });
+      pushToast(i18n._(msg`Workspace clonado correctamente`), 'success');
     },
     [pushToast]
   );
@@ -6398,6 +6522,12 @@ export default function App() {
         onCreateWorkspace={handleCreateWorkspace}
         onUpdateWorkspace={handleUpdateWorkspace}
         onDeleteWorkspace={handleDeleteWorkspace}
+        onCloneWorkspace={handleCloneWorkspace}
+        onSelectBranch={handleManagerSelectBranch}
+        onCreateBranch={handleManagerCreateBranch}
+        onRenameBranch={handleManagerRenameBranch}
+        onDeleteBranch={handleManagerDeleteBranch}
+        onToggleBranchProtection={handleManagerToggleBranchProtection}
         onShowToast={pushToast}
         onSyncWorkspacesToSanity={handleSyncAllWorkspacesToSanity}
         onImportWorkspacesFromSanity={handleImportWorkspacesFromSanity}
