@@ -168,12 +168,31 @@ try {
   assert.equal(new Set(savedDocs.map(doc => doc.id)).size, 3, 'Imported document identities collided');
   assert(savedDocs[0].content.includes('today typingburst'), 'Import overwrote the original task document');
   assert.deepEqual(savedDocs.slice(1).map(doc => doc.content), ['# First readme\n', '# Second readme\n']);
+  await a.evaluate("if(!document.querySelector('#btn-branch-selector-trigger, #btn-explorer-branch-dropdown'))document.querySelector('#btn-toggle-sidebar').click()");
+  await waitUntil(() => a.evaluate("!!document.querySelector('#btn-branch-selector-trigger, #btn-explorer-branch-dropdown')"), 'Branch selector did not open');
+  for (const [name, source] of [['feature-copy', 'main'], ['fresh', '']]) {
+    await a.evaluate("document.querySelector('#btn-branch-selector-trigger, #btn-explorer-branch-dropdown')?.click()");
+    await waitUntil(() => a.evaluate("!!document.querySelector('#btn-new-branch-dropdown, #btn-explorer-new-branch')"), 'Branch menu did not open');
+    await a.evaluate("document.querySelector('#btn-new-branch-dropdown, #btn-explorer-new-branch').click()");
+    await waitUntil(() => a.evaluate("!!document.querySelector('#new-branch-name')"), 'New branch dialog did not open');
+    assert.equal(await a.evaluate("document.querySelector('#new-branch-source').value"), 'main', 'New branches must default to main');
+    await a.evaluate(`(()=>{const input=document.querySelector('#new-branch-name');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(name)});input.dispatchEvent(new Event('input',{bubbles:true}));const select=document.querySelector('#new-branch-source');select.value=${JSON.stringify(source)};select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await a.evaluate("document.querySelector('#btn-submit-new-branch').click()");
+    await waitUntil(() => Promise.resolve(documents.get('workspace-w').branches.some(branch => branch.name === name)), 'New branch did not reach Sanity');
+    await waitUntil(() => b.evaluate(`Object.keys(localStorage).filter(key=>key.startsWith('antask_workspaces_v2')).some(key=>JSON.parse(localStorage.getItem(key)).workspaces.some(ws=>ws.branches.some(branch=>branch.name===${JSON.stringify(name)})))`), 'New branch did not reach the other browser');
+  }
+  const branches = documents.get('workspace-w').branches;
+  const main = branches.find(branch => branch.name === 'main'), copy = branches.find(branch => branch.name === 'feature-copy');
+  assert.deepEqual(copy.taskDocuments.map(doc => doc.content), main.taskDocuments.map(doc => doc.content));
+  assert(copy.taskDocuments.every(doc => !main.taskDocuments.some(original => original.id === doc.id)));
+  assert.equal(branches.find(branch => branch.name === 'fresh').taskDocuments[0].content, '# Tareas\n\n## General\n');
+  assert.equal(await a.evaluate("document.body.innerText.includes('Draft final updated report today typingburst')"), false, 'Empty branch retained main canvas tasks');
   await a.evaluate("[...document.querySelectorAll('button')].find(button=>button.innerText.includes('Sync & Override'))?.click()");
-  await waitUntil(() => a.evaluate("document.querySelectorAll('[data-document-path=\"README.md\"]').length===2"), 'Sync view did not distinguish both Markdown files');
+  await waitUntil(() => a.evaluate("document.querySelectorAll('[data-document-path=\"README.md\"]').length===4"), 'Sync view did not distinguish Markdown files across branches');
   assert.deepEqual(a.errors, []); assert.deepEqual(b.errors, []);
   console.log(JSON.stringify({ browsers: ['Edge', 'Chrome'], isolatedProfiles: true, sequentialEdits: true,
     bidirectionalRealtime: true, concurrentTitleEdits: true, cursorPreserved: true, typingStoreWrites,
-    typingDebounced: true, separateMarkdownFiles: true, mutations, uncaughtErrors: 0 }));
+    typingDebounced: true, separateMarkdownFiles: true, cloneAndEmptyBranches: true, mutations, uncaughtErrors: 0 }));
 } catch(error) {
   for (const browser of browsers) {
     try { console.error(JSON.stringify({errors:browser.errors,body:await browser.evaluate("document.body?.innerText.slice(-1800)")})); }

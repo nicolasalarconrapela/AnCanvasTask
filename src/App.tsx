@@ -96,6 +96,7 @@ import {
   loadWorkspaceStore,
   saveWorkspaceStore,
   createTaskDocument,
+  createWorkspaceBranch,
   flushWorkspaceStoreSaves,
   getActiveWorkspace,
   getActiveBranch,
@@ -1412,7 +1413,8 @@ export default function App() {
   // Reactive and reliable document switching across workspaces, branches and files
   useEffect(() => {
     const layoutRevision = `${currentDocKey}:${(activeDocument.visualState as any)?._rev || ''}`;
-    if (activeDocKeyRef.current !== currentDocKey || activeDocument.content !== markdownRef.current || appliedRemoteLayoutRef.current !== layoutRevision) {
+    const changedDocument = activeDocKeyRef.current !== currentDocKey;
+    if (changedDocument || activeDocument.content !== markdownRef.current || appliedRemoteLayoutRef.current !== layoutRevision) {
       appliedRemoteLayoutRef.current = layoutRevision;
       isSwitchingDocRef.current = true;
       activeDocKeyRef.current = currentDocKey;
@@ -1452,7 +1454,8 @@ export default function App() {
         loadTasksFromMarkdown(
           editor,
           activeDocument.content,
-          activeDocument.visualState
+          activeDocument.visualState,
+          { clearNotes: changedDocument }
         );
       }
 
@@ -2005,30 +2008,10 @@ export default function App() {
   );
 
   const handleCreateBranch = useCallback(
-    (branchName: string, sourceBranchName: string) => {
+    (branchName: string, sourceBranchName: string | null) => {
       setWorkspaceStore((prev) => {
         const currentWs = getActiveWorkspace(prev);
-        const sourceBr = currentWs.branches.find((b) => b.name === sourceBranchName) || currentWs.branches[0];
-
-        // Clone documents from source branch
-        const clonedDocs = sourceBr.taskDocuments.map((doc) => ({
-          ...doc,
-          id: `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          updatedAt: new Date().toISOString(),
-        }));
-
-        const newBranch: BranchConfig = {
-          name: branchName,
-          isProtected: false,
-          lastCommit: {
-            hash: Math.random().toString(16).substring(2, 9),
-            message: `chore: crear rama ${branchName} a partir de ${sourceBranchName}`,
-            author: 'Developer',
-            timestamp: new Date().toISOString(),
-          },
-          activeDocumentId: clonedDocs[0].id,
-          taskDocuments: clonedDocs,
-        };
+        const newBranch = createWorkspaceBranch(currentWs, branchName, sourceBranchName);
 
         const nextWsList = prev.workspaces.map((ws) => {
           if (ws.id !== prev.activeWorkspaceId) return ws;

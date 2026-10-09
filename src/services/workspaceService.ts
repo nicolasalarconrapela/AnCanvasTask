@@ -301,6 +301,24 @@ export function createTaskDocument(name: string, content: string, folder = ''): 
     path: formatDocumentPath(folder, name), content, lastSavedContent: content });
 }
 
+export function createWorkspaceBranch(workspace: Workspace, name: string, sourceName: string | null): BranchConfig {
+  if (workspace.branches.some(branch => branch.name.toLowerCase() === name.toLowerCase())) {
+    throw new Error(`Ya existe una rama con el nombre "${name}"`);
+  }
+  const source = sourceName === null ? undefined : workspace.branches.find(branch => branch.name === sourceName);
+  if (sourceName !== null && !source) throw new Error(`No existe la rama "${sourceName}"`);
+  const documents: TaskDocument[] = source?.taskDocuments.map(doc => ({
+    ...createTaskDocument(doc.name, doc.content, doc.folder),
+    path: doc.path,
+    visualState: doc.visualState ? { tasks: structuredClone(doc.visualState.tasks),
+      groups: structuredClone(doc.visualState.groups), updatedAt: new Date().toISOString() } : null,
+  })) || [];
+  if (!documents.length) documents.push(createTaskDocument('TASKS.md', '# Tareas\n\n## General\n'));
+  const activeIndex = source?.taskDocuments.findIndex(doc => doc.id === source.activeDocumentId) ?? 0;
+  return { name, isProtected: false, taskDocuments: documents,
+    activeDocumentId: documents[Math.max(0, activeIndex)].id };
+}
+
 export function sanitizeTaskDocument(rawDoc: any, fallbackId?: string): TaskDocument {
   const id = rawDoc?.id || rawDoc?._key || fallbackId || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const name = rawDoc?.name || 'TASKS.md';

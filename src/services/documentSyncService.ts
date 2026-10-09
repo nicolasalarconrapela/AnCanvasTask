@@ -15,7 +15,7 @@ function writerIdentity(): string {
   if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(key, browserWriter);
   return browserWriter;
 }
-const ignored = new Set(['_rev', '_createdAt', '_updatedAt', 'updatedAt', 'lastSavedContent']);
+const ignored = new Set(['_key', '_rev', '_createdAt', '_updatedAt', 'updatedAt', 'lastSavedContent']);
 export function syncComparable(value: any): any {
   if (Array.isArray(value)) return value.map(syncComparable);
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
@@ -127,6 +127,9 @@ function withRemoteRevisions(local: any, remote: any): any {
 export function mergeSyncValue(base: any, local: any, remote: any, path = ''): any {
   if (equal(local, base) || equal(local, remote)) return remote;
   if (equal(remote, base)) return withRemoteRevisions(local, remote);
+  // Navigation can change independently while both clients create content.
+  // Keep the caller's selection instead of blocking compatible branch saves.
+  if (path.endsWith('/activeBranchName') || path.endsWith('/activeDocumentId')) return local;
   if (['/content', '/title', '/description'].some(field => path.endsWith(field)) && [base, local, remote].every(v => typeof v === 'string')) {
     return mergeText(base, local, remote);
   }

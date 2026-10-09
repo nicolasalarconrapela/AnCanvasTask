@@ -1,6 +1,6 @@
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BranchConfig } from '../services/workspaceService';
 
 interface NewBranchModalProps {
@@ -8,7 +8,7 @@ interface NewBranchModalProps {
   onClose: () => void;
   currentBranch: BranchConfig;
   allBranches: BranchConfig[];
-  onCreateBranch: (branchName: string, sourceBranchName: string) => void;
+  onCreateBranch: (branchName: string, sourceBranchName: string | null) => void;
   onShowToast: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
 }
 
@@ -22,7 +22,13 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
 }) => {
   const { _ } = useLingui();
   const [branchName, setBranchName] = useState('');
-  const [sourceBranch, setSourceBranch] = useState(currentBranch.name);
+  const [sourceBranch, setSourceBranch] = useState('main');
+  useEffect(() => {
+    if (isOpen) {
+      setBranchName('');
+      setSourceBranch(allBranches.some(branch => branch.name === 'main') ? 'main' : currentBranch.name);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -39,8 +45,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
       return;
     }
 
-    onCreateBranch(cleanName, sourceBranch);
-    onShowToast(_(msg`Rama "${cleanName}" creada a partir de "${sourceBranch}"`), 'success');
+    onCreateBranch(cleanName, sourceBranch || null);
     onClose();
   };
 
@@ -72,10 +77,11 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
 
         <form onSubmit={handleSubmit} className="p-4 flex flex-col gap-3.5">
           <div id="div-newbranchmodal-3" className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-[var(--on-surface)]">
+            <label htmlFor="new-branch-name" className="text-xs font-medium text-[var(--on-surface)]">
               {_(msg`Nombre de la nueva rama`)}
             </label>
             <input
+              id="new-branch-name"
               type="text"
               required
               autoFocus
@@ -87,14 +93,16 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
           </div>
 
           <div id="div-newbranchmodal-4" className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-[var(--on-surface)]">
+            <label htmlFor="new-branch-source" className="text-xs font-medium text-[var(--on-surface)]">
               {_(msg`Crear a partir de la rama`)}
             </label>
             <select
+              id="new-branch-source"
               value={sourceBranch}
               onChange={(e) => setSourceBranch(e.target.value)}
               className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2 py-1.5 text-xs font-mono text-[var(--on-surface)] focus:outline-none cursor-pointer"
             >
+              <option value="">{_(msg`Empezar desde cero`)}</option>
               {allBranches.map((b) => (
                 <option key={b.name} value={b.name}>
                   {b.name} ({b.taskDocuments.length} {_(msg`archivos Task MD`)})
@@ -104,7 +112,8 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
           </div>
 
           <div id="div-newbranchmodal-5" className="p-2.5 rounded bg-[var(--surface)] border border-[var(--outline)] text-[11px] text-[var(--on-surface-variant)] leading-relaxed">
-            {_(msg`Se clonarán todos los archivos Task MD (raíz, frontend, backend, etc.) y su distribución visual hacia la nueva rama.`)}
+            {sourceBranch ? _(msg`Se clonarán todos los archivos Task MD (raíz, frontend, backend, etc.) y su distribución visual hacia la nueva rama.`)
+              : _(msg`Se creará TASKS.md sin tareas.`)}
           </div>
 
           <div id="div-newbranchmodal-6" className="pt-2.5 flex items-center justify-end gap-2 border-t border-[var(--outline)]">

@@ -2006,6 +2006,5 @@ export function loadTasksFromMarkdown(
   options?: { shouldZoomToFit?: boolean; clearNotes?: boolean }
 ): { taskCount: number; groupCount: number } {
   const parsedGroups = parseTasksMarkdown(markdown);
-  if (parsedGroups.length === 0) return { taskCount: 0, groupCount: 0 };
   return populateCanvasWithGroups(editor, parsedGroups, savedVisualState, markdown, options);
 }

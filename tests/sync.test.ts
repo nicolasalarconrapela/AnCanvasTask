@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, afterEach, test } from 'node:test';
 import { DocumentSync, SyncConflict, mergeSyncValue, mergeMarkdown, buildTaskDocumentId, deletionMarkerId } from '../src/services/documentSyncService';
 import { beginSyncSession, getSyncSession, invalidateSyncSession } from '../src/services/syncSessionService';
-import { createEmptyWorkspace, createTaskDocument, loadWorkspaceStore, saveWorkspaceStore, flushWorkspaceStoreSaves, sanitizeWorkspace } from '../src/services/workspaceService';
+import { createEmptyWorkspace, createTaskDocument, createWorkspaceBranch, loadWorkspaceStore, saveWorkspaceStore, flushWorkspaceStoreSaves, sanitizeWorkspace } from '../src/services/workspaceService';
 import { compareMarkdownDocuments } from '../src/services/syncEngineService';
 import { applyRemoteTask, clearSanityConfig, getSanityConfig, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments, subscribeToSanityLiveChanges } from '../src/services/sanityService';
 import { scanTaskBlocks, updateTaskInMarkdown } from '../src/utils/markdownSync';
@@ -129,6 +129,80 @@ test('first login has an empty isolated workspace and does not publish examples'
   assert.equal(store.scope, getSyncSession()!.scope);
   assert.equal(scanTaskBlocks(store.workspaces[0].branches[0].taskDocuments[0].content).taskBlocks.length, 0);
   assert.equal(server.commits, 0);
+});
+
+test('branch cloning copies every document and layout with independent identities', () => {
+  const ws = sanitizeWorkspace(workspace());
+  ws.branches[0].taskDocuments.push(createTaskDocument('README.md', '# Documentation\n', 'docs'));
+  ws.branches[0].activeDocumentId = ws.branches[0].taskDocuments[1].id;
+  ws.branches[0].taskDocuments[0].visualState = { _id: 'source-layout', _rev: 'source-revision',
+    projectId: 'main', tasks: [{ taskId: 'x', x: 100, y: 50, width: 200, height: 100 }], groups: [], updatedAt: 'old' } as any;
+  const copy = createWorkspaceBranch(ws, 'feature/clone', 'main');
+  assert.equal(copy.taskDocuments.length, 2);
+  assert.equal(copy.activeDocumentId, copy.taskDocuments[1].id);
+  for (let index = 0; index < 2; index++) {
+    assert.notEqual(copy.taskDocuments[index].id, ws.branches[0].taskDocuments[index].id);
+    assert.equal(copy.taskDocuments[index].content, ws.branches[0].taskDocuments[index].content);
+    assert.equal(copy.taskDocuments[index].path, ws.branches[0].taskDocuments[index].path);
+  }
+  const layout = copy.taskDocuments[0].visualState!;
+  assert.equal(layout._id, undefined); assert.equal((layout as any)._rev, undefined);
+  layout.tasks[0].x = 999;
+  assert.equal(ws.branches[0].taskDocuments[0].visualState!.tasks[0].x, 100);
+});
+
+test('a branch from scratch syncs without importing or deleting main tasks', async () => {
+  const raw = workspace(); server.documents.set(raw._id, raw); sync.observe(raw);
+  const saved = await sync.write(raw, config);
+  const ws = sanitizeWorkspace(normalizeSanityWorkspaceDoc(saved));
+  const fresh = createWorkspaceBranch(ws, 'empty', null);
+  assert.equal(scanTaskBlocks(fresh.taskDocuments[0].content).taskBlocks.length, 0);
+  const result = await sync.write({ ...saved, branches: [...saved.branches, fresh] }, config);
+  const cloud = workspacesFromSanityDocuments([...server.documents.values()])[0];
+  assert.equal(cloud.branches.length, 2);
+  assert.equal(cloud.branches.find((branch: any) => branch.name === 'empty').taskDocuments[0].content, '# Tareas\n\n## General\n');
+  assert(cloud.branches[0].taskDocuments[0].content.includes('[ ] A'));
+  assert.equal([...server.documents.values()].filter(doc => doc._type === 'task' && !doc.syncDeleted).length, 1);
+  assert.equal(result.branches.length, 2);
+});
+
+test('editing a cloned branch keeps main unchanged after offline replay', async () => {
+  const raw = workspace(); server.documents.set(raw._id, raw); sync.observe(raw);
+  const saved = await sync.write(raw, config);
+  const copy = createWorkspaceBranch(sanitizeWorkspace(normalizeSanityWorkspaceDoc(saved)), 'feature', 'main');
+  copy.taskDocuments[0].content = copy.taskDocuments[0].content.replace('[ ] A', '[ ] B');
+  server.offline = true;
+  await assert.rejects(sync.write({ ...saved, branches: [...saved.branches, copy] }, config), /offline/);
+  server.offline = false;
+  await new DocumentSync(server.client).flush(getSyncSession()!);
+  assert.equal(server.documents.get(buildTaskDocumentId('x', 'w', 'main::d')).title, 'A');
+  assert.equal(server.documents.get(buildTaskDocumentId('x', 'w', `feature::${copy.taskDocuments[0].id}`)).title, 'B');
+  const cloud = workspacesFromSanityDocuments([...server.documents.values()])[0];
+  assert(cloud.branches[0].taskDocuments[0].content.includes('[ ] A'));
+  assert(cloud.branches[1].taskDocuments[0].content.includes('[ ] B'));
+});
+
+test('creating a second branch before the first save hydrates preserves both branches', async () => {
+  const raw = workspace(); server.documents.set(raw._id, raw); sync.observe(raw);
+  const ws = sanitizeWorkspace(normalizeSanityWorkspaceDoc(raw));
+  const copy = createWorkspaceBranch(ws, 'copy', 'main');
+  await sync.write({ ...raw, branches: [...raw.branches, copy], activeBranchName: 'copy' }, config);
+  const empty = createWorkspaceBranch(ws, 'empty', null);
+  const result = await sync.write({ ...raw, branches: [...raw.branches, copy, empty], activeBranchName: 'empty' }, config);
+  assert.deepEqual(result.branches.map((branch: any) => branch.name), ['main', 'copy', 'empty']);
+  assert.equal(result.activeBranchName, 'empty');
+  assert.equal(result.branches[0].taskDocuments[0].content, markdown);
+});
+
+test('acknowledging a new branch tolerates Sanity array keys added during saving', () => {
+  const base = sanitizeWorkspace(normalizeSanityWorkspaceDoc(workspace()));
+  const copy = createWorkspaceBranch(base, 'copy', 'main');
+  const local = { ...base, branches: [...base.branches, copy], activeBranchName: 'copy' };
+  const remote = { ...local, branches: local.branches.map(branch => ({ ...branch, _key: branch.name,
+    taskDocuments: branch.taskDocuments.map(doc => ({ ...doc, _key: doc.id })) })) };
+  const merged = mergeSyncValue([base], [local], [remote], '/workspaces');
+  assert.equal(merged[0].branches.length, 2);
+  assert.equal(merged[0].branches[1].taskDocuments[0].content, markdown);
 });
 
 test('Markdown files with the same name retain separate IDs and sync entries without tasks', async () => {
