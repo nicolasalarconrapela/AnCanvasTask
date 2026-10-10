@@ -87,6 +87,15 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
     const actId = getActiveSanityProfileId();
     setProfiles(pList);
     setActiveProfileId(actId);
+    if (actId) {
+      const activeProf = pList.find((p) => p.id === actId);
+      if (activeProf) {
+        setProfileAlias(activeProf.alias);
+        setProjectId(activeProf.projectId);
+        setDataset(activeProf.dataset);
+        setToken(activeProf.token || '');
+      }
+    }
   };
 
   const loadUserInfoAndProjects = async (t: string, pId?: string, ds?: string) => {
@@ -176,6 +185,7 @@ export const SanityConfigModal: React.FC<SanityConfigModalProps> = ({
 
   const handleSelectProfile = (profile: SanityLocalProfile) => {
     setActiveProfileId(profile.id);
+    setProfileAlias(profile.alias);
     setProjectId(profile.projectId);
     setDataset(profile.dataset);
     setToken(profile.token || '');

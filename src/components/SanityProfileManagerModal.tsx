@@ -222,15 +222,26 @@ export const SanityProfileManagerModal: React.FC<SanityProfileManagerModalProps>
     }
 
     const finalAlias = alias.trim() || `Proyecto ${projectId.trim()} (${dataset.trim()})`;
-    const saved = saveSanityProfile({
-      id: editingProfileId || undefined,
-      alias: finalAlias,
-      projectId: projectId.trim(),
-      dataset: dataset.trim() || 'production',
-      token: token.trim(),
-    });
+    const isCurrentlyActive = editingProfileId ? activeProfileId === editingProfileId : (!activeProfileId || profiles.length === 0);
+
+    const saved = saveSanityProfile(
+      {
+        id: editingProfileId || undefined,
+        alias: finalAlias,
+        projectId: projectId.trim(),
+        dataset: dataset.trim() || 'production',
+        token: token.trim(),
+      },
+      isCurrentlyActive
+    );
 
     refreshList();
+
+    if (isCurrentlyActive) {
+      const appliedConfig = getSanityConfig();
+      onProfileActivated?.(appliedConfig, saved);
+    }
+
     onShowToast(
       editingProfileId
         ? i18n._(msg`Perfil "${saved.alias}" actualizado`)

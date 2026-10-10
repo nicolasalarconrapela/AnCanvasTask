@@ -146,15 +146,18 @@ export function getSavedSanityProfiles(): SanityLocalProfile[] {
   return [];
 }
 
-export function saveSanityProfile(profile: {
-  id?: string;
-  alias: string;
-  projectId: string;
-  dataset: string;
-  token?: string;
-  apiVersion?: string;
-  useCdn?: boolean;
-}): SanityLocalProfile {
+export function saveSanityProfile(
+  profile: {
+    id?: string;
+    alias: string;
+    projectId: string;
+    dataset: string;
+    token?: string;
+    apiVersion?: string;
+    useCdn?: boolean;
+  },
+  makeActive?: boolean
+): SanityLocalProfile {
   const profiles = getSavedSanityProfiles();
   const now = new Date().toISOString();
   const profileId = profile.id || `prof_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
@@ -181,9 +184,21 @@ export function saveSanityProfile(profile: {
     updatedProfiles = [...profiles, cleanProfile];
   }
 
+  const currentActiveId = getActiveSanityProfileId();
+  const shouldBeActive = makeActive === true || (makeActive === undefined && (currentActiveId === profileId || !currentActiveId));
+
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY_SANITY_PROFILES, JSON.stringify(updatedProfiles));
-    localStorage.setItem(LOCAL_STORAGE_KEY_ACTIVE_PROFILE_ID, profileId);
+    if (shouldBeActive) {
+      localStorage.setItem(LOCAL_STORAGE_KEY_ACTIVE_PROFILE_ID, profileId);
+      saveSanityConfig({
+        projectId: cleanProfile.projectId,
+        dataset: cleanProfile.dataset,
+        token: cleanProfile.token || '',
+        apiVersion: cleanProfile.apiVersion || '2024-03-01',
+        useCdn: cleanProfile.useCdn ?? false,
+      });
+    }
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('antask_sanity_profiles_updated', { detail: updatedProfiles }));
     }
@@ -202,6 +217,11 @@ export function deleteSanityProfile(profileId: string): void {
 
     if (getActiveSanityProfileId() === profileId) {
       localStorage.removeItem(LOCAL_STORAGE_KEY_ACTIVE_PROFILE_ID);
+      if (updatedProfiles.length > 0) {
+        activateSanityProfile(updatedProfiles[0].id);
+      } else {
+        clearSanityConfig();
+      }
     }
 
     if (typeof window !== 'undefined') {
@@ -247,14 +267,17 @@ export function duplicateSanityProfile(profileId: string): SanityLocalProfile | 
   const source = profiles.find((p) => p.id === profileId);
   if (!source) return null;
 
-  return saveSanityProfile({
-    alias: `${source.alias} (Copia)`,
-    projectId: source.projectId,
-    dataset: source.dataset,
-    token: source.token,
-    apiVersion: source.apiVersion,
-    useCdn: source.useCdn,
-  });
+  return saveSanityProfile(
+    {
+      alias: `${source.alias} (Copia)`,
+      projectId: source.projectId,
+      dataset: source.dataset,
+      token: source.token,
+      apiVersion: source.apiVersion,
+      useCdn: source.useCdn,
+    },
+    false
+  );
 }
 
 export function exportSanityProfilesJson(includeTokens = true): string {
@@ -277,14 +300,17 @@ export function importSanityProfilesJson(jsonStr: string): { importedCount: numb
     let count = 0;
     list.forEach((item) => {
       if (item && typeof item.projectId === 'string' && item.projectId.trim()) {
-        saveSanityProfile({
-          alias: item.alias || `Proyecto (${item.projectId})`,
-          projectId: item.projectId,
-          dataset: item.dataset || 'production',
-          token: item.token || '',
-          apiVersion: item.apiVersion || '2024-03-01',
-          useCdn: item.useCdn,
-        });
+        saveSanityProfile(
+          {
+            alias: item.alias || `Proyecto (${item.projectId})`,
+            projectId: item.projectId,
+            dataset: item.dataset || 'production',
+            token: item.token || '',
+            apiVersion: item.apiVersion || '2024-03-01',
+            useCdn: item.useCdn,
+          },
+          false
+        );
         count++;
       }
     });
