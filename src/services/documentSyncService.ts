@@ -2,7 +2,7 @@ import { createClient } from '@sanity/client';
 import { diffLines, diffWordsWithSpace } from 'diff';
 import { scanTaskBlocks, addTaskToMarkdown, updateTaskInMarkdown, deleteTaskFromMarkdown, moveTaskToGroupInMarkdown } from '../utils/markdownSync';
 import type { SanityConfig } from './sanityService';
-import { assertSyncSession, getSyncSession, type SyncSession } from './syncSessionService';
+import { assertSyncSession, getSyncSession, logSyncEvent, type SyncSession, type SyncLogEvent } from './syncSessionService';
 
 export class SyncConflict extends Error {}
 type Document = Record<string, any> & { _id: string; _type: string; _rev?: string };
@@ -273,13 +273,20 @@ export class DocumentSync {
 
   async write(document: Document, config: SanityConfig, baseOverride?: Document | null): Promise<Document> {
     const session = getSyncSession(config);
-    if (!session || !config.token) throw new Error('La sesión de Sanity todavía no está preparada');
+    const syncId = crypto.randomUUID();
+    const reject = (error: Error): never => {
+      logSyncEvent(session, { syncId, documentId: document._id || null,
+        baseRev: baseOverride?._rev ?? document._rev ?? null, remoteRev: null,
+        operation: document.syncDeleted ? 'delete' : 'push', result: 'rejected' });
+      throw error;
+    };
+    if (!session || !config.token) return reject(new Error('La sesión de Sanity todavía no está preparada'));
     assertSyncSession(session);
-    if (!document._id) throw new Error('Se requiere un ID estable para sincronizar');
+    if (!document._id) reject(new Error('Se requiere un ID estable para sincronizar'));
     const key = this.key(session, document._id);
     const observed = document._rev ? this.revisions.get(`${key}:${document._rev}`) : this.base(document._id, session);
     if (document._rev && !observed) {
-      throw new SyncConflict('La revisión local ya no es la revisión descargada. Recarga o resuelve el conflicto.');
+      reject(new SyncConflict('La revisión local ya no es la revisión descargada. Recarga o resuelve el conflicto.'));
     }
     // Explicit revision-bearing saves use the fetched revision as their base.
     // For UI forms, the observed snapshot contains the original field values.
@@ -287,7 +294,7 @@ export class DocumentSync {
       .map(k => JSON.parse(localStorage.getItem(k)!)).filter(p => p.document._id === document._id);
     const latest = persisted.filter(p => p.writer === this.writer).sort((a, b) => b.createdAt - a.createdAt)[0];
     const pending: Pending = {
-      id: crypto.randomUUID(), writer: this.writer,
+      id: syncId, writer: this.writer,
       base: baseOverride !== undefined ? baseOverride : this.queued.get(key)?.document || latest?.document || observed || null,
       createdAt: Math.max(Date.now(), (latest?.createdAt || 0) + 1),
       document: { ...document, syncOwner: session.owner },
@@ -306,6 +313,19 @@ export class DocumentSync {
   }
 
   private async commit(pending: Pending, storageKey: string, session: SyncSession): Promise<Document> {
+    const event: SyncLogEvent = { syncId: pending.id, documentId: pending.document._id,
+      baseRev: pending.base?._rev ?? null, remoteRev: null,
+      operation: pending.document.syncDeleted ? 'delete' : 'push', result: 'conflict' };
+    try {
+      return await this.commitDocument(pending, storageKey, session, event);
+    } catch (error) {
+      if (!(error instanceof SyncConflict) || getSyncSession() !== session) event.result = 'rejected';
+      logSyncEvent(session, event);
+      throw error;
+    }
+  }
+
+  private async commitDocument(pending: Pending, storageKey: string, session: SyncSession, event: SyncLogEvent): Promise<Document> {
     const client = this.clientFactory(session.config);
     for (let attempt = 0; attempt < 3; attempt++) {
       assertSyncSession(session);
@@ -318,8 +338,15 @@ export class DocumentSync {
       const remote = await client.getDocument(pending.document._id, {
         signal: session.controller.signal,
       });
+      event.remoteRev = remote?._rev ?? null;
+      if (!pending.document.syncDeleted && remote && pending.base && !equal(remote, pending.base) && !equal(pending.document, pending.base)) {
+        event.operation = 'merge';
+      }
       assertSyncSession(session);
-      if (remote?.syncOwner && remote.syncOwner !== session.owner) throw new SyncConflict('El documento pertenece a otra cuenta');
+      if (remote?.syncOwner && remote.syncOwner !== session.owner) {
+        event.result = 'rejected';
+        throw new SyncConflict('El documento pertenece a otra cuenta');
+      }
       if (remote?.syncDeleted && !pending.document.syncDeleted) throw new SyncConflict('El documento fue eliminado remotamente');
       if (remote && !pending.base && !equal(stripDocument(remote), stripDocument(pending.document))) {
         throw new SyncConflict('El documento remoto no tiene una base local conocida. Descarga antes de guardar.');
@@ -357,6 +384,7 @@ export class DocumentSync {
         const result = results.find((doc: Document) => doc._id === merged._id);
         if (!result) throw new Error('Sanity no confirmó el documento');
         localStorage.removeItem(storageKey);
+        logSyncEvent(session, { ...event, result: 'success' });
         return result;
       } catch (error: any) {
         if (error?.statusCode !== 409 && error?.response?.statusCode !== 409) throw error;

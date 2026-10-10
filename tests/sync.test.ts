@@ -784,3 +784,41 @@ test('automatic document resolution merges both versions and guards newer remote
   await assert.rejects(resolveSyncItem(item, 'merge', store, config), SyncConflict);
   assert.deepEqual(server.documents.get(base._id), committed);
 });
+
+test('sync logs distinguish push, merge, conflict and delete without document content', async context => {
+  const events: any[] = [];
+  context.mock.method(console, 'info', (label, event) => { assert.equal(label, '[sync]'); events.push(event); });
+  const base = task(); server.documents.set(base._id, base); sync.observe(base);
+  await sync.write({ ...base, title: 'Local' }, config);
+  assert.equal(events.at(-1).operation, 'push'); assert.equal(events.at(-1).result, 'success');
+  server.documents.set(base._id, { ...base, status: 'done', completed: true, _rev: 'remote-merge' });
+  await sync.write({ ...base, title: 'Merged' }, config);
+  assert.equal(events.at(-1).operation, 'merge'); assert.equal(events.at(-1).remoteRev, 'remote-merge');
+  server.documents.set(base._id, { ...base, title: 'Remote', _rev: 'remote-conflict' });
+  await assert.rejects(sync.write({ ...base, title: 'Competing' }, config), SyncConflict);
+  assert.equal(events.at(-1).result, 'conflict');
+  const latest = server.documents.get(base._id); sync.observe(latest);
+  await sync.remove(base._id, base._type, config, latest);
+  assert.equal(events.at(-1).operation, 'delete'); assert.equal(events.at(-1).result, 'success');
+  for (const event of events) {
+    assert.deepEqual(Object.keys(event).sort(), ['syncId', 'user', 'session', 'documentId', 'baseRev', 'remoteRev', 'operation', 'result'].sort());
+    assert.equal(event.documentId, base._id); assert.equal(event.user, 'user-a');
+    assert.equal(event.session, getSyncSession()!.id); assert(event.syncId);
+    assert.equal(event.baseRev, event.operation === 'delete' ? 'remote-conflict' : 'r0');
+  }
+});
+
+test('rejected offline replay retains its syncId and expected revision in logs', async context => {
+  const events: any[] = []; context.mock.method(console, 'info', (_label, event) => events.push(event));
+  const base = task(); server.documents.set(base._id, base); sync.observe(base); server.offline = true;
+  await assert.rejects(sync.write({ ...base, title: 'Offline' }, config), /offline/);
+  const rejected = events.at(-1); assert.equal(rejected.result, 'rejected');
+  const key = Object.keys(localStorage).find(key => key.startsWith('antask_sync_pending:'))!;
+  assert.equal(rejected.syncId, JSON.parse(localStorage.getItem(key)!).id);
+  server.offline = false; await sync.flush(getSyncSession()!);
+  assert.equal(events.at(-1).syncId, rejected.syncId); assert.equal(events.at(-1).baseRev, 'r0');
+  assert.equal(events.at(-1).result, 'success');
+  invalidateSyncSession();
+  await assert.rejects(sync.write({ ...base, title: 'Old session' }, config), /sesión/);
+  assert.equal(events.at(-1).result, 'rejected'); assert.equal(events.at(-1).session, null);
+});

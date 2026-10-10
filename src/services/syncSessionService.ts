@@ -1,11 +1,25 @@
 import type { SanityConfig } from './sanityService';
 
 export interface SyncSession {
+  id: string;
   generation: number;
   scope: string;
   owner: string;
   config: SanityConfig;
   controller: AbortController;
+}
+
+export interface SyncLogEvent {
+  syncId: string;
+  documentId: string | null;
+  baseRev: string | null;
+  remoteRev: string | null;
+  operation: 'pull' | 'push' | 'merge' | 'delete';
+  result: 'success' | 'conflict' | 'rejected';
+}
+
+export function logSyncEvent(session: SyncSession | null, event: SyncLogEvent): void {
+  console.info('[sync]', { ...event, user: session?.owner ?? null, session: session?.id ?? null });
 }
 
 let generation = 0;
@@ -78,6 +92,7 @@ export async function beginSyncSession(config: SanityConfig): Promise<SyncSessio
     throw new Error('La sesión de sincronización ha cambiado');
   }
   current = {
+    id: crypto.randomUUID(),
     generation, owner, config: { ...config, useCdn: false }, controller,
     scope: encodeURIComponent(JSON.stringify([config.projectId, config.dataset, owner])),
   };

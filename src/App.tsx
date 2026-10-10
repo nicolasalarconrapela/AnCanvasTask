@@ -1,5 +1,5 @@
-import { beginSyncSession, getSyncSession, assertSyncSession, invalidateSyncSession, localScope } from './services/syncSessionService';
-import { documentSync, mergeSyncValue, syncComparable } from './services/documentSyncService';
+import { beginSyncSession, getSyncSession, assertSyncSession, invalidateSyncSession, localScope, logSyncEvent } from './services/syncSessionService';
+import { documentSync, SyncConflict, mergeSyncValue, syncComparable } from './services/documentSyncService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createShapeId,
@@ -898,6 +898,7 @@ export default function App() {
         const refresh = (): Promise<void> => {
           if (refreshing) { refreshAgain = true; return refreshing; }
           refreshing = (async () => {
+            const syncId = crypto.randomUUID();
             try {
               assertSyncSession(session);
               syncReadyRef.current = false;
@@ -954,7 +955,18 @@ export default function App() {
               syncReadyRef.current = true;
               setSyncReady(true);
               setSyncStatus(session.config.token ? 'synced' : 'local');
+              docs.forEach(d => {
+                const base = previous.remoteBase?.find(w => w._id === d._id);
+                const localWorkspace = local.find(w => w._id === d._id);
+                const remoteWorkspace = remote.find(w => w._id === d._id);
+                const changed = (value: any) => JSON.stringify(syncComparable(value)) !== JSON.stringify(syncComparable(base));
+                logSyncEvent(session, { syncId, documentId: d._id,
+                  baseRev: previous.remoteDocuments?.find(b => b._id === d._id)?._rev ?? null, remoteRev: d._rev ?? null,
+                  operation: base && localWorkspace && remoteWorkspace && changed(localWorkspace) && changed(remoteWorkspace) ? 'merge' : 'pull', result: 'success' });
+              });
             } catch (error: any) {
+              logSyncEvent(session, { syncId, documentId: null, baseRev: null, remoteRev: null,
+                operation: 'pull', result: error instanceof SyncConflict && getSyncSession() === session ? 'conflict' : 'rejected' });
               if (cancelled || getSyncSession() !== session) return;
               syncReadyRef.current = false;
               setSyncReady(false);

@@ -117,7 +117,7 @@ async function openBrowser(executable, port) {
   await browser.send('Runtime.enable'); await browser.send('Page.enable');
   await browser.send('Fetch.enable', { patterns: [{ urlPattern: '*sanity.io*' }] });
   const config = { projectId: 'mockproject', dataset: 'production', apiVersion: '2024-03-01', token: 'fake-a', useCdn: false };
-  await browser.send('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('antaskcanvas_sanity_config',${JSON.stringify(JSON.stringify(config))});localStorage.setItem('antask_welcome_dismissed','true');localStorage.setItem('antask_split_view','true');` });
+  await browser.send('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('antaskcanvas_sanity_config',${JSON.stringify(JSON.stringify(config))});localStorage.setItem('antask_welcome_dismissed','true');localStorage.setItem('antask_split_view','true');window.syncEvents=[];const originalInfo=console.info;console.info=function(...args){if(args[0]==='[sync]')window.syncEvents.push(args[1]);return originalInfo.apply(this,args)};` });
   await browser.send('Page.navigate', { url: 'http://127.0.0.1:4189/' });
   await waitUntil(() => browser.evaluate("document.body?.innerText.includes('Write report')"), 'Shared task did not load');
   await browser.evaluate("if(!document.querySelector('.cm-content'))document.querySelector('#btn-toggle-split-view-top')?.click()");
@@ -150,6 +150,9 @@ try {
     const checkpoint = await browser.evaluate("JSON.parse(Object.entries(localStorage).find(([key])=>key.startsWith('antask_workspaces_v2:'))[1])");
     assert.equal(checkpoint.remoteBase[0]._rev, remoteOnly._rev);
     assert(checkpoint.workspaces[0].branches[0].taskDocuments[0].content.includes('Remote-only note'));
+    const event = await browser.evaluate(`window.syncEvents.find(event=>event.operation==='pull'&&event.documentId==='workspace-w'&&event.remoteRev===${JSON.stringify(remoteOnly._rev)})`);
+    assert.equal(event.result, 'success'); assert.equal(event.baseRev, previous._rev);
+    assert.equal(event.user, 'user-a'); assert(event.syncId); assert.equal(typeof event.session, 'string');
   }
   const cursor = await b.evaluate("(()=>{const view=document.querySelector('.cm-content').cmTile.root.view;const head=view.state.doc.toString().indexOf('Write')+3;view.dispatch({selection:{anchor:head}});return head})()");
   await a.edit('Write report', 'Write final report');
