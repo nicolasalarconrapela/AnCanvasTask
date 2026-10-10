@@ -117,13 +117,13 @@ export const getAppEnvironment = (): AppEnvironmentInfo => {
   > = {
     local: {
       label: 'Local',
-      badgeClass: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30',
-      dotClass: 'bg-amber-500',
+      badgeClass: 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30',
+      dotClass: 'bg-purple-500',
     },
     cliente: {
       label: 'Cliente',
-      badgeClass: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30',
-      dotClass: 'bg-indigo-500',
+      badgeClass: 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30',
+      dotClass: 'bg-red-500',
     },
     pro: {
       label: 'Pro',
@@ -132,8 +132,8 @@ export const getAppEnvironment = (): AppEnvironmentInfo => {
     },
     test: {
       label: 'Test',
-      badgeClass: 'bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/30',
-      dotClass: 'bg-sky-500',
+      badgeClass: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/30',
+      dotClass: 'bg-yellow-500',
     },
   };
 
