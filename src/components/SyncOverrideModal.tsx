@@ -11,6 +11,11 @@ import {
   executeBatchSync,
   deleteSyncItem,
   formatRelativeTime,
+  exportSyncBundle,
+  downloadSyncBundleAsFile,
+  parseAndValidateSyncBundle,
+  applySyncBundle,
+  SyncBundle,
 } from '../services/syncEngineService';
 import { deleteTaskFromMarkdown } from '../utils/markdownSync';
 import { WorkspaceStoreState } from '../services/workspaceService';
@@ -59,6 +64,12 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
   const [confirmBulkDelete, setConfirmBulkDelete] = useState<boolean>(false);
   const [bulkDeleteScope, setBulkDeleteScope] = useState<'local' | 'remote' | 'both'>('local');
   const [collapsedSummaryConflictDiffs, setCollapsedSummaryConflictDiffs] = useState<Set<string>>(new Set());
+  const [pendingImportBundle, setPendingImportBundle] = useState<{
+    bundle: SyncBundle;
+    filename: string;
+  } | null>(null);
+  const [importSyncMode, setImportSyncMode] = useState<'local' | 'cloud' | 'both' | 'compare'>('local');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleSummaryConflictDiff = (id: string) => {
     setCollapsedSummaryConflictDiffs((prev) => {
@@ -606,6 +617,78 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       }
     } catch (err: any) {
       onShowToast(err?.message || 'Error durante la sincronización batch', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleExportSyncBundle = () => {
+    try {
+      const bundle = exportSyncBundle(workspaceStore, result);
+      downloadSyncBundleAsFile(bundle);
+      onShowToast(
+        i18n._(
+          msg`Snapshot de Sync exportado en JSON (${bundle.metadata.summary.totalWorkspaces} workspaces, ${bundle.metadata.summary.totalTasks} tareas)`
+        ),
+        'success'
+      );
+    } catch (err: any) {
+      onShowToast(err?.message || 'Error al exportar JSON', 'error');
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result;
+      if (typeof text !== 'string') return;
+      const res = parseAndValidateSyncBundle(text);
+      if (!res.valid || !res.bundle) {
+        onShowToast(res.error || 'Archivo JSON no compatible', 'error');
+        return;
+      }
+      setPendingImportBundle({ bundle: res.bundle, filename: file.name });
+      setImportSyncMode('local');
+    };
+    reader.onerror = () => {
+      onShowToast('Error al leer el archivo JSON', 'error');
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleExecuteImportSync = async () => {
+    if (!pendingImportBundle) return;
+    const { bundle } = pendingImportBundle;
+    setIsProcessing(true);
+    try {
+      if (importSyncMode === 'compare') {
+        onShowToast(i18n._(msg`Analizando diferencias con Sanity Cloud para los datos importados...`), 'info');
+        const comp = await analyzeSyncDifferences(bundle.workspaceStore);
+        setResult(comp);
+        onShowToast(
+          i18n._(msg`Comparación de Sync completada: ${comp.items.length} elemento(s) analizados`),
+          'info'
+        );
+        setPendingImportBundle(null);
+        return;
+      }
+
+      const res = await applySyncBundle(bundle, importSyncMode, workspaceStore);
+      if (res.success) {
+        onUpdateWorkspaceStore(res.updatedStore);
+        onShowToast(res.message, 'success');
+        setPendingImportBundle(null);
+        setTimeout(() => {
+          handleRunAnalysis();
+        }, 100);
+      } else {
+        onShowToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      onShowToast(err?.message || 'Error durante la sincronización del archivo JSON', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -1592,6 +1675,37 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
 
           <div className="flex items-center gap-1.5 shrink-0">
             <button
+              id="btn-sync-export-json"
+              type="button"
+              onClick={handleExportSyncBundle}
+              disabled={isProcessing}
+              className="btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              title={i18n._(msg`Exportar todos los workspaces, documentos y estado de Sync a un archivo JSON`)}
+            >
+              <span className="material-symbols-outlined text-[15px]">download</span>
+              <span>{i18n._(msg`Exportar JSON`)}</span>
+            </button>
+
+            <button
+              id="btn-sync-import-json"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isProcessing}
+              className="btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              title={i18n._(msg`Importar archivo JSON de Sync y aplicar opciones de sincronización`)}
+            >
+              <span className="material-symbols-outlined text-[15px]">upload</span>
+              <span>{i18n._(msg`Importar JSON`)}</span>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleFileInputChange}
+            />
+
+            <button
               id="btn-sync-open-sanity-config"
               type="button"
               onClick={onOpenSanityConfig}
@@ -2398,6 +2512,238 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
           </div>
         )}
       </div>
+
+      {/* Import & Sync Support Dialog */}
+      {pendingImportBundle && (
+        <div
+          id="modal-sync-import-overlay"
+          className="fixed inset-0 z-[70] bg-black/75 flex justify-center items-center p-3 sm:p-6 animate-fade-in"
+          onClick={() => !isProcessing && setPendingImportBundle(null)}
+        >
+          <div
+            id="modal-sync-import-dialog"
+            className="w-full max-w-lg bg-[var(--surface)] border border-[var(--outline)] rounded-lg shadow-2xl overflow-hidden flex flex-col animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="import-dialog-title"
+          >
+            {/* Header */}
+            <div className="px-4 py-3 border-b border-[var(--outline)]/50 flex items-center justify-between gap-3 bg-[var(--surface)]">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-indigo-400 text-[20px]">upload_file</span>
+                <h3 id="import-dialog-title" className="text-sm font-semibold text-[var(--on-surface)]">
+                  {i18n._(msg`Importación y Soporte de Sync`)}
+                </h3>
+              </div>
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={() => setPendingImportBundle(null)}
+                className="btn-m3-icon w-6 h-6 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[16px]">close</span>
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-4 flex flex-col gap-3 text-xs overflow-y-auto max-h-[70vh]">
+              {/* Metadata summary */}
+              <div className="p-3 rounded bg-[var(--surface-container-low)] border border-[var(--outline)]/40 flex flex-col gap-2">
+                <div className="flex items-center justify-between text-[11px] text-[var(--on-surface-variant)]">
+                  <span className="font-medium truncate max-w-[260px] text-[var(--on-surface)] font-mono">
+                    {pendingImportBundle.filename}
+                  </span>
+                  <span className="font-mono text-[10px]">
+                    {formatRelativeTime(pendingImportBundle.bundle.metadata.exportedAt)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center pt-1 border-t border-[var(--outline)]/20">
+                  <div className="p-1.5 rounded bg-[var(--surface)] border border-[var(--outline)]/20">
+                    <div className="text-[10px] text-[var(--on-surface-variant)]">{i18n._(msg`Workspaces`)}</div>
+                    <div className="font-mono text-sm font-semibold text-[var(--on-surface)]">
+                      {pendingImportBundle.bundle.metadata.summary.totalWorkspaces}
+                    </div>
+                  </div>
+                  <div className="p-1.5 rounded bg-[var(--surface)] border border-[var(--outline)]/20">
+                    <div className="text-[10px] text-[var(--on-surface-variant)]">{i18n._(msg`Documentos`)}</div>
+                    <div className="font-mono text-sm font-semibold text-[var(--on-surface)]">
+                      {pendingImportBundle.bundle.metadata.summary.totalDocuments}
+                    </div>
+                  </div>
+                  <div className="p-1.5 rounded bg-[var(--surface)] border border-[var(--outline)]/20">
+                    <div className="text-[10px] text-[var(--on-surface-variant)]">{i18n._(msg`Tareas`)}</div>
+                    <div className="font-mono text-sm font-semibold text-[var(--on-surface)]">
+                      {pendingImportBundle.bundle.metadata.summary.totalTasks}
+                    </div>
+                  </div>
+                </div>
+
+                {pendingImportBundle.bundle.metadata.environment?.projectId && (
+                  <div className="text-[10px] text-[var(--on-surface-variant)] flex items-center gap-1.5 pt-1 border-t border-[var(--outline)]/10">
+                    <span className="material-symbols-outlined text-[13px] text-amber-400">cloud</span>
+                    <span>{i18n._(msg`Origen Sanity:`)}</span>
+                    <span className="font-mono text-[var(--on-surface)]">
+                      {pendingImportBundle.bundle.metadata.environment.projectId} (
+                      {pendingImportBundle.bundle.metadata.environment.dataset || 'production'})
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Sync mode options */}
+              <div className="flex flex-col gap-2">
+                <span className="text-[11px] font-semibold text-[var(--on-surface-variant)] uppercase tracking-wider">
+                  {i18n._(msg`Selecciona cómo sincronizar el archivo`)}
+                </span>
+
+                <div className="flex flex-col gap-2">
+                  {/* Option 1: Local */}
+                  <label
+                    className={`p-2.5 rounded border transition cursor-pointer flex items-start gap-2.5 ${
+                      importSyncMode === 'local'
+                        ? 'border-indigo-500 bg-indigo-950/20'
+                        : 'border-[var(--outline)]/40 hover:bg-[var(--surface-container-high)]/30'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="importSyncMode"
+                      checked={importSyncMode === 'local'}
+                      onChange={() => setImportSyncMode('local')}
+                      className="mt-0.5 accent-indigo-500 cursor-pointer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[var(--on-surface)] flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[15px] text-sky-400">laptop</span>
+                        <span>{i18n._(msg`Aplicar en Local`)}</span>
+                      </div>
+                      <div className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">
+                        {i18n._(msg`Actualiza tu almacén local con los workspaces y tareas del archivo JSON.`)}
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Option 2: Cloud */}
+                  <label
+                    className={`p-2.5 rounded border transition flex items-start gap-2.5 ${
+                      !isSanityConfigured ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                    } ${
+                      importSyncMode === 'cloud'
+                        ? 'border-indigo-500 bg-indigo-950/20'
+                        : 'border-[var(--outline)]/40 hover:bg-[var(--surface-container-high)]/30'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="importSyncMode"
+                      disabled={!isSanityConfigured}
+                      checked={importSyncMode === 'cloud'}
+                      onChange={() => setImportSyncMode('cloud')}
+                      className="mt-0.5 accent-indigo-500 cursor-pointer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[var(--on-surface)] flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[15px] text-amber-400">cloud_upload</span>
+                        <span>{i18n._(msg`Subir a Sanity Cloud`)}</span>
+                      </div>
+                      <div className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">
+                        {i18n._(msg`Publica directamente los workspaces del archivo en Sanity Cloud.`)}
+                        {!isSanityConfigured && (
+                          <span className="block text-amber-400/80 mt-0.5">
+                            {i18n._(msg`(Requiere configurar credenciales de Sanity)`)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Option 3: Both */}
+                  <label
+                    className={`p-2.5 rounded border transition flex items-start gap-2.5 ${
+                      !isSanityConfigured ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                    } ${
+                      importSyncMode === 'both'
+                        ? 'border-indigo-500 bg-indigo-950/20'
+                        : 'border-[var(--outline)]/40 hover:bg-[var(--surface-container-high)]/30'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="importSyncMode"
+                      disabled={!isSanityConfigured}
+                      checked={importSyncMode === 'both'}
+                      onChange={() => setImportSyncMode('both')}
+                      className="mt-0.5 accent-indigo-500 cursor-pointer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[var(--on-surface)] flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[15px] text-emerald-400">sync</span>
+                        <span>{i18n._(msg`Sincronización Total (Local + Sanity Cloud)`)}</span>
+                      </div>
+                      <div className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">
+                        {i18n._(msg`Actualiza tu almacén local y publica simultáneamente los datos en Sanity Cloud.`)}
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Option 4: Compare */}
+                  <label
+                    className={`p-2.5 rounded border transition cursor-pointer flex items-start gap-2.5 ${
+                      importSyncMode === 'compare'
+                        ? 'border-indigo-500 bg-indigo-950/20'
+                        : 'border-[var(--outline)]/40 hover:bg-[var(--surface-container-high)]/30'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="importSyncMode"
+                      checked={importSyncMode === 'compare'}
+                      onChange={() => setImportSyncMode('compare')}
+                      className="mt-0.5 accent-indigo-500 cursor-pointer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[var(--on-surface)] flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[15px] text-purple-400">compare_arrows</span>
+                        <span>{i18n._(msg`Comparar en Sync (Inspeccionar diferencias)`)}</span>
+                      </div>
+                      <div className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">
+                        {i18n._(msg`Carga los datos en el analizador de Sync para revisar diferencias contra Sanity Cloud sin guardar cambios aún.`)}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-4 py-3 border-t border-[var(--outline)]/50 bg-[var(--surface-container-low)] flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingImportBundle(null)}
+                disabled={isProcessing}
+                className="btn-m3-secondary px-3 py-1.5 text-xs cursor-pointer disabled:opacity-50"
+              >
+                {i18n._(msg`Cancelar`)}
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteImportSync}
+                disabled={isProcessing}
+                className="btn-m3-primary px-3.5 py-1.5 text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isProcessing && <span className="material-symbols-outlined text-[14px] animate-spin">refresh</span>}
+                <span>
+                  {importSyncMode === 'compare'
+                    ? i18n._(msg`Comparar en Sync`)
+                    : i18n._(msg`Ejecutar Sincronización`)}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

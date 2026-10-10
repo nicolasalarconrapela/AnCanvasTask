@@ -3,6 +3,7 @@ import {
   WorkspaceStoreState,
   saveWorkspaceStore,
   createEmptyWorkspace,
+  sanitizeWorkspace,
 } from './workspaceService';
 import {
   getSanityConfig,
@@ -13,6 +14,7 @@ import {
   workspacesFromSanityDocuments,
   normalizeSanityWorkspaceDoc,
   SanityConfig,
+  saveWorkspaceToSanity,
 } from './sanityService';
 import { parseTasksMarkdown, type ParsedGroup } from '../utils/taskMarkdown';
 import { documentSync, mergeSyncValue, buildTaskDocumentId, syncComparable, applyTaskToMarkdown, taskFields } from './documentSyncService';
@@ -895,5 +897,336 @@ export async function deleteSyncItem(
   return {
     success: false,
     message: 'Tipo de elemento no compatible para eliminación',
+  };
+}
+
+export interface SyncBundleMetadata {
+  version: 1;
+  format: 'antask_sync_bundle';
+  exportedAt: string;
+  source: string;
+  environment?: {
+    projectId?: string;
+    dataset?: string;
+    appVersion?: string;
+  };
+  summary: {
+    totalWorkspaces: number;
+    totalBranches: number;
+    totalDocuments: number;
+    totalTasks: number;
+  };
+}
+
+export interface SyncBundle {
+  metadata: SyncBundleMetadata;
+  workspaceStore: WorkspaceStoreState;
+  analysisSnapshot?: {
+    analyzedAt: string;
+    counts: SyncComparisonResult['counts'];
+    itemsSummary?: Array<{
+      id: string;
+      title: string;
+      diffType: SyncDifferenceType;
+      entityType: SyncEntityType;
+      workspaceId?: string;
+      documentPath?: string;
+    }>;
+  };
+}
+
+/**
+ * Calculates high-level summary counts from a workspace store.
+ */
+export function calculateStoreSummary(store: WorkspaceStoreState): {
+  totalWorkspaces: number;
+  totalBranches: number;
+  totalDocuments: number;
+  totalTasks: number;
+} {
+  const workspaces = store.workspaces || [];
+  let totalBranches = 0;
+  let totalDocuments = 0;
+  let totalTasks = 0;
+
+  for (const ws of workspaces) {
+    const branches = ws.branches || [];
+    totalBranches += branches.length;
+    for (const b of branches) {
+      const docs = b.taskDocuments || [];
+      totalDocuments += docs.length;
+      for (const d of docs) {
+        if (d.content) {
+          const parsed = parseTasksMarkdown(d.content);
+          totalTasks += parsed.reduce((acc, g) => acc + g.tasks.length, 0);
+        }
+      }
+    }
+  }
+
+  return {
+    totalWorkspaces: workspaces.length,
+    totalBranches,
+    totalDocuments,
+    totalTasks,
+  };
+}
+
+/**
+ * Creates an export bundle containing all workspaces, markdown task documents,
+ * and optional current sync analysis snapshot.
+ */
+export function exportSyncBundle(
+  workspaceStore: WorkspaceStoreState,
+  result: SyncComparisonResult | null,
+  configOverride?: Partial<SanityConfig>
+): SyncBundle {
+  const config = { ...getSanityConfig(), ...configOverride };
+  const summary = calculateStoreSummary(workspaceStore);
+
+  return {
+    metadata: {
+      version: 1,
+      format: 'antask_sync_bundle',
+      exportedAt: new Date().toISOString(),
+      source: 'AnCanvasTask Sync',
+      environment: {
+        projectId: config.projectId || undefined,
+        dataset: config.dataset || undefined,
+        appVersion: '1.5.404-beta',
+      },
+      summary,
+    },
+    workspaceStore: {
+      workspaces: (workspaceStore.workspaces || []).map((w) => sanitizeWorkspace(w)),
+      activeWorkspaceId: workspaceStore.activeWorkspaceId,
+      githubToken: workspaceStore.githubToken,
+      remoteBase: workspaceStore.remoteBase,
+      remoteDocuments: workspaceStore.remoteDocuments,
+      scope: workspaceStore.scope,
+    },
+    analysisSnapshot: result
+      ? {
+          analyzedAt: result.analyzedAt,
+          counts: { ...result.counts },
+          itemsSummary: result.items.map((i) => ({
+            id: i.id,
+            title: i.title,
+            diffType: i.diffType,
+            entityType: i.entityType,
+            workspaceId: i.workspaceId,
+            documentPath: i.documentPath,
+          })),
+        }
+      : undefined,
+  };
+}
+
+/**
+ * Downloads a sync bundle directly as a formatted JSON file in the browser.
+ */
+export function downloadSyncBundleAsFile(bundle: SyncBundle, filename?: string): void {
+  const json = JSON.stringify(bundle, null, 2);
+  const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+  const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const name = filename || `antask_sync_snapshot_${dateStr}.json`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Parses and validates an imported JSON string or object, normalizing it into a SyncBundle.
+ * Supports native antask_sync_bundle format, raw WorkspaceStoreState, or localStorage dumps.
+ */
+export function parseAndValidateSyncBundle(input: string | any): {
+  valid: boolean;
+  bundle?: SyncBundle;
+  error?: string;
+} {
+  let data: any;
+  if (typeof input === 'string') {
+    try {
+      data = JSON.parse(input);
+    } catch (err: any) {
+      return { valid: false, error: `JSON inválido: ${err?.message || 'Error de parseo'}` };
+    }
+  } else {
+    data = input;
+  }
+
+  if (!data || typeof data !== 'object') {
+    return { valid: false, error: 'El archivo JSON no contiene un objeto válido' };
+  }
+
+  // Case 1: Standard antask_sync_bundle
+  if (data.metadata?.format === 'antask_sync_bundle' && data.workspaceStore) {
+    const rawWs = data.workspaceStore.workspaces;
+    if (!Array.isArray(rawWs)) {
+      return { valid: false, error: 'El archivo no contiene una lista de workspaces válida' };
+    }
+    const sanitizedWorkspaces = rawWs.map((w: any) => sanitizeWorkspace(w));
+    const store: WorkspaceStoreState = {
+      workspaces: sanitizedWorkspaces,
+      activeWorkspaceId: data.workspaceStore.activeWorkspaceId || sanitizedWorkspaces[0]?.id || '',
+      githubToken: data.workspaceStore.githubToken || null,
+      remoteBase: data.workspaceStore.remoteBase || null,
+      remoteDocuments: data.workspaceStore.remoteDocuments || null,
+      scope: data.workspaceStore.scope,
+    };
+    const summary = calculateStoreSummary(store);
+    return {
+      valid: true,
+      bundle: {
+        metadata: {
+          version: 1,
+          format: 'antask_sync_bundle',
+          exportedAt: data.metadata.exportedAt || new Date().toISOString(),
+          source: data.metadata.source || 'AnCanvasTask Sync',
+          environment: data.metadata.environment,
+          summary: data.metadata.summary || summary,
+        },
+        workspaceStore: store,
+        analysisSnapshot: data.analysisSnapshot,
+      },
+    };
+  }
+
+  // Case 2: Direct WorkspaceStoreState or contains workspaces
+  let rawWorkspaces = Array.isArray(data.workspaces) ? data.workspaces : null;
+
+  // Case 3: LocalStorage backup dump
+  if (!rawWorkspaces && typeof data === 'object') {
+    for (const key of Object.keys(data)) {
+      if (key.includes('workspace_store') && typeof data[key] === 'string') {
+        try {
+          const parsed = JSON.parse(data[key]);
+          if (Array.isArray(parsed?.workspaces)) {
+            rawWorkspaces = parsed.workspaces;
+            break;
+          }
+        } catch {
+          // continue
+        }
+      }
+    }
+  }
+
+  if (!rawWorkspaces || !Array.isArray(rawWorkspaces) || rawWorkspaces.length === 0) {
+    return {
+      valid: false,
+      error: 'No se encontraron workspaces reconocibles en el archivo JSON',
+    };
+  }
+
+  const sanitizedWorkspaces = rawWorkspaces.map((w: any) => sanitizeWorkspace(w));
+  const store: WorkspaceStoreState = {
+    workspaces: sanitizedWorkspaces,
+    activeWorkspaceId: data.activeWorkspaceId || sanitizedWorkspaces[0]?.id || '',
+    githubToken: data.githubToken || null,
+    remoteBase: data.remoteBase || null,
+    remoteDocuments: data.remoteDocuments || null,
+    scope: data.scope,
+  };
+
+  const summary = calculateStoreSummary(store);
+
+  return {
+    valid: true,
+    bundle: {
+      metadata: {
+        version: 1,
+        format: 'antask_sync_bundle',
+        exportedAt: data.exportedAt || new Date().toISOString(),
+        source: 'JSON Import',
+        summary,
+      },
+      workspaceStore: store,
+    },
+  };
+}
+
+/**
+ * Applies an imported SyncBundle to local storage, Sanity Cloud, or both,
+ * providing full sync support for the imported data.
+ */
+export async function applySyncBundle(
+  bundle: SyncBundle,
+  mode: 'local' | 'cloud' | 'both',
+  currentStore: WorkspaceStoreState,
+  configOverride?: Partial<SanityConfig>
+): Promise<{
+  success: boolean;
+  message: string;
+  updatedStore: WorkspaceStoreState;
+  pushedCount?: number;
+}> {
+  const config = { ...getSanityConfig(), ...configOverride };
+  const updatedWorkspaces = bundle.workspaceStore.workspaces.map((w) => sanitizeWorkspace(w));
+  const updatedStore: WorkspaceStoreState = {
+    ...currentStore,
+    workspaces: updatedWorkspaces,
+    activeWorkspaceId: bundle.workspaceStore.activeWorkspaceId || updatedWorkspaces[0]?.id || currentStore.activeWorkspaceId,
+  };
+
+  if (mode === 'local' || mode === 'both') {
+    saveWorkspaceStore(updatedStore);
+  }
+
+  if (mode === 'cloud' || mode === 'both') {
+    if (!config.projectId || !config.dataset || !config.token) {
+      return {
+        success: false,
+        message: 'Se requiere configurar el Project ID, Dataset y API Token de Sanity para sincronizar a la nube.',
+        updatedStore: mode === 'both' ? updatedStore : currentStore,
+      };
+    }
+
+    let pushedCount = 0;
+    const errors: string[] = [];
+    for (const ws of bundle.workspaceStore.workspaces) {
+      try {
+        const res = await saveWorkspaceToSanity(ws, config);
+        if (res.ok) {
+          pushedCount++;
+        } else {
+          errors.push(`Workspace "${ws.name}": ${res.message}`);
+        }
+      } catch (err: any) {
+        errors.push(`Workspace "${ws.name}": ${err?.message || 'Error'}`);
+      }
+    }
+
+    if (errors.length > 0 && pushedCount === 0) {
+      return {
+        success: false,
+        message: `Fallo al subir a Sanity Cloud: ${errors.join(', ')}`,
+        updatedStore: mode === 'both' ? updatedStore : currentStore,
+        pushedCount: 0,
+      };
+    }
+
+    const modeMsg =
+      mode === 'both'
+        ? `Sincronización completa: Almacén local actualizado y ${pushedCount} workspace(s) subidos a Sanity Cloud.`
+        : `${pushedCount} workspace(s) subidos a Sanity Cloud desde el archivo JSON.`;
+
+    return {
+      success: true,
+      message: modeMsg,
+      updatedStore: mode === 'both' ? updatedStore : currentStore,
+      pushedCount,
+    };
+  }
+
+  return {
+    success: true,
+    message: `Almacén local actualizado exitosamente con ${bundle.workspaceStore.workspaces.length} workspace(s).`,
+    updatedStore,
   };
 }
