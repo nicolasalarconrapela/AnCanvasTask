@@ -133,6 +133,24 @@ try {
   assert(existsSync(edge) && existsSync(chrome), 'This browser test requires Edge and Chrome on Windows');
   const a = await openBrowser(edge, 9338), b = await openBrowser(chrome, 9339);
   await waitUntil(() => Promise.resolve(listeners.size >= 2), 'Both realtime streams did not connect');
+  // A remote-only edit must reach the active editor without publishing its old text.
+  await pause(1500);
+  const beforeRemoteOnly = mutations;
+  const previous = documents.get('workspace-w'), remoteOnly = structuredClone(previous);
+  remoteOnly._rev = `remote-only-${++revision}`;
+  remoteOnly.branches[0].taskDocuments[0].content += '\nRemote-only note\n';
+  documents.set(remoteOnly._id, remoteOnly);
+  for (const listener of listeners) listener.write(`event: mutation\ndata: ${JSON.stringify({
+    type: 'mutation', documentId: remoteOnly._id, transition: 'update', result: remoteOnly, previous,
+  })}\n\n`);
+  await waitUntil(async () => (await a.content()).includes('Remote-only note') && (await b.content()).includes('Remote-only note'), 'Remote-only edit did not reach the active editors');
+  await pause(1500);
+  assert.equal(mutations, beforeRemoteOnly, 'Hydration published obsolete local content');
+  for (const browser of [a, b]) {
+    const checkpoint = await browser.evaluate("JSON.parse(Object.entries(localStorage).find(([key])=>key.startsWith('antask_workspaces_v2:'))[1])");
+    assert.equal(checkpoint.remoteBase[0]._rev, remoteOnly._rev);
+    assert(checkpoint.workspaces[0].branches[0].taskDocuments[0].content.includes('Remote-only note'));
+  }
   const cursor = await b.evaluate("(()=>{const view=document.querySelector('.cm-content').cmTile.root.view;const head=view.state.doc.toString().indexOf('Write')+3;view.dispatch({selection:{anchor:head}});return head})()");
   await a.edit('Write report', 'Write final report');
   await waitUntil(async () => (await b.content()).includes('Write final report'), 'A edit did not reach B');
@@ -161,6 +179,15 @@ try {
   await waitUntil(async () => (await b.content()).includes('today typingburst'), 'Debounced edits did not reach the other browser');
   for (const [name, content] of [['README.md', '# First readme\n'], ['README.md', '# Second readme\n']]) {
     await a.evaluate(`(()=>{const input=document.querySelector('#div-app-root > input[type=file]');const transfer=new DataTransfer();transfer.items.add(new File([${JSON.stringify(content)}],${JSON.stringify(name)},{type:'text/markdown'}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    // Receiving a new file preserves this tab's selection. Verify replication, then open it.
+    let receivedId;
+    await waitUntil(async () => {
+      receivedId = await b.evaluate(`Object.entries(localStorage).filter(([key])=>key.startsWith('antask_workspaces_v2:')).flatMap(([,value])=>JSON.parse(value).workspaces).flatMap(ws=>ws.branches).flatMap(branch=>branch.taskDocuments).find(doc=>doc.content===${JSON.stringify(content)})?.id`);
+      return !!receivedId;
+    }, 'Imported Markdown did not reach the other browser store');
+    await b.evaluate("if(!document.querySelector('[id^=div-doc-item-]'))document.querySelector('#btn-toggle-sidebar')?.click()");
+    await waitUntil(() => b.evaluate(`!!document.getElementById(${JSON.stringify('div-doc-item-')}+${JSON.stringify(receivedId)})`), 'Imported document did not appear in the explorer');
+    await b.evaluate(`document.getElementById(${JSON.stringify('div-doc-item-')}+${JSON.stringify(receivedId)}).click()`);
     await waitUntil(async () => await b.content() === content, 'Imported Markdown did not reach the other browser');
   }
   const savedDocs = documents.get('workspace-w').branches[0].taskDocuments;
@@ -191,7 +218,7 @@ try {
   await waitUntil(() => a.evaluate("document.querySelectorAll('[data-document-path=\"README.md\"]').length===4"), 'Sync view did not distinguish Markdown files across branches');
   assert.deepEqual(a.errors, []); assert.deepEqual(b.errors, []);
   console.log(JSON.stringify({ browsers: ['Edge', 'Chrome'], isolatedProfiles: true, sequentialEdits: true,
-    bidirectionalRealtime: true, concurrentTitleEdits: true, cursorPreserved: true, typingStoreWrites,
+    bidirectionalRealtime: true, remoteOnlyNoOverwrite: true, concurrentTitleEdits: true, cursorPreserved: true, typingStoreWrites,
     typingDebounced: true, separateMarkdownFiles: true, cloneAndEmptyBranches: true, mutations, uncaughtErrors: 0 }));
 } catch(error) {
   for (const browser of browsers) {

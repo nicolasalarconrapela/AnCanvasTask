@@ -954,7 +954,7 @@ export async function writeTestingTaskToSanity(
 /**
  * Fetches recent documents stored in Sanity dataset (task, canvasVisualState, and workspace).
  */
-export async function fetchSanityDocumentsList(configOverride?: Partial<SanityConfig>, includeDeleted = false, includeLegacy = false): Promise<any[]> {
+export async function fetchSanityDocumentsList(configOverride?: Partial<SanityConfig>, includeDeleted = false, includeLegacy = false, observe = true): Promise<any[]> {
   const config = { ...getSanityConfig(), ...configOverride };
   const session = getSyncSession(config);
   if (!session) throw new Error('La sesión de Sanity todavía no está preparada');
@@ -965,7 +965,7 @@ export async function fetchSanityDocumentsList(configOverride?: Partial<SanityCo
   const deleted = new Map(docs.filter(d => d._type === 'syncDeletion').map(d => [d.targetId, d.deletedDocument]));
   const visible = docs.filter(d => d._type !== 'syncDeletion').map(d => deleted.has(d._id) ? { ...d, syncDeleted: true } : d);
   for (const [id, tombstone] of deleted) if (!visible.some(d => d._id === id)) visible.push(tombstone);
-  visible.forEach(doc => documentSync.observe(doc, session));
+  if (observe) visible.forEach(doc => documentSync.observe(doc, session));
   return includeDeleted ? visible : visible.filter(doc => !doc.syncDeleted);
 }
 
@@ -1319,29 +1319,18 @@ export async function deleteDocumentFromSanity(docId: string, configOverride?: P
     return { ok: false, message: 'Configura el API Token de Sanity para eliminar en remoto' };
   }
 
-  const client = getSanityClient(config);
   try {
-    let doc = documentSync.base(docId);
+    const session = getSyncSession(config);
+    if (!session) throw new Error('La sesión de Sanity todavía no está preparada');
+    assertSyncSession(session);
+    let doc = documentSync.base(docId, session);
     if (!doc) {
-      doc = await fetchSanityDocumentById(docId, config);
+      doc = await createClient(session.config).getDocument(docId, { signal: session.controller.signal });
+      assertSyncSession(session);
     }
-
-    if (doc) {
-      try {
-        await documentSync.remove(docId, doc._type, config, doc);
-      } catch (syncErr) {
-        console.warn('documentSync.remove note, proceeding to Lake deletion:', syncErr);
-      }
-    }
-
-    // Direct deletion on Sanity Lake (both published and draft)
-    await client.delete(docId);
-    if (!docId.startsWith('drafts.')) {
-      try {
-        await client.delete(`drafts.${docId}`);
-      } catch {}
-    }
-
+    if (!doc) throw new Error('No hay una revisión conocida para confirmar el borrado');
+    await documentSync.remove(docId, doc._type, config, doc);
+    assertSyncSession(session);
     return { ok: true, message: 'Documento eliminado de Sanity' };
   } catch (error: any) {
     return { ok: false, message: error?.message || 'Error al eliminar de Sanity' };

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { beforeEach, afterEach, test } from 'node:test';
-import { DocumentSync, SyncConflict, mergeSyncValue, mergeMarkdown, buildTaskDocumentId, deletionMarkerId } from '../src/services/documentSyncService';
+import { DocumentSync, documentSync, SyncConflict, mergeSyncValue, mergeMarkdown, buildTaskDocumentId, deletionMarkerId } from '../src/services/documentSyncService';
 import { beginSyncSession, getSyncSession, invalidateSyncSession } from '../src/services/syncSessionService';
 import { createEmptyWorkspace, createTaskDocument, createWorkspaceBranch, loadWorkspaceStore, saveWorkspaceStore, flushWorkspaceStoreSaves, sanitizeWorkspace } from '../src/services/workspaceService';
-import { compareMarkdownDocuments } from '../src/services/syncEngineService';
-import { applyRemoteTask, clearSanityConfig, getSanityConfig, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments, subscribeToSanityLiveChanges } from '../src/services/sanityService';
+import { analyzeSyncDifferences, classifySyncDifference, compareMarkdownDocuments, resolveSyncItem } from '../src/services/syncEngineService';
+import { applyRemoteTask, clearSanityConfig, deleteDocumentFromSanity, getSanityConfig, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments, subscribeToSanityLiveChanges } from '../src/services/sanityService';
 import { scanTaskBlocks, updateTaskInMarkdown } from '../src/utils/markdownSync';
 
 class MemoryStorage implements Storage {
@@ -665,4 +666,121 @@ test('live listener reconnects after an error and stops retrying when its sessio
   observers[1].next({ type: 'welcome' }); assert.equal(events.at(-1), 'reconnect');
   observers[1].error(new Error('connection lost')); close();
   context.mock.timers.tick(30000); assert.equal(observers.length, 2);
+});
+
+test('query absence with an existing direct document never creates a tombstone', async () => {
+  const base = workspace(); sync.observe(base);
+  const current = { ...base, name: 'Current remote', _rev: 'new' };
+  server.documents.set(base._id, current);
+  const reconciled = await sync.reconcileDeletions([base], [], config);
+  assert.deepEqual(reconciled, [current]);
+  assert.equal(server.commits, 0);
+  assert.equal(server.documents.has(deletionMarkerId(base._id)), false);
+});
+
+test('a failed direct absence check preserves documents and never deletes', async () => {
+  const base = workspace(); server.documents.set(base._id, base); sync.observe(base); server.offline = true;
+  await assert.rejects(sync.reconcileDeletions([base], [], config), /offline/);
+  assert.deepEqual(server.documents.get(base._id), base);
+  assert.equal(server.commits, 0);
+});
+
+test('a recreation after direct absence verification rejects deletion', async () => {
+  const base = workspace();
+  let checked = false;
+  const verifier = new DocumentSync(() => ({ ...server.client(), getDocument: async (id: string) => {
+    if (id === base._id && !checked) {
+      checked = true; server.documents.set(id, { ...base, _rev: 'recreated' }); return null;
+    }
+    return server.client().getDocument(id);
+  } }));
+  verifier.observe(base);
+  await assert.rejects(verifier.reconcileDeletions([base], [], config), SyncConflict);
+  assert.equal(server.documents.get(base._id)._rev, 'recreated');
+  assert.equal(server.commits, 0);
+});
+
+test('public deletion preserves a concurrent edit and never falls back to physical delete', async context => {
+  const base = workspace(); sync.observe(base);
+  const remote = { ...base, name: 'Concurrent edit', _rev: 'new' }; server.documents.set(base._id, remote);
+  context.mock.method(documentSync, 'base', () => base);
+  context.mock.method(documentSync, 'remove', (id, type, cfg, expected) => sync.remove(id, type, cfg, expected));
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; throw new Error('Unexpected fallback request'); };
+  const result = await deleteDocumentFromSanity(base._id, config);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /editado/);
+  assert.equal(requests, 0); assert.equal(server.commits, 0);
+  assert.deepEqual(server.documents.get(base._id), remote);
+});
+
+test('public deletion rejects invalid sessions and other owners without physical delete', async context => {
+  const base = { ...task(), syncOwner: 'user-b' }; server.documents.set(base._id, base); sync.observe(base);
+  context.mock.method(documentSync, 'base', () => base);
+  context.mock.method(documentSync, 'remove', (id, type, cfg, expected) => sync.remove(id, type, cfg, expected));
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; throw new Error('Unexpected fallback request'); };
+  assert.equal((await deleteDocumentFromSanity(base._id, config)).ok, false);
+  invalidateSyncSession();
+  assert.equal((await deleteDocumentFromSanity(base._id, config)).ok, false);
+  assert.equal(requests, 0); assert.deepEqual(server.documents.get(base._id), base);
+});
+
+test('text merge returns one-sided changes and preserves both inputs on real conflict', () => {
+  const local = markdown.replace('[ ] A', '[ ] B'), remote = markdown.replace('[ ] A', '[ ] C');
+  assert.equal(mergeMarkdown(markdown, local, markdown), local);
+  assert.equal(mergeMarkdown(markdown, markdown, remote), remote);
+  assert.throws(() => mergeMarkdown(markdown, local, remote), SyncConflict);
+  assert(local.includes('[ ] B')); assert(remote.includes('[ ] C'));
+  assert.equal(classifySyncDifference({ content: markdown }, { content: local }, { content: remote }), 'conflict');
+});
+
+test('remote-only and compatible changes never increment the conflict count', async context => {
+  const base = workspace(), local = normalizeSanityWorkspaceDoc(base);
+  const remote = structuredClone(base); remote._rev = 'new';
+  remote.branches[0].taskDocuments[0].content = markdown.replace('[ ]', '[x]');
+  const store = { scope: getSyncSession()!.scope, workspaces: [local], activeWorkspaceId: local.id,
+    remoteBase: [structuredClone(local)], remoteDocuments: [base] };
+  const api = createServer((_request, response) => {
+    response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ result: [remote] }));
+  });
+  await new Promise<void>(resolve => api.listen(0, '127.0.0.1', resolve));
+  context.after(() => { api.closeAllConnections(); api.close(); });
+  const address = api.address() as { port: number };
+  const mockConfig = { ...config, apiHost: `http://127.0.0.1:${address.port}`, useProjectHostname: false };
+  const remoteOnly = await analyzeSyncDifferences(store, mockConfig);
+  assert.equal(remoteOnly.counts.conflicts, 0); assert(remoteOnly.counts.remoteOverrides > 0);
+  local.branches[0].taskDocuments[0].content = markdown.replace('[ ] A', '[ ] B');
+  const compatible = await analyzeSyncDifferences(store, mockConfig);
+  assert.equal(compatible.counts.conflicts, 0); assert(compatible.counts.autoMerged > 0);
+  assert(compatible.items.filter(item => item.diffType === 'auto_merged').every(item => item.resolutionStrategy === 'merge'));
+  assert.equal(classifySyncDifference({ content: markdown }, { content: local.branches[0].taskDocuments[0].content }, { content: markdown }), 'local_override');
+});
+
+test('automatic document resolution merges both versions and guards newer remote edits', async context => {
+  documentSync.forget();
+  context.mock.method(documentSync as any, 'clientFactory', server.client);
+  const base = workspace(); server.documents.set(base._id, base); sync.observe(base);
+  const saved = await sync.write(base, config); documentSync.observe(saved);
+  const local = normalizeSanityWorkspaceDoc(saved), baseline = structuredClone(local);
+  local.branches[0].taskDocuments[0].content = markdown.replace('[ ] A', '[ ] B');
+  const changed = structuredClone(saved);
+  changed.branches[0].taskDocuments[0].content = markdown.replace('[ ]', '[x]');
+  const remote = await sync.write(changed, config);
+  const store = { scope: getSyncSession()!.scope, workspaces: [local], remoteBase: [baseline], remoteDocuments: [saved], activeWorkspaceId: local.id };
+  const item = compareMarkdownDocuments(store, [normalizeSanityWorkspaceDoc(remote)])[0];
+  assert.equal(item.diffType, 'auto_merged');
+  const newer = structuredClone(remote);
+  newer.branches[0].taskDocuments[0].content += '  tags: remote\n';
+  await sync.write(newer, config);
+  const result = await resolveSyncItem(item, 'merge', store, config);
+  const content = result.updatedStore!.workspaces[0].branches[0].taskDocuments[0].content;
+  assert(content.includes('[x] B')); assert(content.includes('tags: remote'));
+  // The same proposal cannot overwrite a subsequent incompatible remote title.
+  const latest = structuredClone(server.documents.get(base._id));
+  latest.branches[0].taskDocuments[0].content = latest.branches[0].taskDocuments[0].content.replace('[x] B', '[x] C');
+  sync.observe(server.documents.get(base._id)); await sync.write(latest, config);
+  const committed = structuredClone(server.documents.get(base._id));
+  await assert.rejects(resolveSyncItem(item, 'merge', store, config), SyncConflict);
+  assert.deepEqual(server.documents.get(base._id), committed);
 });

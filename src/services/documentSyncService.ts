@@ -77,10 +77,11 @@ export function mergeText(base: string, local: string, remote: string): string {
   const diffFn = isMultiLine ? diffLines : diffWordsWithSpace;
 
   type Edit = { start: number; end: number; pieces: string[] };
-  const getEdits = (value: string): Edit[] => {
+  const getEdits = (value: string, source = base,
+    compare: (a: string, b: string) => Array<{ value: string; added?: boolean; removed?: boolean }> = diffFn, offset = 0): Edit[] => {
     const result: Edit[] = [];
-    let position = 0;
-    for (const part of diffFn(base, value)) {
+    let position = offset;
+    for (const part of compare(source, value)) {
       const partLen = part.value.length;
       if (!part.added && !part.removed) {
         position += partLen;
@@ -101,8 +102,20 @@ export function mergeText(base: string, local: string, remote: string): string {
     return result;
   };
 
-  const localEdits = getEdits(local);
-  const remoteEdits = getEdits(remote);
+  const overlaps = (a: Edit, b: Edit) =>
+    Math.max(a.start, b.start) < Math.min(a.end, b.end) ||
+    (a.start === a.end && a.start > b.start && a.start < b.end) ||
+    (b.start === b.end && b.start > a.start && b.start < a.end);
+  let localEdits = getEdits(local);
+  let remoteEdits = getEdits(remote);
+  if (isMultiLine) {
+    // Refine only colliding line replacements; conflicting words still fail closed.
+    const refine = (edits: Edit[], other: Edit[]) => edits.flatMap(edit => other.some(candidate => overlaps(edit, candidate))
+      ? getEdits(edit.pieces.join(''), base.slice(edit.start, edit.end), diffWordsWithSpace, edit.start) : [edit]);
+    const originalLocal = localEdits;
+    localEdits = refine(localEdits, remoteEdits);
+    remoteEdits = refine(remoteEdits, originalLocal);
+  }
   const combined = [...localEdits];
 
   for (const incoming of remoteEdits) {
@@ -113,15 +126,11 @@ export function mergeText(base: string, local: string, remote: string): string {
         break;
       }
       if (existing.start === existing.end && incoming.start === incoming.end && existing.start === incoming.start) {
-        existing.pieces.push(...incoming.pieces);
+        existing.pieces = [existing.pieces.join(''), incoming.pieces.join('')].sort();
         duplicate = true;
         break;
       }
-      if (
-        Math.max(existing.start, incoming.start) < Math.min(existing.end, incoming.end) ||
-        (existing.start === existing.end && existing.start > incoming.start && existing.start < incoming.end) ||
-        (incoming.start === incoming.end && incoming.start > existing.start && incoming.start < existing.end)
-      ) {
+      if (overlaps(existing, incoming)) {
         throw new SyncConflict('Conflicto en el mismo fragmento de texto');
       }
     }
@@ -217,16 +226,29 @@ export class DocumentSync {
   async reconcileDeletions(previous: Document[], snapshot: Document[], config: SanityConfig): Promise<Document[]> {
     const session = getSyncSession(config);
     if (!session) throw new Error('La sesión de sincronización ha cambiado');
+    const client = this.clientFactory(session.config);
+    const observedBefore = new Map([...previous, ...snapshot].map(d => [d._id, this.base(d._id, session)]));
     const documents = [...snapshot];
     const missing = previous.filter(d => ['workspace', 'task'].includes(d._type) && !d.syncDeleted &&
       !snapshot.some(current => current._id === d._id)).sort((a, b) => Number(b._type === 'workspace') - Number(a._type === 'workspace'));
     for (const old of missing) {
       assertSyncSession(session);
-      const deleted = config.token ? await this.write({ ...old, syncDeleted: true }, config) : { ...old, syncDeleted: true };
+      const current = await client.getDocument(old._id, { signal: session.controller.signal });
+      assertSyncSession(session);
+      if (current) {
+        if (current.syncOwner && current.syncOwner !== session.owner) throw new SyncConflict('El documento pertenece a otra cuenta');
+        documents.push(current);
+        continue;
+      }
+      // A concurrent recreation must conflict with the confirmed absence.
+      const deleted = config.token ? await this.write({ ...old, syncDeleted: true }, config, null) : { ...old, syncDeleted: true };
       if (!config.token) this.observe(deleted, session);
       documents.push(deleted);
     }
-    return documents.map(d => this.base(d._id, session) || d);
+    return documents.map(d => {
+      const acknowledged = this.base(d._id, session);
+      return acknowledged && acknowledged !== observedBefore.get(d._id) ? acknowledged : d;
+    });
   }
 
   async resolve(document: Document, config: SanityConfig): Promise<Document> {

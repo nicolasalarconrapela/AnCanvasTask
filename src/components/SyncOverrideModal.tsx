@@ -187,7 +187,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       if (getSyncSession() !== session) return;
       setResult(res);
       if (res.hasPendingChanges) {
-        const count = res.counts.localOverrides + res.counts.remoteOverrides + res.counts.conflicts;
+        const count = res.counts.localOverrides + res.counts.remoteOverrides + res.counts.autoMerged + res.counts.conflicts;
         onShowToast(i18n._(msg`Detección completada: ${count} diferencias encontradas`), 'info');
       } else {
         onShowToast(i18n._(msg`Todo está al día y sincronizado con Sanity`), 'success');
@@ -723,6 +723,8 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
             <span>{i18n._(msg`Sincronizado`)}</span>
           </span>
         );
+      case 'auto_merged':
+        return <span className="text-xs text-[var(--on-surface-variant)]">{i18n._(msg`Fusionar (3-way merge)`)}</span>;
       case 'local_override':
         return (
           <span className="inline-flex items-center gap-1 text-xs text-sky-400 font-medium">
@@ -1272,17 +1274,17 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               </button>
             )}
 
-            {item.diffType === 'local_override' && (
+            {(item.diffType === 'local_override' || item.diffType === 'auto_merged') && (
               <button
                 type="button"
                 id={`btn-sync-action-${item.id}`}
                 disabled={isResolving || !isSanityConfigured}
-                onClick={() => handleResolveSingle(item, 'keep_local')}
+                onClick={() => handleResolveSingle(item, item.diffType === 'auto_merged' ? 'merge' : 'keep_local')}
                 className="btn-m3-secondary px-2.5 py-1 text-xs rounded font-medium flex items-center gap-1 cursor-pointer disabled:opacity-40 text-sky-400 hover:bg-sky-950/40"
                 title={i18n._(msg`Subir cambios locales más recientes a Sanity`)}
               >
                 <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
-                <span>{i18n._(msg`Subir`)}</span>
+                <span>{item.diffType === 'auto_merged' ? i18n._(msg`Fusionar (3-way merge)`) : i18n._(msg`Subir`)}</span>
               </button>
             )}
 

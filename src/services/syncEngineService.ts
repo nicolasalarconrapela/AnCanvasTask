@@ -17,7 +17,7 @@ import {
   saveWorkspaceToSanity,
 } from './sanityService';
 import { parseTasksMarkdown, type ParsedGroup } from '../utils/taskMarkdown';
-import { documentSync, mergeSyncValue, buildTaskDocumentId, syncComparable, applyTaskToMarkdown, taskFields } from './documentSyncService';
+import { documentSync, SyncConflict, mergeSyncValue, buildTaskDocumentId, syncComparable, applyTaskToMarkdown, taskFields } from './documentSyncService';
 import { getSyncSession, assertSyncSession } from './syncSessionService';
 import {
   deleteTaskFromMarkdown,
@@ -27,6 +27,7 @@ export type SyncDifferenceType =
   | 'synced'
   | 'local_override'
   | 'remote_override'
+  | 'auto_merged'
   | 'conflict'
   | 'only_local'
   | 'only_remote';
@@ -59,6 +60,7 @@ export interface SyncComparisonResult {
     synced: number;
     localOverrides: number;
     remoteOverrides: number;
+    autoMerged: number;
     conflicts: number;
     onlyLocal: number;
     onlyRemote: number;
@@ -67,6 +69,20 @@ export interface SyncComparisonResult {
 }
 
 // Markdown files retain their own identity even when names or task IDs repeat.
+export function classifySyncDifference(base: any, local: any, remote: any): SyncDifferenceType {
+  const comparable = (value: any) => JSON.stringify(syncComparable(value));
+  if (comparable(local) === comparable(remote)) return 'synced';
+  if (comparable(local) === comparable(base)) return 'remote_override';
+  if (comparable(remote) === comparable(base)) return 'local_override';
+  try {
+    mergeSyncValue(base, local, remote);
+    return 'auto_merged';
+  } catch (error) {
+    if (!(error instanceof SyncConflict)) throw error;
+    return 'conflict';
+  }
+}
+
 export function compareMarkdownDocuments(store: WorkspaceStoreState, remote: Workspace[]): SyncItemDiff[] {
   const items: SyncItemDiff[] = [];
   const comparable = (doc: any) => doc && JSON.stringify([doc.id, doc.name, doc.folder || '', doc.path, doc.content]);
@@ -87,9 +103,7 @@ export function compareMarkdownDocuments(store: WorkspaceStoreState, remote: Wor
             const cloudTime = cloud.updatedAt ? new Date(cloud.updatedAt).getTime() : 0;
             diffType = localTime >= cloudTime ? 'local_override' : 'remote_override';
           } else {
-            const changedLocal = comparable(local) !== comparable(base);
-            const changedRemote = comparable(cloud) !== comparable(base);
-            diffType = changedLocal && changedRemote ? 'conflict' : changedLocal ? 'local_override' : 'remote_override';
+            diffType = classifySyncDifference(base, local, cloud);
           }
         }
         const doc = local || cloud!;
@@ -97,7 +111,7 @@ export function compareMarkdownDocuments(store: WorkspaceStoreState, remote: Wor
           title: doc.path, subtitle: branchName, workspaceId, workspaceName: localWs?.name || remoteWs?.name,
           branchName, documentPath: doc.path, diffType, localData: local, remoteData: cloud,
           localTimestamp: local?.updatedAt, remoteTimestamp: cloud?.updatedAt,
-          summaryChanges: [], resolutionStrategy: diffType === 'only_remote' || diffType === 'remote_override' ? 'keep_remote' : 'keep_local' });
+          summaryChanges: [], resolutionStrategy: diffType === 'auto_merged' ? 'merge' : diffType === 'only_remote' || diffType === 'remote_override' ? 'keep_remote' : 'keep_local' });
       }
     }
   }
@@ -146,7 +160,7 @@ export async function analyzeSyncDifferences(
 
   if (config.projectId && config.dataset) {
     try {
-      remoteSanityDocs = await fetchSanityDocumentsList(config);
+      remoteSanityDocs = await fetchSanityDocumentsList(config, false, false, false);
       remoteWorkspaces = workspacesFromSanityDocuments(remoteSanityDocs);
     } catch (err) {
       throw err;
@@ -252,9 +266,7 @@ export async function analyzeSyncDifferences(
           const remoteTime = remoteWs.updatedAt ? new Date(remoteWs.updatedAt).getTime() : 0;
           diffType = localTime >= remoteTime ? 'local_override' : 'remote_override';
         } else {
-          const changedLocal = JSON.stringify(syncComparable(base)) !== JSON.stringify(syncComparable(localWs));
-          const changedRemote = JSON.stringify(syncComparable(base)) !== JSON.stringify(syncComparable(remoteWs));
-          diffType = changedLocal && changedRemote ? 'conflict' : changedLocal ? 'local_override' : 'remote_override';
+          diffType = classifySyncDifference(base, localWs, remoteWs);
         }
       }
 
@@ -378,9 +390,7 @@ export async function analyzeSyncDifferences(
                 const remoteTime = (matchedRemote.updatedAt || matchedRemote._updatedAt) ? new Date(matchedRemote.updatedAt || matchedRemote._updatedAt).getTime() : 0;
                 diffType = localTime >= remoteTime ? 'local_override' : 'remote_override';
               } else {
-                const changedLocal = JSON.stringify(syncComparable(fields)) !== JSON.stringify(syncComparable(select(base)));
-                const changedRemote = JSON.stringify(syncComparable(select(matchedRemote))) !== JSON.stringify(syncComparable(select(base)));
-                diffType = changedLocal && changedRemote ? 'conflict' : changedLocal ? 'local_override' : 'remote_override';
+                diffType = classifySyncDifference(select(base), fields, select(matchedRemote));
               }
 
               const changes: string[] = [];
@@ -403,7 +413,7 @@ export async function analyzeSyncDifferences(
                 localData: lt,
                 remoteData: matchedRemote,
                 summaryChanges: changes,
-                resolutionStrategy: diffType === 'remote_override' ? 'keep_remote' : 'keep_local',
+                resolutionStrategy: diffType === 'auto_merged' ? 'merge' : diffType === 'remote_override' ? 'keep_remote' : 'keep_local',
               });
             }
           }
@@ -441,6 +451,7 @@ export async function analyzeSyncDifferences(
     synced: items.filter((i) => i.diffType === 'synced').length,
     localOverrides: items.filter((i) => i.diffType === 'local_override').length,
     remoteOverrides: items.filter((i) => i.diffType === 'remote_override').length,
+    autoMerged: items.filter((i) => i.diffType === 'auto_merged').length,
     conflicts: items.filter((i) => i.diffType === 'conflict').length,
     onlyLocal: items.filter((i) => i.diffType === 'only_local').length,
     onlyRemote: items.filter((i) => i.diffType === 'only_remote').length,
@@ -449,6 +460,7 @@ export async function analyzeSyncDifferences(
   const hasPendingChanges =
     counts.localOverrides > 0 ||
     counts.remoteOverrides > 0 ||
+    counts.autoMerged > 0 ||
     counts.conflicts > 0 ||
     counts.onlyLocal > 0 ||
     counts.onlyRemote > 0;
@@ -485,9 +497,12 @@ export async function resolveSyncItem(
       if (strategy === 'merge' && !base) throw new Error('No hay base compartida. Selecciona conservar local o remoto');
       const local = strategy === 'merge' ? mergeSyncValue(base, item.localData, item.remoteData, '/workspace') : item.localData;
       const id = local._id || `workspace-${local.id}`;
-      const document = await documentSync.resolve({ ...documentSync.base(id, session), _id: id, _type: 'workspace',
+      const intention = { ...documentSync.base(id, session), _id: id, _type: 'workspace',
         workspaceId: local.id, name: local.name, githubRepo: local.githubRepo, branches: local.branches,
-        activeBranchName: local.activeBranchName, createdAt: local.createdAt }, config);
+        activeBranchName: local.activeBranchName, createdAt: local.createdAt };
+      const document = strategy === 'merge'
+        ? await documentSync.write({ ...intention, _rev: item.localData._rev }, config)
+        : await documentSync.resolve(intention, config);
       resolved = normalizeSanityWorkspaceDoc(document);
     }
   } else if (item.entityType === 'task') {
@@ -512,7 +527,9 @@ export async function resolveSyncItem(
       const intention = { ...(item.remoteData || {}), ...fields, _type: 'task',
         _id: item.remoteData?._id || buildTaskDocumentId(fields.taskId, ws.id, documentKey),
         workspaceId: ws.id, documentKey, branchName: branch.name, documentPath: doc.path };
-      task = await documentSync.resolve(strategy === 'merge' ? mergeSyncValue(base, intention, item.remoteData) : intention, config);
+      task = strategy === 'merge'
+        ? await documentSync.write({ ...mergeSyncValue(base, intention, item.remoteData), _rev: base._rev }, config, base)
+        : await documentSync.resolve(intention, config);
     }
     resolved = { ...ws, branches: ws.branches.map(b => b.name === branch.name ? { ...b,
       taskDocuments: b.taskDocuments.map(d => d.id === doc.id ? { ...d, content: applyTaskToMarkdown(d.content, task) } : d) } : b) };
@@ -554,10 +571,10 @@ export async function resolveSyncItem(
       if (!item.localData && strategy !== 'merge') return { success: false, message: 'No hay datos locales para enviar' };
       let finalDoc = item.localData || item.remoteData;
       if (strategy === 'merge') {
-        const localContent = item.localData?.content || '';
-        const remoteContent = item.remoteData?.content || '';
-        const mergedContent = localContent || remoteContent;
-        finalDoc = { ...(item.localData || item.remoteData), content: mergedContent, updatedAt: new Date().toISOString() };
+        const base = workspaceStore.remoteBase?.find(w => w.id === ws.id)?.branches.find(b => b.name === branchName)
+          ?.taskDocuments.find(d => d.id === item.localData?.id);
+        if (!base) throw new Error('No hay base compartida para fusionar el documento');
+        finalDoc = mergeSyncValue(base, item.localData, item.remoteData, '/document');
       }
 
       const existingIndex = branch.taskDocuments.findIndex(d => d.id === finalDoc.id || d.path === finalDoc.path);
@@ -571,7 +588,7 @@ export async function resolveSyncItem(
       };
 
       const id = updatedWs._id || `workspace-${updatedWs.id}`;
-      const document = await documentSync.resolve({
+      const intention = {
         ...documentSync.base(id, session),
         _id: id,
         _type: 'workspace',
@@ -581,7 +598,10 @@ export async function resolveSyncItem(
         branches: updatedWs.branches,
         activeBranchName: updatedWs.activeBranchName,
         createdAt: updatedWs.createdAt,
-      }, config);
+      };
+      const document = strategy === 'merge'
+        ? await documentSync.write({ ...intention, _rev: ws._rev }, config)
+        : await documentSync.resolve(intention, config);
       resolved = normalizeSanityWorkspaceDoc(document);
     }
   } else return { success: false, message: 'Tipo de elemento no compatible' };

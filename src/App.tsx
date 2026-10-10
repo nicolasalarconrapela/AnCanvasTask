@@ -900,20 +900,25 @@ export default function App() {
           refreshing = (async () => {
             try {
               assertSyncSession(session);
+              syncReadyRef.current = false;
+              setSyncReady(false);
               if (session.config.token) await documentSync.flush(session);
-              let docs = await fetchSanityDocumentsList(session.config, true);
+              let docs = await fetchSanityDocumentsList(session.config, true, false, false);
               docs = await documentSync.reconcileDeletions(workspaceStoreRef.current.remoteDocuments || [], docs, session.config);
               assertSyncSession(session);
               if (cancelled) return;
               const previous = workspaceStoreRef.current;
               if (previous.scope !== session.scope) return;
               const remote = workspacesFromSanityDocuments(docs);
-              const local = previous.workspaces.filter(w => !w.isPlaceholder || w.name !== 'Mi Workspace' ||
-                w.branches.some(b => b.taskDocuments.some(d => d.content.trim() !== '# Tareas\n\n## General')));
-
               const activeWs = previous.workspaces.find(w => w.id === previous.activeWorkspaceId);
               const activeBr = activeWs?.branches.find(b => b.name === activeWs.activeBranchName) || activeWs?.branches[0];
               const activeDoc = activeBr?.taskDocuments.find(d => d.id === activeBr.activeDocumentId) || activeBr?.taskDocuments[0];
+              // Include keystrokes that have not reached the debounced local store yet.
+              const local = previous.workspaces.map(w => w.id !== activeWs?.id ? w : { ...w,
+                branches: w.branches.map(b => b.name !== activeBr?.name ? b : { ...b,
+                  taskDocuments: b.taskDocuments.map(d => d.id !== activeDoc?.id ? d : { ...d, content: markdownRef.current }) }) })
+                .filter(w => !w.isPlaceholder || w.name !== 'Mi Workspace' ||
+                  w.branches.some(b => b.taskDocuments.some(d => d.content.trim() !== '# Tareas\n\n## General')));
 
               const merged = mergeSyncValue(previous.remoteBase || [], local, remote, '/workspaces') as Workspace[];
               const baseWorkspaces = merged.length ? merged : [previous.workspaces.find(w => w.isPlaceholder) || createEmptyWorkspace()];
@@ -929,13 +934,6 @@ export default function App() {
                     return {
                       ...b,
                       activeDocumentId: activeBr.activeDocumentId || b.activeDocumentId,
-                      taskDocuments: b.taskDocuments.map(d => {
-                        if (activeDoc && (d.id === activeDoc.id || d.path === activeDoc.path)) {
-                          const liveContent = markdownRef.current !== undefined ? markdownRef.current : activeDoc.content;
-                          return { ...d, content: liveContent, lastSavedContent: activeDoc.lastSavedContent };
-                        }
-                        return d;
-                      }),
                     };
                   }),
                 };
@@ -944,6 +942,12 @@ export default function App() {
               const next: WorkspaceStoreState = { ...previous, scope: session.scope, workspaces,
                 remoteBase: remote, remoteDocuments: docs,
                 activeWorkspaceId: workspaces.some(w => w.id === previous.activeWorkspaceId) ? previous.activeWorkspaceId : workspaces[0].id };
+              const reconciledDoc = getActiveDocument(getActiveBranch(getActiveWorkspace(next)));
+              if (markdownStoreSyncDebounceRef.current) clearTimeout(markdownStoreSyncDebounceRef.current);
+              if (markdownEditorDebounceRef.current) clearTimeout(markdownEditorDebounceRef.current);
+              markdownRef.current = reconciledDoc.content;
+              setMarkdownInput(reconciledDoc.content);
+              docs.forEach(d => documentSync.observe(d, session));
               workspaceStoreRef.current = next;
               saveWorkspaceStore(next);
               setWorkspaceStore(next);
@@ -1425,7 +1429,7 @@ export default function App() {
           const session = getSyncSession(sanityConfig);
           const diffResult = await analyzeSyncDifferences(workspaceStore);
           if (getSyncSession() !== session) return;
-          const totalConflicts = diffResult.counts.conflicts + diffResult.counts.remoteOverrides;
+          const totalConflicts = diffResult.counts.conflicts;
           if (totalConflicts > 0) {
             const now = Date.now();
             // Throttle notifications to at most once per 60 seconds
@@ -3598,6 +3602,7 @@ export default function App() {
     const timer = setTimeout(async () => {
       try {
         assertSyncSession(session);
+        if (!syncReadyRef.current) return;
         const baseWs = workspaceStore.remoteBase?.find(w => w.id === activeWorkspace.id);
         if (JSON.stringify(syncComparable(baseWs)) === JSON.stringify(syncComparable(activeWorkspace))) return;
         const normalized = autoAssignAllMissingTaskIds(markdownInput).updatedMarkdown;
