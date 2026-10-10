@@ -52,7 +52,7 @@ export async function beginSyncSession(config: SanityConfig): Promise<SyncSessio
     const cacheKey = `antask_sync_identity:${credential}`;
     let response: Response | undefined;
     try {
-      response = await fetch('https://api.sanity.io/v2021-06-07/users/me', {
+      response = await fetch(`https://${config.projectId}.api.sanity.io/v2021-06-07/users/me`, {
         headers: { Authorization: `Bearer ${config.token}` }, signal: controller.signal,
       });
     } catch (error) {

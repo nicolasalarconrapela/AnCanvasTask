@@ -354,7 +354,7 @@ export async function fetchSanityCurrentUser(configOverride?: SanityConfig): Pro
   }
 
   try {
-    const res = await fetch('https://api.sanity.io/v2021-06-07/users/me', {
+    const res = await fetch(`https://${config.projectId}.api.sanity.io/v2021-06-07/users/me`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
