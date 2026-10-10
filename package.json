@@ -1,11 +1,17 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "1.5.0-beta",
+  "version": "1.5.4-beta",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev:cliente": "vite --mode cliente --port=3000 --host=0.0.0.0",
+    "dev:test": "vite --mode test --port=3000 --host=0.0.0.0",
     "build": "npm run i18n:check && vite build",
+    "build:local": "npm run i18n:check && vite build --mode local",
+    "build:cliente": "npm run i18n:check && vite build --mode cliente",
+    "build:test": "npm run i18n:check && vite build --mode test",
+    "build:pro": "npm run i18n:check && vite build --mode production",
     "preview": "vite preview --host 0.0.0.0",
     "start": "vite preview --host 0.0.0.0 --port 3000",
     "clean": "rm -rf dist server.js",
