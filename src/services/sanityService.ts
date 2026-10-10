@@ -1315,12 +1315,37 @@ export async function syncAllWorkspacesToSanity(workspaces: any[], configOverrid
  */
 export async function deleteDocumentFromSanity(docId: string, configOverride?: Partial<SanityConfig>): Promise<{ ok: boolean; message: string }> {
   const config = { ...getSanityConfig(), ...configOverride };
+  if (!config.projectId || !config.dataset || !config.token) {
+    return { ok: false, message: 'Configura el API Token de Sanity para eliminar en remoto' };
+  }
+
+  const client = getSanityClient(config);
   try {
-    const doc = documentSync.base(docId) || await fetchSanityDocumentById(docId, config);
-    if (!doc) return { ok: true, message: 'El documento ya está eliminado' };
-    await documentSync.remove(docId, doc._type, config);
+    let doc = documentSync.base(docId);
+    if (!doc) {
+      doc = await fetchSanityDocumentById(docId, config);
+    }
+
+    if (doc) {
+      try {
+        await documentSync.remove(docId, doc._type, config, doc);
+      } catch (syncErr) {
+        console.warn('documentSync.remove note, proceeding to Lake deletion:', syncErr);
+      }
+    }
+
+    // Direct deletion on Sanity Lake (both published and draft)
+    await client.delete(docId);
+    if (!docId.startsWith('drafts.')) {
+      try {
+        await client.delete(`drafts.${docId}`);
+      } catch {}
+    }
+
     return { ok: true, message: 'Documento eliminado de Sanity' };
-  } catch (error: any) { return { ok: false, message: error.message }; }
+  } catch (error: any) {
+    return { ok: false, message: error?.message || 'Error al eliminar de Sanity' };
+  }
 }
 
 /**

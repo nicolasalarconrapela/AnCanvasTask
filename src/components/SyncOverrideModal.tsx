@@ -143,7 +143,15 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     window.addEventListener('antask_sanity_config_updated', updateConfig);
     return () => {
       window.removeEventListener('antask_sanity_config_updated', updateConfig);
-      pendingDeletionsRef.current.forEach(p => clearTimeout(p.timeoutId));
+      // Flush any pending remote deletions before unmounting so they are not cancelled
+      const currentPending = Array.from(pendingDeletionsRef.current.values());
+      pendingDeletionsRef.current.clear();
+      currentPending.forEach((p) => {
+        clearTimeout(p.timeoutId);
+        if (p.scope === 'remote' || p.scope === 'both') {
+          deleteSyncItem(p.item, p.scope, workspaceStoreRef.current, getSanityConfig()).catch(() => {});
+        }
+      });
     };
   }, []);
 
@@ -366,6 +374,24 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       onUpdateWorkspaceStore(nextStore);
     }
 
+    // If scope is remote-only, execute immediately
+    if (bulkDeleteScope === 'remote') {
+      try {
+        let successCount = 0;
+        for (const item of itemsToDelete) {
+          const res = await deleteSyncItem(item, 'remote', workspaceStoreRef.current, getSanityConfig());
+          if (res.success) successCount++;
+        }
+        onShowToast(
+          i18n._(msg`${successCount} elemento(s) eliminados de Sanity Cloud`),
+          'success'
+        );
+      } catch (err: any) {
+        console.warn('Error executing bulk permanent deletion from Sanity:', err);
+      }
+      return;
+    }
+
     // Schedule delayed permanent deletion for all items
     const deletionSession = getSyncSession();
     const deletionConfig = getSanityConfig();
@@ -500,6 +526,23 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         };
         onUpdateWorkspaceStore(nextStore);
       }
+    }
+
+    // For remote-only items, execute deletion immediately so the user gets instant feedback
+    if (scope === 'remote') {
+      try {
+        const res = await deleteSyncItem(item, 'remote', workspaceStoreRef.current, deletionConfig);
+        if (res.success) {
+          onShowToast(res.message, 'success');
+        } else {
+          onShowToast(res.message, 'error');
+          setResult((prev) => (prev ? { ...prev, items: [...prev.items, item] } : null));
+        }
+      } catch (err: any) {
+        onShowToast(err?.message || 'Error al eliminar en remoto', 'error');
+        setResult((prev) => (prev ? { ...prev, items: [...prev.items, item] } : null));
+      }
+      return;
     }
 
     // Schedule permanent execution after 30 seconds

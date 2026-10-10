@@ -446,7 +446,10 @@ export class DocumentSync {
         doc.content = applyTaskToMarkdown(doc.content, task);
       }
     }
-    if (!matched) throw new SyncConflict('No se encuentra el documento de la tarea');
+    if (!matched) {
+      if (task.syncDeleted) return;
+      throw new SyncConflict('No se encuentra el documento de la tarea');
+    }
     writes.push({ document: next, remote: workspace });
   }
 
@@ -468,14 +471,21 @@ export class DocumentSync {
     }
   }
 
-  async remove(id: string, type: string, config: SanityConfig): Promise<Document> {
+  async remove(id: string, type: string, config: SanityConfig, baseDoc?: Document | null): Promise<Document> {
     const session = getSyncSession(config);
     if (!session) throw new Error('La sesión de Sanity todavía no está preparada');
-    const base = this.base(id, session);
-    if (!base) throw new SyncConflict('Descarga el documento antes de eliminarlo');
+    let base = baseDoc || this.base(id, session);
+    if (!base) {
+      const client = this.clientFactory(session.config);
+      base = await client.getDocument(id, { signal: session.controller.signal });
+      if (base) this.observe(base, session);
+    }
+    if (!base) {
+      return { _id: id, _type: type, syncDeleted: true };
+    }
     // Retain the original ID and revision. Old clients cannot recreate this ID
     // with createIfNotExists, and new clients reject writes to the tombstone.
-    return this.write({ ...base, _id: id, _type: type, syncDeleted: true }, config);
+    return this.write({ ...base, _id: id, _type: type, syncDeleted: true }, config, base);
   }
 }
 

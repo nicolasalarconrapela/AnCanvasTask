@@ -797,8 +797,11 @@ export async function deleteSyncItem(
         if (explicitId) {
           delRes = await deleteDocumentFromSanity(explicitId, config);
         }
-        if (!delRes.ok || !explicitId) {
+        if (!delRes.ok) {
           delRes = await deleteDocumentFromSanity(buildTaskDocumentId(taskId, item.workspaceId, item.remoteData?.documentKey), config);
+        }
+        if (!delRes.ok && taskId) {
+          delRes = await deleteDocumentFromSanity(`task-${taskId}`, config);
         }
         if (!delRes.ok) {
           return { success: false, message: delRes.message, updatedStore };
