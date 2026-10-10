@@ -34,8 +34,9 @@ export interface AppEnvironmentInfo {
 export const resolveEnvironmentType = (): AppEnvironmentType => {
   // 1. Variable de entorno explícita (VITE_APP_ENV o MODE)
   const envVar = (
-    (import.meta.env.VITE_APP_ENV as string | undefined) ||
-    import.meta.env.MODE ||
+    (import.meta.env?.VITE_APP_ENV as string | undefined) ||
+    import.meta.env?.MODE ||
+    (typeof process !== 'undefined' ? process.env?.VITE_APP_ENV || process.env?.NODE_ENV : '') ||
     ''
   ).toLowerCase();
 
@@ -97,7 +98,7 @@ export const resolveEnvironmentType = (): AppEnvironmentType => {
   }
 
   // 3. Fallback de Vite
-  if (import.meta.env.DEV) {
+  if (import.meta.env?.DEV) {
     return 'local';
   }
 
@@ -109,7 +110,7 @@ export const resolveEnvironmentType = (): AppEnvironmentType => {
  */
 export const getAppEnvironment = (): AppEnvironmentInfo => {
   const type = resolveEnvironmentType();
-  const mode = import.meta.env.MODE || (import.meta.env.DEV ? 'development' : 'production');
+  const mode = import.meta.env?.MODE || (import.meta.env?.DEV ? 'development' : 'production') || 'production';
 
   const configs: Record<
     AppEnvironmentType,
@@ -154,3 +155,58 @@ export const getAppEnvironment = (): AppEnvironmentInfo => {
 };
 
 export const APP_ENV = getAppEnvironment();
+
+/**
+ * Obtiene la clave de licencia de tldraw SDK (https://tldraw.dev/installation#License).
+ * Evalúa las variables de entorno para el entorno activo:
+ * - VITE_TLDRAW_LICENSE_KEY_PRO: Producción
+ * - VITE_TLDRAW_LICENSE_KEY_CLIENTE: Cliente / Staging
+ * - VITE_TLDRAW_LICENSE_KEY_TEST: Testing
+ * - VITE_TLDRAW_LICENSE_KEY_LOCAL: Local / Desarrollo
+ * - VITE_TLDRAW_LICENSE_KEY: Clave global para todos los entornos
+ * - __TLDRAW_LICENSE_KEY__: Inyectada en build o process.env
+ * - antask_tldraw_license_key: Override local en localStorage (si existe)
+ */
+export const getTldrawLicenseKey = (): string | undefined => {
+  const envType = resolveEnvironmentType();
+
+  let key: string | undefined;
+
+  // 1. Clave específica según el entorno activo
+  const envObj = import.meta.env || (typeof process !== 'undefined' ? process.env : {}) || {};
+  if (envType === 'pro') {
+    key = envObj.VITE_TLDRAW_LICENSE_KEY_PRO as string | undefined;
+  } else if (envType === 'cliente') {
+    key = envObj.VITE_TLDRAW_LICENSE_KEY_CLIENTE as string | undefined;
+  } else if (envType === 'test') {
+    key = envObj.VITE_TLDRAW_LICENSE_KEY_TEST as string | undefined;
+  } else if (envType === 'local') {
+    key = envObj.VITE_TLDRAW_LICENSE_KEY_LOCAL as string | undefined;
+  }
+
+  // 2. Clave global por defecto
+  if (!key) {
+    key = envObj.VITE_TLDRAW_LICENSE_KEY as string | undefined;
+  }
+
+  // 3. Clave inyectada en tiempo de compilación por Vite
+  if (!key && typeof __TLDRAW_LICENSE_KEY__ !== 'undefined' && __TLDRAW_LICENSE_KEY__) {
+    key = __TLDRAW_LICENSE_KEY__;
+  }
+
+  // 4. Override en almacenamiento local
+  if (!key) {
+    try {
+      const storage = typeof localStorage !== 'undefined' ? localStorage : (typeof window !== 'undefined' ? window.localStorage : null);
+      const stored = storage?.getItem('antask_tldraw_license_key');
+      if (stored && stored.trim()) {
+        key = stored.trim();
+      }
+    } catch {
+      // Ignorar errores de acceso a almacenamiento
+    }
+  }
+
+  const trimmed = key ? key.trim() : '';
+  return trimmed || undefined;
+};

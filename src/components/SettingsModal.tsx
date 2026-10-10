@@ -3,7 +3,7 @@ import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { SUPPORTED_LANGUAGES, SupportedLanguageCode, dynamicActivate } from '../i18n';
-import { APP_VERSION, APP_ENV } from '../version';
+import { APP_VERSION, APP_ENV, getTldrawLicenseKey } from '../version';
 import {
   AppUserSettings,
   clearRecentFilesHistory,
@@ -45,6 +45,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [searchFilter, setSearchFilter] = useState('');
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+  const tldrawLicenseKey = useMemo(() => getTldrawLicenseKey(), []);
 
   if (!isOpen) return null;
 
@@ -434,6 +435,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     onChange={(e) => handleUpdate('canvasSnapToGrid', e.target.checked)}
                     className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
                   />
+                </div>
+
+                {/* tldraw SDK License */}
+                <div id="div-settings-tldraw-license" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Licencia tldraw SDK`)}</span>
+                      {tldrawLicenseKey ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                          <span className="material-symbols-outlined text-[12px]">verified</span>
+                          <span>{i18n._(msg`Activa (${APP_ENV.label})`)}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border border-zinc-500/30">
+                          <span>{i18n._(msg`Desarrollo / Sin clave`)}</span>
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[var(--on-surface-variant)] text-[11px] truncate">
+                      {tldrawLicenseKey
+                        ? i18n._(msg`Configurada mediante variables de entorno para ${APP_ENV.label}`)
+                        : i18n._(msg`Configurable con VITE_TLDRAW_LICENSE_KEY en .env`)}
+                    </span>
+                  </div>
+                  <a
+                    href="https://tldraw.dev/installation#License"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer shrink-0 text-sky-500 hover:text-sky-400"
+                    title={i18n._(msg`Ver documentación oficial de licencias de tldraw`)}
+                  >
+                    <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                    <span>{i18n._(msg`Docs`)}</span>
+                  </a>
                 </div>
               </div>
             )}

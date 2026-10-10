@@ -88,7 +88,7 @@ import { MarkdownSplitEditor } from './components/MarkdownSplitEditor';
 import { SafeMarkdownNormalizerModal } from './components/SafeMarkdownNormalizerModal';
 import { SafeguardPage } from './components/SafeguardPage';
 import { LanguageSelector } from './components/LanguageSelector';
-import { APP_VERSION, APP_ENV } from './version';
+import { APP_VERSION, APP_ENV, getTldrawLicenseKey } from './version';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
@@ -320,6 +320,7 @@ export default function App() {
     return false;
   });
   const [activeView, setActiveView] = useState<'canvas' | 'kanban' | 'split' | 'studio'>(() => userSettings.defaultView || 'canvas');
+  const tldrawLicenseKey = useMemo(() => getTldrawLicenseKey(), []);
   const [selectedTaskShapeId, setSelectedTaskShapeId] = useState<string | null>(null);
   const [isTaskDetailsOpen, setIsTaskDetailsOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -5026,6 +5027,7 @@ export default function App() {
                 const canvasViewNode = (
                   <div className="relative w-full h-full overflow-hidden flex flex-col">
                     <Tldraw
+                      licenseKey={tldrawLicenseKey}
                       hideUi={true}
                       shapeUtils={customShapeUtils}
                       onMount={handleMount}
