@@ -179,11 +179,12 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [activeMenuId]);
 
-  const handleRunAnalysis = useCallback(async () => {
+  const handleRunAnalysis = useCallback(async (storeToUse?: WorkspaceStoreState) => {
     setIsAnalyzing(true);
     try {
       const session = getSyncSession();
-      const res = await analyzeSyncDifferences(workspaceStore);
+      const currentStore = storeToUse || workspaceStoreRef.current || workspaceStore;
+      const res = await analyzeSyncDifferences(currentStore);
       if (getSyncSession() !== session) return;
       setResult(res);
       if (res.hasPendingChanges) {
@@ -218,9 +219,29 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       if (res.success) {
         onShowToast(res.message, 'success');
         if (res.updatedStore) {
+          workspaceStoreRef.current = res.updatedStore;
           onUpdateWorkspaceStore(res.updatedStore);
         }
-        await handleRunAnalysis();
+        setResult((prev) => {
+          if (!prev) return prev;
+          const remainingItems = prev.items.map((i) =>
+            i.id === item.id
+              ? { ...i, diffType: 'synced' as const, summaryChanges: [] }
+              : i
+          );
+          const remainingConflicts = remainingItems.filter((i) => i.diffType === 'conflict').length;
+          return {
+            ...prev,
+            items: remainingItems,
+            counts: {
+              ...prev.counts,
+              conflicts: remainingConflicts,
+              synced: prev.counts.synced + (item.diffType === 'conflict' ? 1 : 0),
+            },
+            hasPendingChanges: remainingItems.some((i) => i.diffType !== 'synced'),
+          };
+        });
+        await handleRunAnalysis(res.updatedStore);
       } else {
         onShowToast(res.message, 'error');
       }
@@ -606,12 +627,23 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     setIsProcessing(true);
     try {
       const res = await executeBatchSync(result.items, mode, workspaceStore);
-      if (getSyncSession() !== session) return;
-      onUpdateWorkspaceStore(res.updatedStore);
+      if (res.updatedStore) {
+        workspaceStoreRef.current = res.updatedStore;
+        onUpdateWorkspaceStore(res.updatedStore);
+      }
       if (res.success) {
         onShowToast(res.message, 'success');
-        onUpdateWorkspaceStore(res.updatedStore);
-        await handleRunAnalysis();
+        setResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                counts: { ...prev.counts, conflicts: 0, synced: prev.counts.total },
+                hasPendingChanges: false,
+                items: prev.items.map((i) => ({ ...i, diffType: 'synced', summaryChanges: [] })),
+              }
+            : null
+        );
+        await handleRunAnalysis(res.updatedStore);
       } else {
         onShowToast(res.message, 'error');
       }
@@ -1593,22 +1625,6 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               </div>
             )}
 
-            {/* Differences Summary */}
-            {item.summaryChanges.length > 0 && (
-              <div className="p-2.5 rounded bg-[var(--surface)] border border-[var(--outline)]/40 flex flex-col gap-1">
-                <span className="text-[10px] font-semibold text-[var(--on-surface-variant)] uppercase tracking-wider">
-                  {i18n._(msg`Resumen de discrepancias`)}
-                </span>
-                <ul className="list-disc list-inside space-y-0.5 text-xs text-[var(--on-surface)] pl-1">
-                  {item.summaryChanges.map((change, idx) => (
-                    <li key={idx} className="font-mono text-[11px]">
-                      {change}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
             {/* Structured Field-by-Field Comparison */}
             {renderStructuredDiff(item)}
 
@@ -2323,13 +2339,13 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
               </div>
             </div>
 
-            {/* 3. Conflicting Items Section (if any) */}
+            {/* 3. Resumen de discrepancias (solo si hay conflictos pendientes) */}
             {(result?.counts.conflicts || 0) > 0 && (
-              <div className="p-3.5 rounded-lg bg-rose-950/20 border border-rose-900/40 flex flex-col gap-3">
+              <div id="sync-modal-summary-discrepancies" className="p-3.5 rounded-lg bg-rose-950/20 border border-rose-900/40 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-rose-300 font-semibold text-xs">
                     <span className="material-symbols-outlined text-[16px] text-rose-400">priority_high</span>
-                    <span>{i18n._(msg`Conflictos pendientes de resolución (${result?.counts.conflicts ?? 0})`)}</span>
+                    <span>{i18n._(msg`Resumen de discrepancias (${result?.counts.conflicts ?? 0})`)}</span>
                   </div>
                 </div>
 
