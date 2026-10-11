@@ -835,12 +835,22 @@ function TaskCardComponent({
             )}
 
             {isDuplicateId && (
-              <span
-                className="text-[10px] font-semibold text-rose-400 font-mono"
-                title={_(msg`ID duplicado en TASKS.md`)}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.dispatchEvent(
+                    new CustomEvent('antask:resolve-single-duplicate-id', {
+                      detail: { taskId: shape.props?.taskId || taskId, taskTitle: title },
+                    })
+                  );
+                }}
+                className="flex items-center gap-0.5 text-rose-400 hover:text-rose-300 font-mono text-[10px] font-semibold transition-colors cursor-pointer px-1 py-0.2 rounded bg-rose-950/80 border border-rose-800/80"
+                title={_(msg`ID duplicado en TASKS.md. Clic para resolver y asignar nuevo ID único.`)}
               >
-                dup
-              </span>
+                <span>dup</span>
+                <span className="material-symbols-outlined text-[9px]">auto_fix_high</span>
+              </button>
             )}
 
             {unresolvedBlockers && unresolvedBlockers.length > 0 && (

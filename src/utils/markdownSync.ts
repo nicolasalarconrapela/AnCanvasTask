@@ -867,6 +867,158 @@ export function autoAssignAllMissingTaskIds(markdown: string): {
 }
 
 /**
+ * Resolves all duplicate task IDs in Markdown by keeping the first occurrence
+ * and generating fresh unique IDs for any subsequent colliding task blocks.
+ */
+export function resolveDuplicateTaskIds(markdown: string): {
+  updatedMarkdown: string;
+  resolvedCount: number;
+  resolvedTasks: Array<{ oldId: string; newId: string; title: string }>;
+} {
+  const { taskBlocks } = scanTaskBlocks(markdown);
+  if (taskBlocks.length === 0) {
+    return { updatedMarkdown: markdown, resolvedCount: 0, resolvedTasks: [] };
+  }
+
+  // Find all used IDs
+  const allUsedIds = new Set<string>();
+  taskBlocks.forEach((b) => {
+    if (b.detectedId) allUsedIds.add(b.detectedId.toLowerCase());
+  });
+
+  const seenIds = new Set<string>();
+  const duplicateBlocks: Array<{ block: TaskBlockInfo; oldId: string }> = [];
+
+  // Identify duplicate occurrences (any occurrence after the first)
+  for (const block of taskBlocks) {
+    if (!block.detectedId) continue;
+    const lower = block.detectedId.toLowerCase();
+    if (seenIds.has(lower)) {
+      duplicateBlocks.push({ block, oldId: block.detectedId });
+    } else {
+      seenIds.add(lower);
+    }
+  }
+
+  if (duplicateBlocks.length === 0) {
+    return { updatedMarkdown: markdown, resolvedCount: 0, resolvedTasks: [] };
+  }
+
+  const lines = markdown.split(/\r?\n/);
+  const resolvedTasks: Array<{ oldId: string; newId: string; title: string }> = [];
+
+  // Sort duplicate blocks in reverse line order to ensure line modifications don't shift prior indices
+  const sorted = [...duplicateBlocks].sort((a, b) => b.block.taskLineIndex - a.block.taskLineIndex);
+
+  for (const { block, oldId } of sorted) {
+    const baseSlug = slugify(block.detectedTitle || oldId) || 'task';
+    let candidate = baseSlug;
+    let counter = 2;
+    while (allUsedIds.has(candidate.toLowerCase())) {
+      candidate = `${baseSlug}-${counter}`;
+      counter++;
+    }
+
+    allUsedIds.add(candidate.toLowerCase());
+    resolvedTasks.unshift({ oldId, newId: candidate, title: block.detectedTitle });
+
+    // Find the line that has `- ID: ...` in this block
+    let replaced = false;
+    for (let i = block.taskLineIndex; i <= block.endLineIndex && i < lines.length; i++) {
+      const line = lines[i];
+      const idMatch = line.match(/^(\s*[-*]\s*ID\s*:\s*)(.+)$/i);
+      if (idMatch) {
+        lines[i] = `${idMatch[1]}${candidate}`;
+        replaced = true;
+        break;
+      }
+    }
+
+    if (!replaced) {
+      const baseIndent = block.indentation ? `${block.indentation}  ` : '  ';
+      lines.splice(block.taskLineIndex + 1, 0, `${baseIndent}- ID: ${candidate}`);
+    }
+  }
+
+  return {
+    updatedMarkdown: lines.join('\n'),
+    resolvedCount: resolvedTasks.length,
+    resolvedTasks,
+  };
+}
+
+/**
+ * Resolves a single duplicate task ID at a specific line or taskId.
+ */
+export function resolveSingleDuplicateTaskId(
+  markdown: string,
+  targetLineIndexOrTaskId: number | string,
+  taskTitle?: string
+): { updatedMarkdown: string; oldId: string | null; newId: string | null } {
+  const { taskBlocks } = scanTaskBlocks(markdown);
+  let targetBlock: TaskBlockInfo | undefined;
+
+  if (typeof targetLineIndexOrTaskId === 'number') {
+    targetBlock = taskBlocks.find((b) => b.taskLineIndex === targetLineIndexOrTaskId);
+  } else {
+    const matches = taskBlocks.filter(
+      (b) => b.detectedId && b.detectedId.toLowerCase() === targetLineIndexOrTaskId.toLowerCase()
+    );
+    if (matches.length > 1) {
+      if (taskTitle) {
+        targetBlock =
+          matches.find((m) => m.detectedTitle.toLowerCase() === taskTitle.toLowerCase()) ||
+          matches[matches.length - 1];
+      } else {
+        targetBlock = matches[matches.length - 1];
+      }
+    } else {
+      targetBlock = matches[0];
+    }
+  }
+
+  if (!targetBlock || !targetBlock.detectedId) {
+    return { updatedMarkdown: markdown, oldId: null, newId: null };
+  }
+
+  const oldId = targetBlock.detectedId;
+  const allUsedIds = new Set<string>(
+    taskBlocks.map((b) => (b.detectedId || '').toLowerCase()).filter(Boolean)
+  );
+
+  const baseSlug = slugify(targetBlock.detectedTitle || oldId) || 'task';
+  let candidate = baseSlug;
+  let counter = 2;
+  while (allUsedIds.has(candidate.toLowerCase())) {
+    candidate = `${baseSlug}-${counter}`;
+    counter++;
+  }
+
+  const lines = markdown.split(/\r?\n/);
+  let replaced = false;
+  for (let i = targetBlock.taskLineIndex; i <= targetBlock.endLineIndex && i < lines.length; i++) {
+    const line = lines[i];
+    const idMatch = line.match(/^(\s*[-*]\s*ID\s*:\s*)(.+)$/i);
+    if (idMatch) {
+      lines[i] = `${idMatch[1]}${candidate}`;
+      replaced = true;
+      break;
+    }
+  }
+
+  if (!replaced) {
+    const baseIndent = targetBlock.indentation ? `${targetBlock.indentation}  ` : '  ';
+    lines.splice(targetBlock.taskLineIndex + 1, 0, `${baseIndent}- ID: ${candidate}`);
+  }
+
+  return {
+    updatedMarkdown: lines.join('\n'),
+    oldId,
+    newId: candidate,
+  };
+}
+
+/**
  * Scans note items from the "## Notas" or "## Notes" section of the Markdown.
  */
 export function scanNotesFromMarkdown(markdown: string): string[] {

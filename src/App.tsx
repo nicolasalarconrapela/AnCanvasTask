@@ -125,6 +125,8 @@ import {
   addTaskToMarkdown,
   assignTaskIdToTask,
   autoAssignAllMissingTaskIds,
+  resolveDuplicateTaskIds,
+  resolveSingleDuplicateTaskId,
   deleteSectionFromMarkdown,
   deleteTaskFromMarkdown,
   findDependentTasks,
@@ -668,6 +670,34 @@ export default function App() {
     });
   }, [pushToast]);
 
+  const handleResolveDuplicateIds = useCallback(() => {
+    setMarkdownInput((curr) => {
+      const { updatedMarkdown, resolvedCount } = resolveDuplicateTaskIds(curr);
+      if (resolvedCount > 0) {
+        pushToast(
+          i18n._(msg`Se resolvieron ${resolvedCount} IDs duplicados asignando nuevos identificadores`),
+          'success'
+        );
+      } else {
+        pushToast(i18n._(msg`No se encontraron IDs duplicados`), 'info');
+      }
+      return updatedMarkdown;
+    });
+  }, [pushToast]);
+
+  const handleResolveSingleDuplicateId = useCallback(
+    (lineIndexOrId: number | string, taskTitle?: string) => {
+      setMarkdownInput((curr) => {
+        const { updatedMarkdown, newId } = resolveSingleDuplicateTaskId(curr, lineIndexOrId, taskTitle);
+        if (newId) {
+          pushToast(i18n._(msg`Nuevo ID único asignado: #${newId}`), 'success');
+        }
+        return updatedMarkdown;
+      });
+    },
+    [pushToast]
+  );
+
   useEffect(() => {
     const handleAssignEvent = (e: any) => {
       const { taskId, taskTitle } = e.detail || {};
@@ -677,6 +707,13 @@ export default function App() {
     };
     const handleBatchAssignEvent = () => {
       handleAutoAssignAllTaskIds();
+    };
+    const handleResolveDuplicateEvent = () => {
+      handleResolveDuplicateIds();
+    };
+    const handleResolveSingleDuplicateEvent = (e: any) => {
+      const { lineIndex, taskId, taskTitle } = e.detail || {};
+      handleResolveSingleDuplicateId(lineIndex ?? taskId, taskTitle);
     };
     const handleDeleteSectionEvent = (e: any) => {
       const { groupTitle, shapeId } = e.detail || {};
@@ -728,14 +765,18 @@ export default function App() {
 
     window.addEventListener('antask:assign-task-id', handleAssignEvent);
     window.addEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
+    window.addEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
+    window.addEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
     window.addEventListener('antask:delete-section', handleDeleteSectionEvent);
 
     return () => {
       window.removeEventListener('antask:assign-task-id', handleAssignEvent);
       window.removeEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
+      window.removeEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
+      window.removeEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
       window.removeEventListener('antask:delete-section', handleDeleteSectionEvent);
     };
-  }, [handleAssignSingleTaskId, handleAutoAssignAllTaskIds]);
+  }, [handleAssignSingleTaskId, handleAutoAssignAllTaskIds, handleResolveDuplicateIds, handleResolveSingleDuplicateId]);
 
   // Online / Offline network status listener
   useEffect(() => {
@@ -4037,6 +4078,16 @@ export default function App() {
         },
       },
       {
+        id: 'resolve-duplicate-ids',
+        title: 'Resolver IDs duplicados en TASKS.md',
+        shortcut: '⇧⌘D',
+        icon: 'auto_fix_high',
+        category: 'action',
+        perform: () => {
+          handleResolveDuplicateIds();
+        },
+      },
+      {
         id: 'toggle-theme',
         title: `Cambiar a tema ${effectiveTheme === 'dark' ? 'claro' : 'oscuro'}`,
         shortcut: 'T',
@@ -4591,6 +4642,23 @@ export default function App() {
             >
               <span>⚠</span>
               <span>{validationReport.issues.length}</span>
+            </button>
+          )}
+
+          {/* Resolve Duplicate IDs Button (visible when duplicate IDs exist) */}
+          {validationReport.duplicateIds.size > 0 && (
+            <button
+              id="btn-header-resolve-duplicate-ids"
+              type="button"
+              onClick={handleResolveDuplicateIds}
+              className="px-2 py-1 text-xs font-sans font-medium rounded border border-rose-800/80 bg-rose-950/80 text-rose-300 hover:bg-rose-900/90 flex items-center gap-1 cursor-pointer transition-colors shadow-sm select-none"
+              title={i18n._(msg`Resolver IDs duplicados (${validationReport.duplicateIds.size})`)}
+            >
+              <span className="material-symbols-outlined text-[14px]">auto_fix_high</span>
+              <span className="hidden lg:inline">{i18n._(msg`Resolver duplicados`)}</span>
+              <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-rose-900 text-rose-200">
+                {validationReport.duplicateIds.size}
+              </span>
             </button>
           )}
 
@@ -6124,24 +6192,38 @@ export default function App() {
               </button>
             </div>
 
-            <div id="div-app-54" className="px-4 py-2 bg-[var(--surface)] border-b border-[var(--outline)] flex items-center justify-between text-xs font-mono overflow-x-auto">
+            <div id="div-app-54" className="px-4 py-2 bg-[var(--surface)] border-b border-[var(--outline)] flex items-center justify-between text-xs font-mono overflow-x-auto gap-2">
               <div className="flex items-center gap-4">
                 <span>{i18n._(msg`Total:`)} <strong className="text-[var(--on-surface)]">{validationReport.issues.length}</strong></span>
                 <span className="text-rose-400">{i18n._(msg`Errores`)}: <strong>{validationReport.errorCount}</strong></span>
                 <span className="text-amber-400">{i18n._(msg`Avisos`)}: <strong>{validationReport.warningCount}</strong></span>
               </div>
-              {validationReport.missingIdTaskIds.size > 0 && (
-                <button
-                  id="btn-problems-auto-assign-all-ids"
-                  type="button"
-                  onClick={handleAutoAssignAllTaskIds}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-sans font-medium bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 cursor-pointer transition-colors"
-                  title={i18n._(msg`Generar y asignar IDs a todas las tareas sin ID`)}
-                >
-                  <span className="material-symbols-outlined text-[13px]">auto_fix_high</span>
-                  <span>{i18n._(msg`Generar IDs a todas (${validationReport.missingIdTaskIds.size})`)}</span>
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {validationReport.duplicateIds.size > 0 && (
+                  <button
+                    id="btn-problems-resolve-duplicate-ids"
+                    type="button"
+                    onClick={handleResolveDuplicateIds}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-sans font-medium bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 cursor-pointer transition-colors"
+                    title={i18n._(msg`Resolver IDs duplicados asignando identificadores únicos`)}
+                  >
+                    <span className="material-symbols-outlined text-[13px]">auto_fix_high</span>
+                    <span>{i18n._(msg`Resolver IDs duplicados (${validationReport.duplicateIds.size})`)}</span>
+                  </button>
+                )}
+                {validationReport.missingIdTaskIds.size > 0 && (
+                  <button
+                    id="btn-problems-auto-assign-all-ids"
+                    type="button"
+                    onClick={handleAutoAssignAllTaskIds}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-sans font-medium bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 cursor-pointer transition-colors"
+                    title={i18n._(msg`Generar y asignar IDs a todas las tareas sin ID`)}
+                  >
+                    <span className="material-symbols-outlined text-[13px]">auto_fix_high</span>
+                    <span>{i18n._(msg`Generar IDs a todas (${validationReport.missingIdTaskIds.size})`)}</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div id="div-app-55" className="p-4 overflow-auto max-h-[50vh] flex flex-col gap-2">
@@ -6169,6 +6251,18 @@ export default function App() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
+                      {issue.type === 'duplicate_id' && (
+                        <button
+                          id={`btn-problems-resolve-dup-${issue.id}`}
+                          type="button"
+                          onClick={() => handleResolveSingleDuplicateId(issue.lineIndex ?? issue.taskId ?? '', issue.taskTitle)}
+                          className="px-2.5 py-1 rounded text-[11px] font-medium bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 cursor-pointer transition-colors flex items-center gap-1"
+                          title={i18n._(msg`Asignar un ID único a esta tarea`)}
+                        >
+                          <span className="material-symbols-outlined text-[12px]">auto_fix_high</span>
+                          <span>{i18n._(msg`Resolver ID`)}</span>
+                        </button>
+                      )}
                       {issue.type === 'missing_id' && (
                         <button
                           id={`btn-problems-assign-id-${issue.id}`}
