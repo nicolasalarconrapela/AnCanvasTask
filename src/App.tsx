@@ -965,30 +965,80 @@ export default function App() {
                   operation: base && localWorkspace && remoteWorkspace && changed(localWorkspace) && changed(remoteWorkspace) ? 'merge' : 'pull', result: 'success' });
               });
             } catch (error: any) {
-              logSyncEvent(session, { syncId, documentId: null, baseRev: null, remoteRev: null,
-                operation: 'pull', result: error instanceof SyncConflict && getSyncSession() === session ? 'conflict' : 'rejected' });
+              const isConflict =
+                error instanceof SyncConflict ||
+                (typeof error?.message === 'string' && /conflict/i.test(error.message));
+              logSyncEvent(session, {
+                syncId,
+                documentId: null,
+                baseRev: null,
+                remoteRev: null,
+                operation: 'pull',
+                result: isConflict && getSyncSession() === session ? 'conflict' : 'rejected',
+              });
               if (cancelled || getSyncSession() !== session) return;
               syncReadyRef.current = false;
               setSyncReady(false);
               setSyncStatus('local');
-              pushToast(error.message, 'warning');
-              if (error.name !== 'TypeError') setIsSyncOverrideModalOpen(true);
+
+              if (isConflict) {
+                const now = Date.now();
+                if (now - lastConflictNotifiedTimeRef.current > 30000) {
+                  lastConflictNotifiedTimeRef.current = now;
+                  pushToast(
+                    error.message || i18n._(msg`Conflicto detectado en la sincronización`),
+                    'warning',
+                    {
+                      label: i18n._(msg`Resolver conflicto`),
+                      onClick: () => setIsSyncOverrideModalOpen(true),
+                    },
+                    8000
+                  );
+                }
+              }
             } finally {
               refreshing = null;
-              if (refreshAgain && !cancelled) { refreshAgain = false; queueMicrotask(() => { void refresh(); }); }
+              if (refreshAgain && !cancelled) {
+                refreshAgain = false;
+                queueMicrotask(() => {
+                  void refresh();
+                });
+              }
             }
           })();
           return refreshing;
         };
         refreshRemoteRef.current = refresh;
-        unsubscribe = subscribeToSanityLiveChanges(event => {
+        unsubscribe = subscribeToSanityLiveChanges((event) => {
           setIsLiveSyncActive(event.type !== 'connection_error');
           if (event.type !== 'connection_error') void refresh();
         }, session.config);
         await refresh();
       } catch (error: any) {
-        if (!cancelled) { setSyncStatus('local'); pushToast(error.message, 'warning'); }
-      } finally { initializing = false; }
+        if (!cancelled) {
+          setSyncStatus('local');
+          const isConflict =
+            error instanceof SyncConflict ||
+            (typeof error?.message === 'string' && /conflict/i.test(error.message));
+          if (isConflict) {
+            const now = Date.now();
+            if (now - lastConflictNotifiedTimeRef.current > 30000) {
+              lastConflictNotifiedTimeRef.current = now;
+              pushToast(
+                error.message || i18n._(msg`Conflicto detectado en la sincronización`),
+                'warning',
+                {
+                  label: i18n._(msg`Resolver conflicto`),
+                  onClick: () => setIsSyncOverrideModalOpen(true),
+                },
+                8000
+              );
+            }
+          }
+        }
+      } finally {
+        initializing = false;
+      }
     };
     void initialize();
     const catchUp = () => {
@@ -1448,12 +1498,13 @@ export default function App() {
             if (now - lastConflictNotifiedTimeRef.current > 60000) {
               lastConflictNotifiedTimeRef.current = now;
               pushToast(
-                i18n._(msg`Conflicto detectado en la sincronización automática (${totalConflicts})`),
+                i18n._(msg`Conflicto detectado en la sincronización (${totalConflicts})`),
                 'warning',
                 {
-                  label: i18n._(msg`Resolver`),
+                  label: i18n._(msg`Resolver conflicto`),
                   onClick: () => setIsSyncOverrideModalOpen(true),
-                }
+                },
+                8000
               );
             }
           }
@@ -3628,7 +3679,27 @@ export default function App() {
         if (!result.ok) throw new Error(result.message);
         await refreshRemoteRef.current();
       } catch (error: any) {
-        if (getSyncSession() === session) { setSyncStatus('local'); pushToast(error.message, 'warning'); }
+        if (getSyncSession() === session) {
+          setSyncStatus('local');
+          const isConflict =
+            error instanceof SyncConflict ||
+            (typeof error?.message === 'string' && /conflict/i.test(error.message));
+          if (isConflict) {
+            const now = Date.now();
+            if (now - lastConflictNotifiedTimeRef.current > 30000) {
+              lastConflictNotifiedTimeRef.current = now;
+              pushToast(
+                error.message || i18n._(msg`Conflicto detectado en la sincronización`),
+                'warning',
+                {
+                  label: i18n._(msg`Resolver conflicto`),
+                  onClick: () => setIsSyncOverrideModalOpen(true),
+                },
+                8000
+              );
+            }
+          }
+        }
       }
     }, 1000);
     debouncedSanityTasksRef.current = timer;

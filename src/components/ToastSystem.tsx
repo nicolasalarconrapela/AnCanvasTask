@@ -138,7 +138,9 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
             }}
             className="px-2 py-0.5 rounded bg-[var(--primary)] text-[var(--on-primary)] font-medium text-[11px] hover:brightness-110 active:opacity-90 transition-opacity cursor-pointer flex items-center gap-1"
           >
-            <span className="material-symbols-outlined text-[13px]">undo</span>
+            <span className="material-symbols-outlined text-[13px]">
+              {actionLabel.toLowerCase().includes('deshacer') || actionLabel.toLowerCase().includes('undo') ? 'undo' : 'sync_problem'}
+            </span>
             <span>{actionLabel}</span>
           </button>
         )}
