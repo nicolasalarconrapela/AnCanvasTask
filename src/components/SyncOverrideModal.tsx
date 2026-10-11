@@ -213,7 +213,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     setResolvingItemId(item.id);
     setActiveMenuId(null);
     try {
-      const res = await resolveSyncItem(item, strategy, workspaceStore);
+      const res = await resolveSyncItem(item, strategy, workspaceStore, undefined, true);
       if (getSyncSession() !== session) return;
       if (res.success) {
         onShowToast(res.message, 'success');

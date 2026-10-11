@@ -1,4 +1,4 @@
-import { documentSync, buildTaskDocumentId, applyTaskToMarkdown, deletionMarkerId } from './documentSyncService';
+import { documentSync, buildTaskDocumentId, applyTaskToMarkdown, deletionMarkerId, isActiveDeletion } from './documentSyncService';
 import { getSyncSession, assertSyncSession, getStorageScope, invalidateSyncSession } from './syncSessionService';
 import { createClient } from '@sanity/client';
 import type { Editor } from 'tldraw';
@@ -962,7 +962,7 @@ export async function fetchSanityDocumentsList(configOverride?: Partial<SanityCo
   const docs = await client.fetch<any[]>(`*[(syncOwner == $owner || ($legacy && !defined(syncOwner))) && _type in ["task", "canvasVisualState", "workspace", "syncDeletion"] && !(_id in path("drafts.**"))] | order(_id)`,
     { owner: session.owner, legacy: includeLegacy }, { signal: session.controller.signal });
   assertSyncSession(session);
-  const deleted = new Map(docs.filter(d => d._type === 'syncDeletion').map(d => [d.targetId, d.deletedDocument]));
+  const deleted = new Map(docs.filter(d => d._type === 'syncDeletion' && isActiveDeletion(d)).map(d => [d.targetId, d.deletedDocument]));
   const visible = docs.filter(d => d._type !== 'syncDeletion').map(d => deleted.has(d._id) ? { ...d, syncDeleted: true } : d);
   for (const [id, tombstone] of deleted) if (!visible.some(d => d._id === id)) visible.push(tombstone);
   if (observe) visible.forEach(doc => documentSync.observe(doc, session));
@@ -992,7 +992,7 @@ export async function fetchSanityDocumentById(id: string, configOverride?: Parti
   const client = createClient({ ...config, useCdn: false, perspective: 'raw' });
   const marker = await client.fetch('*[_id == $id][0]', { id: deletionMarkerId(id) }, { signal: session.controller.signal });
   assertSyncSession(session);
-  if (marker) return null;
+  if (isActiveDeletion(marker)) return null;
   const doc = await client.fetch(`*[_id == $id && syncOwner == $owner][0]`, { id, owner: session.owner }, { signal: session.controller.signal });
   assertSyncSession(session);
   if (doc) documentSync.observe(doc, session);
@@ -1243,6 +1243,7 @@ export function normalizeSanityWorkspaceDoc(doc: any): any {
     _id: doc._id,
     _rev: doc._rev,
     syncOwner: doc.syncOwner,
+    syncRestorationId: doc.syncRestorationId,
     id: cleanId,
     name: doc.name || doc.title || 'Workspace',
     githubRepo: {

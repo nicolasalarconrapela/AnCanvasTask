@@ -41,6 +41,7 @@ export interface Workspace {
   _id?: string;
   _rev?: string;
   syncOwner?: string;
+  syncRestorationId?: string;
   isPlaceholder?: boolean;
   id: string;
   name: string;

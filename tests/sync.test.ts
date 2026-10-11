@@ -4,7 +4,7 @@ import { beforeEach, afterEach, test } from 'node:test';
 import { DocumentSync, documentSync, SyncConflict, mergeSyncValue, mergeMarkdown, buildTaskDocumentId, deletionMarkerId } from '../src/services/documentSyncService';
 import { beginSyncSession, getSyncSession, invalidateSyncSession } from '../src/services/syncSessionService';
 import { createEmptyWorkspace, createTaskDocument, createWorkspaceBranch, loadWorkspaceStore, saveWorkspaceStore, flushWorkspaceStoreSaves, sanitizeWorkspace } from '../src/services/workspaceService';
-import { analyzeSyncDifferences, classifySyncDifference, compareMarkdownDocuments, resolveSyncItem } from '../src/services/syncEngineService';
+import { analyzeSyncDifferences, classifySyncDifference, compareMarkdownDocuments, resolveSyncItem, executeBatchSync } from '../src/services/syncEngineService';
 import { applyRemoteTask, clearSanityConfig, deleteDocumentFromSanity, getSanityConfig, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments, subscribeToSanityLiveChanges } from '../src/services/sanityService';
 import { scanTaskBlocks, updateTaskInMarkdown } from '../src/utils/markdownSync';
 
@@ -806,6 +806,143 @@ test('sync logs distinguish push, merge, conflict and delete without document co
     assert.equal(event.session, getSyncSession()!.id); assert(event.syncId);
     assert.equal(event.baseRev, event.operation === 'delete' ? 'remote-conflict' : 'r0');
   }
+});
+
+test('manual restoration retains deletion history and rejects stale writes and deletes', async () => {
+  const original = task(); server.documents.set(original._id, original); sync.observe(original);
+  const stale = new DocumentSync(server.client); stale.observe(original);
+  await sync.remove(original._id, original._type, config, original);
+  await assert.rejects(stale.write({ ...original, title: 'Automatic resurrection' }, config), SyncConflict);
+  const restored = await sync.restore({ ...original, title: 'Manual restoration' }, config);
+  assert.equal(restored.syncDeleted, false); assert(restored.syncRestorationId);
+  const marker = server.documents.get(deletionMarkerId(original._id));
+  assert.equal(marker.syncRestorationId, restored.syncRestorationId); assert(marker.deletedDocument.syncDeleted);
+  await assert.rejects(stale.write({ ...original, title: 'Stale client' }, config), SyncConflict);
+  await assert.rejects(stale.remove(original._id, original._type, config, original), SyncConflict);
+  await sync.write({ ...restored, title: 'Fresh edit' }, config);
+  assert.equal(server.documents.get(original._id).title, 'Fresh edit');
+  await sync.remove(original._id, original._type, config, server.documents.get(original._id));
+  assert.equal(server.documents.get(deletionMarkerId(original._id)).syncRestorationId, undefined);
+  await assert.rejects(sync.write(restored, config), SyncConflict);
+});
+
+test('manual workspace restoration restores its tasks atomically and fences older clients', async () => {
+  const original = workspace(); server.documents.set(original._id, original); sync.observe(original);
+  const saved = await sync.write(original, config);
+  const stale = new DocumentSync(server.client); stale.observe(saved);
+  await sync.remove(saved._id, saved._type, config, saved);
+  const restored = await sync.restore(saved, config);
+  const restoredTask = [...server.documents.values()].find(d => d._type === 'task');
+  assert.equal(restoredTask.syncDeleted, false);
+  assert.equal(restoredTask.syncRestorationId, restored.syncRestorationId);
+  await assert.rejects(stale.write(saved, config), SyncConflict);
+  await sync.write({ ...restored, name: 'Restored W' }, config);
+  assert.equal(server.documents.get(original._id).name, 'Restored W');
+});
+
+test('manual restoration of a physically deleted document keeps its identity', async () => {
+  const original = task(); server.documents.set(original._id, original); sync.observe(original);
+  await sync.remove(original._id, original._type, config, original);
+  server.documents.delete(original._id);
+  const restored = await sync.restore(original, config);
+  assert.equal(restored._id, original._id); assert.equal(restored.syncDeleted, false);
+  await sync.write({ ...restored, title: 'Edited after restore' }, config);
+});
+
+test('manual restoration never queues offline authorization or overwrites a concurrent revision', async () => {
+  const original = task(); server.documents.set(original._id, original); sync.observe(original);
+  await sync.remove(original._id, original._type, config, original);
+  const before = structuredClone([...server.documents]);
+  server.offline = true;
+  await assert.rejects(sync.restore(original, config), /offline/);
+  assert.equal(Object.keys(localStorage).filter(k => k.startsWith('antask_sync_pending:')).length, 0);
+  server.offline = false;
+  await sync.flush(getSyncSession()!); assert.deepEqual([...server.documents], before);
+  server.beforeCommit = () => { server.documents.get(original._id)._rev = 'concurrent'; };
+  await assert.rejects(sync.restore(original, config), /revision conflict/);
+  assert.equal(server.documents.get(original._id).syncDeleted, true);
+  assert.equal(server.documents.get(deletionMarkerId(original._id)).syncRestorationId, undefined);
+});
+
+test('manual download restores locally deleted documents in their own workspace', async () => {
+  const remote = normalizeSanityWorkspaceDoc(workspace());
+  const unrelated = createEmptyWorkspace();
+  const store = { scope: getSyncSession()!.scope, workspaces: [unrelated], remoteBase: [remote], activeWorkspaceId: unrelated.id };
+  const item = compareMarkdownDocuments(store, [remote]).find(i => i.workspaceId === remote.id)!;
+  assert.equal(item.requiresRestoration, true);
+  await assert.rejects(resolveSyncItem(item, 'keep_remote', store, config), SyncConflict);
+  const result = await resolveSyncItem(item, 'keep_remote', store, config, true);
+  assert(result.success);
+  assert.deepEqual(result.updatedStore!.workspaces.find(w => w.id === unrelated.id), unrelated);
+  assert.equal(result.updatedStore!.workspaces.find(w => w.id === remote.id)!.branches[0].taskDocuments[0].content, markdown);
+  assert.equal(server.commits, 0);
+});
+
+test('smart sync skips restoration while explicit upload can restore a deleted workspace', async context => {
+  documentSync.forget(); context.mock.method(documentSync as any, 'clientFactory', server.client);
+  const original = workspace(); server.documents.set(original._id, original); sync.observe(original);
+  const saved = await sync.write(original, config); documentSync.observe(saved);
+  const local = normalizeSanityWorkspaceDoc(saved);
+  await sync.remove(saved._id, saved._type, config, saved);
+  const store = { scope: getSyncSession()!.scope, workspaces: [local], remoteBase: [local], activeWorkspaceId: local.id };
+  const item: any = { id: local.id, entityType: 'workspace', workspaceId: local.id, localData: local,
+    diffType: 'only_local', requiresRestoration: true, resolutionStrategy: 'keep_local', title: local.name, summaryChanges: [] };
+  const smart = await executeBatchSync([item], 'smart', store, config);
+  assert.equal(smart.resolvedCount, 0); assert.equal(server.documents.get(original._id).syncDeleted, true);
+  const manual = await executeBatchSync([item], 'push_all', store, config);
+  assert(manual.success, manual.message); assert.equal(manual.resolvedCount, 1);
+  assert.equal(server.documents.get(original._id).syncDeleted, false);
+});
+
+test('analysis identifies deleted tasks and manual resolution restores them in either direction', async context => {
+  documentSync.forget(); context.mock.method(documentSync as any, 'clientFactory', server.client);
+  const original = workspace();
+  for (const id of ['remote-note', 'local-note']) original.branches[0].taskDocuments.push({ id, path: `${id}.md`, name: `${id}.md`, content: '# Original\n' });
+  server.documents.set(original._id, original); sync.observe(original);
+  const saved = await sync.write(original, config); documentSync.observe(saved);
+  const local = normalizeSanityWorkspaceDoc(saved);
+  const taskDoc = [...server.documents.values()].find(d => d._type === 'task');
+  await sync.remove(taskDoc._id, taskDoc._type, config, taskDoc);
+  const store = { scope: getSyncSession()!.scope, workspaces: [local], remoteBase: [structuredClone(local)],
+    remoteDocuments: [saved, taskDoc], activeWorkspaceId: local.id };
+  local.branches[0].taskDocuments[2].content = '# Local pending\n';
+  const remoteParent = server.documents.get(saved._id);
+  remoteParent.branches[0].taskDocuments[1].content = '# Remote update\n'; remoteParent._rev = 'other-doc-updated';
+  const api = createServer((_request, response) => {
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ result: [...server.documents.values()] }));
+  });
+  await new Promise<void>(resolve => api.listen(0, '127.0.0.1', resolve));
+  context.after(() => { api.closeAllConnections(); api.close(); });
+  const address = api.address() as { port: number };
+  const mockConfig = { ...config, apiHost: `http://127.0.0.1:${address.port}`, useProjectHostname: false };
+  const comparison = await analyzeSyncDifferences(store, mockConfig);
+  const upload = comparison.items.find(i => i.entityType === 'task')!;
+  assert.equal(upload.requiresRestoration, true); assert.equal(upload.remoteData._id, taskDoc._id);
+  assert(comparison.items.find(i => i.entityType === 'workspace')!.requiresRestoration);
+  const smart = await executeBatchSync(comparison.items, 'smart', store, config);
+  assert.equal(smart.resolvedCount, 0);
+  const restored = await resolveSyncItem(upload, 'keep_local', store, config, true);
+  assert(restored.success);
+  assert.equal(server.documents.get(taskDoc._id).syncDeleted, false);
+  const restoredWorkspace = server.documents.get(saved._id);
+  assert(restoredWorkspace.branches[0].taskDocuments[0].content.includes('- [ ] A'));
+  assert.equal(restoredWorkspace.syncRestorationId, server.documents.get(taskDoc._id).syncRestorationId);
+  assert.equal(restored.updatedStore!.workspaces[0].branches[0].taskDocuments[1].content, '# Remote update\n');
+  assert.equal(restored.updatedStore!.workspaces[0].branches[0].taskDocuments[2].content, '# Local pending\n');
+  assert.equal(restored.updatedStore!.remoteBase![0].branches[0].taskDocuments[2].content, '# Original\n');
+  // A local removal must stay removed during smart sync; selecting download restores it.
+  const localRemoved = structuredClone(restored.updatedStore!);
+  localRemoved.workspaces[0].branches[0].taskDocuments[0].content = '# Tareas\n\n## General\n';
+  const reverse = await analyzeSyncDifferences(localRemoved, mockConfig);
+  const download = reverse.items.find(i => i.entityType === 'task')!;
+  assert.equal(download.requiresRestoration, true);
+  const skipped = await executeBatchSync(reverse.items, 'smart', localRemoved, config);
+  assert.equal(skipped.resolvedCount, 0);
+  const downloaded = await resolveSyncItem(download, 'keep_remote', localRemoved, config, true);
+  assert(downloaded.success);
+  assert(downloaded.updatedStore!.workspaces[0].branches[0].taskDocuments[0].content.includes('- [ ] A'));
+  assert.equal(downloaded.updatedStore!.workspaces[0].syncRestorationId, restoredWorkspace.syncRestorationId);
 });
 
 test('rejected offline replay retains its syncId and expected revision in logs', async context => {
