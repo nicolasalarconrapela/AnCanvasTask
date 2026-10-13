@@ -137,6 +137,7 @@ import {
   scanTaskBlocks,
   syncNotesToMarkdown,
   toggleSubtaskInMarkdown,
+  updateSectionColorInMarkdown,
   updateTaskInMarkdown,
   validateMarkdownDocument,
 } from './utils/markdownSync';
@@ -792,11 +793,25 @@ export default function App() {
       }
     };
 
+    const handleSectionColorChangedEvent = (e: any) => {
+      const { groupTitle, color, headingId, branchTitle } = e.detail || {};
+      if (groupTitle) {
+        setMarkdownInput((currentMd) =>
+          updateSectionColorInMarkdown(currentMd, groupTitle, color, headingId, branchTitle)
+        );
+        const ed = editorRef.current;
+        if (ed) {
+          triggerDebouncedVisualSave(ed);
+        }
+      }
+    };
+
     window.addEventListener('antask:assign-task-id', handleAssignEvent);
     window.addEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
     window.addEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
     window.addEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
     window.addEventListener('antask:delete-section', handleDeleteSectionEvent);
+    window.addEventListener('antask:section-color-changed', handleSectionColorChangedEvent);
     window.addEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
 
     return () => {
@@ -805,6 +820,7 @@ export default function App() {
       window.removeEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
       window.removeEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
       window.removeEventListener('antask:delete-section', handleDeleteSectionEvent);
+      window.removeEventListener('antask:section-color-changed', handleSectionColorChangedEvent);
       window.removeEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
     };
   }, [handleAssignSingleTaskId, handleAutoAssignAllTaskIds, handleResolveDuplicateIds, handleResolveSingleDuplicateId]);

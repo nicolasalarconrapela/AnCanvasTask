@@ -1425,14 +1425,143 @@ export function updateAllGroupCounts(editor: Editor) {
   }
 }
 
-function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
-  const { title, count, completedCount, w, h, level } = shape.props;
+export interface SectionColorOption {
+  id: string;
+  name: string;
+  swatchClass: string;
+  leafBgClass: string;
+  leafBorderClass: string;
+  containerBgClass: string;
+  containerBorderClass: string;
+  headerAccentClass?: string;
+  badgeClass?: string;
+}
+
+export const SECTION_COLOR_OPTIONS: Record<string, SectionColorOption> = {
+  default: {
+    id: 'default',
+    name: 'Por defecto',
+    swatchClass: 'bg-zinc-400 dark:bg-zinc-600',
+    leafBgClass: 'bg-[var(--surface-container)]/35',
+    leafBorderClass: 'border-[var(--outline)]',
+    containerBgClass: 'bg-[var(--surface-container-lowest)]/50',
+    containerBorderClass: 'border-[var(--outline-variant)]',
+  },
+  blue: {
+    id: 'blue',
+    name: 'Azul',
+    swatchClass: 'bg-blue-500',
+    leafBgClass: 'bg-blue-500/10 dark:bg-blue-950/30',
+    leafBorderClass: 'border-blue-500/35 dark:border-blue-400/35',
+    containerBgClass: 'bg-blue-500/8 dark:bg-blue-950/20',
+    containerBorderClass: 'border-blue-500/35 dark:border-blue-400/35',
+    headerAccentClass: 'text-blue-600 dark:text-blue-400',
+    badgeClass: 'bg-blue-500/15 text-blue-600 dark:text-blue-300 border-blue-500/30',
+  },
+  purple: {
+    id: 'purple',
+    name: 'Púrpura',
+    swatchClass: 'bg-purple-500',
+    leafBgClass: 'bg-purple-500/10 dark:bg-purple-950/30',
+    leafBorderClass: 'border-purple-500/35 dark:border-purple-400/35',
+    containerBgClass: 'bg-purple-500/8 dark:bg-purple-950/20',
+    containerBorderClass: 'border-purple-500/35 dark:border-purple-400/35',
+    headerAccentClass: 'text-purple-600 dark:text-purple-400',
+    badgeClass: 'bg-purple-500/15 text-purple-600 dark:text-purple-300 border-purple-500/30',
+  },
+  emerald: {
+    id: 'emerald',
+    name: 'Esmeralda',
+    swatchClass: 'bg-emerald-500',
+    leafBgClass: 'bg-emerald-500/10 dark:bg-emerald-950/30',
+    leafBorderClass: 'border-emerald-500/35 dark:border-emerald-400/35',
+    containerBgClass: 'bg-emerald-500/8 dark:bg-emerald-950/20',
+    containerBorderClass: 'border-emerald-500/35 dark:border-emerald-400/35',
+    headerAccentClass: 'text-emerald-600 dark:text-emerald-400',
+    badgeClass: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border-emerald-500/30',
+  },
+  amber: {
+    id: 'amber',
+    name: 'Ámbar',
+    swatchClass: 'bg-amber-500',
+    leafBgClass: 'bg-amber-500/10 dark:bg-amber-950/30',
+    leafBorderClass: 'border-amber-500/35 dark:border-amber-400/35',
+    containerBgClass: 'bg-amber-500/8 dark:bg-amber-950/20',
+    containerBorderClass: 'border-amber-500/35 dark:border-amber-400/35',
+    headerAccentClass: 'text-amber-600 dark:text-amber-400',
+    badgeClass: 'bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/30',
+  },
+  rose: {
+    id: 'rose',
+    name: 'Rosa',
+    swatchClass: 'bg-rose-500',
+    leafBgClass: 'bg-rose-500/10 dark:bg-rose-950/30',
+    leafBorderClass: 'border-rose-500/35 dark:border-rose-400/35',
+    containerBgClass: 'bg-rose-500/8 dark:bg-rose-950/20',
+    containerBorderClass: 'border-rose-500/35 dark:border-rose-400/35',
+    headerAccentClass: 'text-rose-600 dark:text-rose-400',
+    badgeClass: 'bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/30',
+  },
+  cyan: {
+    id: 'cyan',
+    name: 'Cian',
+    swatchClass: 'bg-cyan-500',
+    leafBgClass: 'bg-cyan-500/10 dark:bg-cyan-950/30',
+    leafBorderClass: 'border-cyan-500/35 dark:border-cyan-400/35',
+    containerBgClass: 'bg-cyan-500/8 dark:bg-cyan-950/20',
+    containerBorderClass: 'border-cyan-500/35 dark:border-cyan-400/35',
+    headerAccentClass: 'text-cyan-600 dark:text-cyan-400',
+    badgeClass: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border-cyan-500/30',
+  },
+  slate: {
+    id: 'slate',
+    name: 'Pizarra',
+    swatchClass: 'bg-slate-500',
+    leafBgClass: 'bg-slate-500/10 dark:bg-slate-900/35',
+    leafBorderClass: 'border-slate-500/35 dark:border-slate-500/35',
+    containerBgClass: 'bg-slate-500/8 dark:bg-slate-900/25',
+    containerBorderClass: 'border-slate-500/35 dark:border-slate-400/35',
+    headerAccentClass: 'text-slate-600 dark:text-slate-300',
+    badgeClass: 'bg-slate-500/15 text-slate-600 dark:text-slate-300 border-slate-500/30',
+  },
+};
+
+function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?: Editor }) {
+  const { title, count, completedCount, w, h, level, color } = shape.props;
   const isContainer = Boolean(shape.props.isContainer || level === 1);
   const headingLevel = Math.max(1, Math.min(6, level || (isContainer ? 1 : 2)));
   const headingPrefix = '#'.repeat(headingLevel);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const activeColorKey = color && SECTION_COLOR_OPTIONS[color] ? color : 'default';
+  const colorConfig = SECTION_COLOR_OPTIONS[activeColorKey] || SECTION_COLOR_OPTIONS.default;
+
+  const handleSelectColor = (selectedColor: string) => {
+    const finalColor = selectedColor && selectedColor !== 'default' ? selectedColor : undefined;
+    if (editor) {
+      editor.updateShape({
+        id: shape.id,
+        type: 'task-group',
+        props: {
+          ...shape.props,
+          color: finalColor,
+        },
+      } as any);
+    }
+    window.dispatchEvent(
+      new CustomEvent('antask:section-color-changed', {
+        detail: {
+          groupTitle: title,
+          color: finalColor || '',
+          headingId: shape.props?.headingId,
+          branchTitle: shape.props?.branchTitle,
+          shapeId: shape.id,
+        },
+      })
+    );
+  };
 
   const globalFilters = useGlobalTaskFilters();
   const isSectionFilteredOut =
@@ -1505,10 +1634,14 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
       <div
         id={`task-group-container-${shape.id}`}
         onContextMenu={handleContextMenu}
+        style={{
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+        }}
         className={
           isContainer
-            ? "w-full h-full rounded-xl bg-[var(--surface-container-lowest)]/50 border-2 border-dashed border-[var(--outline-variant)] p-4 flex flex-col justify-start select-none transition-colors relative"
-            : "w-full h-full rounded-md bg-[var(--surface-container)]/30 border border-[var(--outline)] p-3 flex flex-col justify-start select-none transition-colors relative"
+            ? `w-full h-full rounded-xl backdrop-blur-md ${colorConfig.containerBgClass} border-2 border-dashed ${colorConfig.containerBorderClass} p-4 flex flex-col justify-start select-none transition-colors relative`
+            : `w-full h-full rounded-md backdrop-blur-md ${colorConfig.leafBgClass} border ${colorConfig.leafBorderClass} p-3 flex flex-col justify-start select-none transition-colors relative`
         }
       >
         {/* Header */}
@@ -1517,19 +1650,19 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
           onContextMenu={handleContextMenu}
           className={
             isContainer
-              ? "flex items-center justify-between border-b border-[var(--outline-variant)]/60 pb-2.5 pointer-events-auto cursor-context-menu"
-              : "flex items-center justify-between border-b border-[var(--outline)] pb-2 pointer-events-auto cursor-context-menu"
+              ? `flex items-center justify-between border-b ${colorConfig.containerBorderClass}/60 pb-2.5 pointer-events-auto cursor-context-menu`
+              : `flex items-center justify-between border-b ${colorConfig.leafBorderClass} pb-2 pointer-events-auto cursor-context-menu`
           }
         >
           <div id={`task-group-title-group-${shape.id}`} className="flex items-center gap-1.5">
-            <span className={isContainer ? "text-[var(--primary)] font-mono text-sm font-bold" : "text-[var(--on-surface-variant)] font-mono text-xs font-semibold"}>
+            <span className={colorConfig.headerAccentClass || (isContainer ? "text-[var(--primary)] font-mono text-sm font-bold" : "text-[var(--on-surface-variant)] font-mono text-xs font-semibold")}>
               {headingPrefix}
             </span>
             <h2 className={isContainer ? "text-sm font-bold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[280px]" : "text-xs font-semibold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[180px]"}>
               {title}
             </h2>
             {isContainer ? (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-[var(--on-surface-variant)] bg-[var(--surface-container-high)] border border-[var(--outline)]">
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${colorConfig.badgeClass || 'text-[var(--on-surface-variant)] bg-[var(--surface-container-high)] border border-[var(--outline)]'}`}>
                 {headingPrefix}
               </span>
             ) : (
@@ -1583,11 +1716,56 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
               right: menuPosition ? 'auto' : '8px',
               zIndex: 100,
             }}
-            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1 flex flex-col gap-0.5 min-w-[170px] text-xs font-sans pointer-events-auto"
+            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1.5 flex flex-col gap-1 min-w-[190px] text-xs font-sans pointer-events-auto"
           >
             <div className="px-2 py-1 text-[11px] font-mono text-[var(--on-surface-variant)] border-b border-[var(--outline)] mb-0.5 truncate">
               {`${headingPrefix} ${title}`}
             </div>
+
+            {/* Selector de color blur */}
+            <div className="px-2 py-1 border-b border-[var(--outline)] pb-1.5">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--on-surface-variant)] mb-1 flex items-center justify-between">
+                <span>{i18n._(msg`Fondo Blur`)}</span>
+                {activeColorKey !== 'default' && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSelectColor('default');
+                    }}
+                    className="text-[9px] hover:underline text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer"
+                  >
+                    {i18n._(msg`Restablecer`)}
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-4 gap-1.5 py-0.5">
+                {Object.entries(SECTION_COLOR_OPTIONS).map(([cKey, opt]) => {
+                  const isSelected = activeColorKey === cKey;
+                  return (
+                    <button
+                      key={cKey}
+                      type="button"
+                      title={opt.name}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectColor(cKey);
+                      }}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center transition-all cursor-pointer ${opt.swatchClass} ${
+                        isSelected
+                          ? 'ring-2 ring-offset-1 ring-offset-[var(--surface-container)] ring-[var(--primary)] scale-110'
+                          : 'opacity-80 hover:opacity-100 hover:scale-105'
+                      }`}
+                    >
+                      {isSelected && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-white dark:bg-zinc-900 shadow-xs" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {!isContainer && (
               <button
                 id={`btn-task-group-menu-add-task-${shape.id}`}
@@ -1649,6 +1827,7 @@ export type GroupShapeProps = {
   branchTitle?: string;
   path?: string;
   isContainer?: boolean;
+  color?: string;
 };
 
 export type ITaskGroupShape = TLBaseShape<'task-group', GroupShapeProps>;
@@ -1669,6 +1848,7 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
     branchTitle: T.optional(T.string),
     path: T.optional(T.string),
     isContainer: T.optional(T.boolean),
+    color: T.optional(T.string),
   };
 
   getDefaultProps(): GroupShapeProps {
@@ -1775,7 +1955,7 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
   }
 
   component(shape: ITaskGroupShape) {
-    return <TaskGroupComponent shape={shape} />;
+    return <TaskGroupComponent shape={shape} editor={this.editor} />;
   }
 }
 
@@ -1910,7 +2090,7 @@ export function populateCanvasWithGroups(
     }
   }
 
-  const savedGroupMap = new Map<string, { x: number; y: number; width: number; height: number; isCollapsed?: boolean }>();
+  const savedGroupMap = new Map<string, { x: number; y: number; width: number; height: number; isCollapsed?: boolean; color?: string }>();
   if (savedVisualState?.groups) {
     for (const g of savedVisualState.groups) {
       if (g.groupTitle) {
@@ -2041,6 +2221,7 @@ export function populateCanvasWithGroups(
     const groupW = placed.w;
     const groupH = placed.h;
     const isNewGroup = !savedGroupMap.has(group.title.toLowerCase());
+    const saved = savedGroupMap.get(group.title.toLowerCase());
 
     // If this group is a parent container with child headings AND has direct tasks:
     // Its parentId for the leaf column is ITSELF (group.id), so its macro container encloses it!
@@ -2065,6 +2246,7 @@ export function populateCanvasWithGroups(
         branchTitle: group.branchTitle,
         path: group.path,
         isContainer: false,
+        color: group.color || saved?.color,
       },
     });
 
@@ -2273,6 +2455,7 @@ export function populateCanvasWithGroups(
         branchTitle: ph.branchTitle,
         path: ph.path,
         isContainer: true,
+        color: ph.color || pSaved?.color,
       },
     });
   });

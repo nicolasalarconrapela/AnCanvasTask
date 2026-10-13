@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
-import { TaskPriority, TaskStatus, SubtaskItem } from '../shapes/TaskShapeUtil';
+import { TaskPriority, TaskStatus, SubtaskItem, SECTION_COLOR_OPTIONS } from '../shapes/TaskShapeUtil';
 import { scanTaskBlocks, TaskBlockInfo } from '../utils/markdownSync';
 import { TaskFilterState } from './FilterBar';
 import { SkeletonKanbanColumn } from './Skeletons';
@@ -141,10 +141,17 @@ export function KanbanBoard({
   };
 
   // Parse tasks from markdown
-  const { allTasks, sections } = useMemo(() => {
+  const { allTasks, sections, sectionColorMap } = useMemo(() => {
     const { taskBlocks, groupHeadings } = scanTaskBlocks(markdown);
     const secList = groupHeadings.map((g) => g.title);
     if (secList.length === 0) secList.push('General');
+
+    const colorMap = new Map<string, string>();
+    groupHeadings.forEach((g) => {
+      if (g.color) {
+        colorMap.set(g.title.toLowerCase(), g.color);
+      }
+    });
 
     const tasks: KanbanTask[] = taskBlocks.map((b) => {
       const isCompleted = b.rawTaskLine.includes('[x]') || b.rawTaskLine.includes('[X]');
@@ -179,7 +186,7 @@ export function KanbanBoard({
       };
     });
 
-    return { allTasks: tasks, sections: secList };
+    return { allTasks: tasks, sections: secList, sectionColorMap: colorMap };
   }, [markdown]);
 
   // Filter & Sort tasks according to search, filters & sort state
@@ -997,6 +1004,8 @@ export function KanbanBoard({
               const isDropTarget = dragOverColumn === sec;
 
               const secId = sec.toLowerCase().replace(/[^a-z0-9]/g, '-');
+              const secColorKey = sectionColorMap.get(sec.toLowerCase()) || 'default';
+              const colorOpt = SECTION_COLOR_OPTIONS[secColorKey] || SECTION_COLOR_OPTIONS.default;
 
               return (
                 <div
@@ -1005,10 +1014,14 @@ export function KanbanBoard({
                   onDragOver={(e) => handleDragOver(e, sec)}
                   onDragLeave={handleDragLeave}
                   onDrop={(e) => handleDrop(e, sec)}
-                  className={`w-[85vw] sm:w-80 shrink-0 snap-center sm:snap-align-none flex flex-col rounded-md bg-[var(--surface-container)] border transition-all duration-120 ${
+                  style={{
+                    backdropFilter: 'blur(12px)',
+                    WebkitBackdropFilter: 'blur(12px)',
+                  }}
+                  className={`w-[85vw] sm:w-80 shrink-0 snap-center sm:snap-align-none flex flex-col rounded-md backdrop-blur-md ${colorOpt.leafBgClass} border transition-all duration-120 ${
                     isDropTarget
                       ? 'border-[var(--primary)] bg-[var(--primary)]/5'
-                      : 'border-[var(--outline)]'
+                      : colorOpt.leafBorderClass
                   }`}
                 >
                   {/* Column Header */}
@@ -1054,8 +1067,56 @@ export function KanbanBoard({
                       {activeMenuSectionId === secId && (
                         <div
                           id={`kanban-section-menu-dropdown-${secId}`}
-                          className="absolute top-8 right-0 z-50 bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1 flex flex-col gap-0.5 min-w-[160px] text-xs font-sans"
+                          className="absolute top-8 right-0 z-50 bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1.5 flex flex-col gap-1 min-w-[170px] text-xs font-sans"
                         >
+                          {/* Selector de color blur */}
+                          <div className="px-1.5 py-1 border-b border-[var(--outline)] pb-1.5">
+                            <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--on-surface-variant)] mb-1 flex items-center justify-between">
+                              <span>{i18n._(msg`Fondo Blur`)}</span>
+                              {secColorKey !== 'default' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveMenuSectionId(null);
+                                    window.dispatchEvent(
+                                      new CustomEvent('antask:section-color-changed', {
+                                        detail: { groupTitle: sec, color: '' },
+                                      })
+                                    );
+                                  }}
+                                  className="text-[9px] hover:underline text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer"
+                                >
+                                  {i18n._(msg`Restablecer`)}
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-4 gap-1.5 py-0.5">
+                              {Object.entries(SECTION_COLOR_OPTIONS).map(([cKey, opt]) => (
+                                <button
+                                  key={cKey}
+                                  id={`btn-kanban-menu-color-${cKey}-${secId}`}
+                                  type="button"
+                                  title={opt.name}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveMenuSectionId(null);
+                                    window.dispatchEvent(
+                                      new CustomEvent('antask:section-color-changed', {
+                                        detail: { groupTitle: sec, color: cKey === 'default' ? '' : cKey },
+                                      })
+                                    );
+                                  }}
+                                  className={`w-5 h-5 rounded-full flex items-center justify-center transition-all cursor-pointer ${opt.swatchClass} ${
+                                    secColorKey === cKey
+                                      ? 'ring-2 ring-offset-1 ring-offset-[var(--surface-container)] ring-[var(--primary)] scale-110'
+                                      : 'opacity-80 hover:opacity-100 hover:scale-105'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                          </div>
+
                           <button
                             id={`btn-kanban-menu-add-task-sec-${secId}`}
                             type="button"

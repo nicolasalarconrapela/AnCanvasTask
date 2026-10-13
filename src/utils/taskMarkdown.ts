@@ -25,6 +25,7 @@ export interface ParsedGroup {
   path?: string;
   lineIndex?: number;
   isParent?: boolean;
+  color?: string;
 }
 
 export function parseTasksMarkdown(markdown: string): ParsedGroup[] {
@@ -47,6 +48,7 @@ export function parseTasksMarkdown(markdown: string): ParsedGroup[] {
         path: gh.path,
         lineIndex: gh.lineIndex,
         isParent: gh.isParent,
+        color: gh.color,
       };
       parsedGroups.push(gItem);
       groupById.set(gItem.id!, gItem);

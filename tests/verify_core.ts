@@ -11,6 +11,7 @@ import {
   deleteTaskFromMarkdown,
   autoAssignAllMissingTaskIds,
   validateMarkdownDocument,
+  updateSectionColorInMarkdown,
 } from '../src/utils/markdownSync';
 import {
   getInitialDefaultWorkspaces,
@@ -431,6 +432,60 @@ assert(!parsedAfterDelete.some((g) => g.title === 'Github' && g.branchTitle === 
 assert(parsedAfterDelete.some((g) => g.title === 'Github' && g.branchTitle === 'Backend'), 'Github de Backend debe seguir existiendo intacto');
 
 console.log('   ✓ Ramas independientes ## con subsecciones duplicadas completamente aisladas y verificadas.');
+
+// 13. Verificando colores de fondo blur para secciones
+console.log('13. Verificando colores de fondo blur para secciones (#, ##, ###, ####)...');
+const colorMdSample = `# Paco <!-- color: slate -->
+
+## Fronted <!-- color: blue -->
+
+### NPM <!-- color: emerald -->
+- [ ] Tarea en NPM
+  id: tarea-npm-1
+  priority: P1
+
+## Backend
+### NPM
+- [ ] Tarea backend
+  id: tarea-be-1
+  priority: P1
+`;
+
+const parsedWithColors = parseTasksMarkdown(colorMdSample);
+const pacoGroupHeadings = scanTaskBlocks(colorMdSample);
+const pacoParent = pacoGroupHeadings.parentHeadings.find((p) => p.title === 'Paco');
+assert.strictEqual(pacoParent?.color, 'slate', 'El macro grupo Paco debe tener color slate');
+
+const frontedGroup = pacoGroupHeadings.parentHeadings.find((p) => p.title === 'Fronted');
+assert.strictEqual(frontedGroup?.color, 'blue', 'El contenedor Fronted debe tener color blue');
+
+const frontedNpmGroup = parsedWithColors.find((g) => g.title === 'NPM' && g.branchTitle === 'Fronted');
+assert.strictEqual(frontedNpmGroup?.color, 'emerald', 'La subsección NPM de Fronted debe tener color emerald');
+
+const backendNpmGroup = parsedWithColors.find((g) => g.title === 'NPM' && g.branchTitle === 'Backend');
+assert.strictEqual(backendNpmGroup?.color, undefined, 'La subsección NPM de Backend no debe tener color');
+
+// Actualizar color de sección Fronted a purple
+const mdWithPurple = updateSectionColorInMarkdown(colorMdSample, 'Fronted', 'purple');
+const parsedPurple = scanTaskBlocks(mdWithPurple);
+const frontedPurple = parsedPurple.parentHeadings.find((p) => p.title === 'Fronted');
+assert.strictEqual(frontedPurple?.color, 'purple', 'Fronted debe haberse actualizado a color purple');
+
+// Actualizar color de NPM bajo Backend a amber sin tocar NPM bajo Fronted
+const mdWithAmber = updateSectionColorInMarkdown(colorMdSample, 'NPM', 'amber', undefined, 'Backend');
+const parsedAmber = parseTasksMarkdown(mdWithAmber);
+const beNpmAmber = parsedAmber.find((g) => g.title === 'NPM' && g.branchTitle === 'Backend');
+const feNpmEmerald = parsedAmber.find((g) => g.title === 'NPM' && g.branchTitle === 'Fronted');
+assert.strictEqual(beNpmAmber?.color, 'amber', 'Backend NPM debe haberse actualizado a amber');
+assert.strictEqual(feNpmEmerald?.color, 'emerald', 'Fronted NPM debe permanecer intacto con emerald');
+
+// Quitar color (restablecer a default)
+const mdCleared = updateSectionColorInMarkdown(mdWithAmber, 'NPM', '', undefined, 'Backend');
+const parsedCleared = parseTasksMarkdown(mdCleared);
+const beNpmCleared = parsedCleared.find((g) => g.title === 'NPM' && g.branchTitle === 'Backend');
+assert.strictEqual(beNpmCleared?.color, undefined, 'Backend NPM debe no tener color tras restablecer');
+
+console.log('   ✓ Colores de fondo blur parseados, actualizados y sincronizados bidireccionalmente de forma segura.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 
