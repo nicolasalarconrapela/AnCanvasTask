@@ -1,8 +1,8 @@
-import { documentSync, buildTaskDocumentId, applyTaskToMarkdown, deletionMarkerId, isActiveDeletion } from './documentSyncService';
+import { documentSync, buildTaskDocumentId, applyTaskToMarkdown, deletionMarkerId, isActiveDeletion, SyncConflict } from './documentSyncService';
 import { getSyncSession, assertSyncSession, getStorageScope, invalidateSyncSession } from './syncSessionService';
 import { createClient } from '@sanity/client';
 import type { Editor } from 'tldraw';
-import { scanTaskBlocks } from '../utils/markdownSync';
+import { scanTaskBlocks, restoreTaskFromMarkdown } from '../utils/markdownSync';
 
 export interface TaskVisualState {
   taskId: string;
@@ -959,9 +959,19 @@ export async function fetchSanityDocumentsList(configOverride?: Partial<SanityCo
   const session = getSyncSession(config);
   if (!session) throw new Error('La sesión de Sanity todavía no está preparada');
   const client = createClient({ ...config, useCdn: false, perspective: 'raw' });
-  const docs = await client.fetch<any[]>(`*[(syncOwner == $owner || ($legacy && !defined(syncOwner))) && _type in ["task", "canvasVisualState", "workspace", "syncDeletion"] && !(_id in path("drafts.**"))] | order(_id)`,
+  let docs = await client.fetch<any[]>(`*[(syncOwner == $owner || ($legacy && !defined(syncOwner))) && _type in ["task", "canvasVisualState", "workspace", "syncDeletion"] && !(_id in path("drafts.**"))] | order(_id)`,
     { owner: session.owner, legacy: includeLegacy }, { signal: session.controller.signal });
   assertSyncSession(session);
+  if (docs.length) {
+    const originals = docs;
+    const ids = [...new Set(originals.flatMap(d => d._type === 'syncDeletion' ? [d._id, d.targetId] : [d._id, deletionMarkerId(d._id)]).filter(Boolean))];
+    const direct = await client.getDocuments(ids, { signal: session.controller.signal });
+    assertSyncSession(session);
+    docs = direct.filter(Boolean);
+    for (const d of docs) if (d.syncOwner && d.syncOwner !== session.owner) throw new SyncConflict('El documento pertenece a otra cuenta');
+    for (const old of originals.filter(d => d._type !== 'syncDeletion'))
+      if (!docs.some(d => d._id === old._id)) docs.push({ ...old, syncDeleted: true });
+  }
   const deleted = new Map(docs.filter(d => d._type === 'syncDeletion' && isActiveDeletion(d)).map(d => [d.targetId, d.deletedDocument]));
   const visible = docs.filter(d => d._type !== 'syncDeletion').map(d => deleted.has(d._id) ? { ...d, syncDeleted: true } : d);
   for (const [id, tombstone] of deleted) if (!visible.some(d => d._id === id)) visible.push(tombstone);
@@ -972,13 +982,13 @@ export async function fetchSanityDocumentsList(configOverride?: Partial<SanityCo
 /**
  * Updates or creates any document in Sanity.
  */
-export async function saveSanityDocument(doc: any, configOverride?: Partial<SanityConfig>): Promise<{ ok: boolean; document?: any; message: string }> {
+export async function saveSanityDocument(doc: any, configOverride?: Partial<SanityConfig>): Promise<{ ok: boolean; document?: any; message: string; conflict?: boolean }> {
   const config = { ...getSanityConfig(), ...configOverride };
   try {
     const document = await documentSync.write(doc, config);
     return { ok: true, document, message: 'Documento sincronizado con Sanity' };
   } catch (error: any) {
-    return { ok: false, message: error.message };
+    return { ok: false, message: error.message, conflict: error instanceof SyncConflict };
   }
 }
 
@@ -1181,14 +1191,35 @@ export interface SanityWorkspaceDocument {
 /**
  * Saves a single workspace document to Sanity with local fallback cache.
  */
-export async function saveWorkspaceToSanity(workspace: any, configOverride?: Partial<SanityConfig>): Promise<{ ok: boolean; message: string; document?: any }> {
+export async function saveWorkspaceToSanity(workspace: any, configOverride?: Partial<SanityConfig>): Promise<{ ok: boolean; message: string; document?: any; conflict?: boolean }> {
   const config = { ...getSanityConfig(), ...configOverride };
   const id = sanitizeSanityDocId(String(workspace.workspaceId || workspace.id).replace(/^workspace-/, ''));
-  const doc = { ...documentSync.base(workspace._id || `workspace-${id}`), _id: workspace._id || `workspace-${id}`, _type: 'workspace', workspaceId: id,
-    name: workspace.name, githubRepo: workspace.githubRepo, activeBranchName: workspace.activeBranchName,
-    branches: workspace.branches.map((b: any) => ({ ...b, _key: b._key || b.name, taskDocuments: b.taskDocuments.map((d: any) => ({ ...d, _key: d._key || d.id })) })), createdAt: workspace.createdAt, ...(workspace._rev ? { _rev: workspace._rev } : {}) };
+  const session = getSyncSession(config);
+  if (workspace.syncOwner && session && workspace.syncOwner !== session.owner) return { ok: false, message: 'El workspace pertenece a otra cuenta', conflict: true };
+  const doc = buildWorkspaceSyncDocument(workspace);
   if (!config.projectId || !config.token) return { ok: true, document: doc, message: 'Workspace guardado localmente' };
   return saveSanityDocument(doc, config);
+}
+
+export function buildWorkspaceSyncDocument(workspace: any): any {
+  const id = sanitizeSanityDocId(String(workspace.workspaceId || workspace.id).replace(/^workspace-/, ''));
+  const base = documentSync.base(workspace._id || `workspace-${id}`);
+  if (workspace.localOnlyDeletions?.length && base) {
+    workspace = structuredClone(workspace);
+    for (const mask of workspace.localOnlyDeletions) {
+      const source = base.branches?.find((b: any) => b.name === mask.branchName)?.taskDocuments.find((d: any) => d.id === mask.documentId);
+      const branch = workspace.branches.find((b: any) => b.name === mask.branchName);
+      if (!source || !branch) continue;
+      const target = branch.taskDocuments.find((d: any) => d.id === mask.documentId);
+      if (!mask.taskId && !target) branch.taskDocuments.push(structuredClone(source));
+      else if (mask.taskId && target) {
+        target.content = restoreTaskFromMarkdown(target.content, source.content, mask.taskId);
+      }
+    }
+  }
+  return { ...documentSync.base(workspace._id || `workspace-${id}`), _id: workspace._id || `workspace-${id}`, _type: 'workspace', workspaceId: id,
+    syncRestorationId: workspace.syncRestorationId, name: workspace.name, githubRepo: workspace.githubRepo, activeBranchName: base?.activeBranchName || workspace.activeBranchName,
+    branches: workspace.branches.map((b: any) => ({ ...b, activeDocumentId: base?.branches?.find((remote: any) => remote.name === b.name)?.activeDocumentId || b.activeDocumentId, _key: b._key || b.name, taskDocuments: b.taskDocuments.map((d: any) => ({ ...d, _key: d._key || d.id })) })), createdAt: workspace.createdAt, ...(workspace._rev ? { _rev: workspace._rev } : {}) };
 }
 
 /**
@@ -1273,7 +1304,8 @@ export async function loadWorkspacesFromSanity(configOverride?: Partial<SanityCo
 export function workspacesFromSanityDocuments(docs: any[]): any[] {
   const workspaces = docs.filter(d => d._type === 'workspace' && !d.syncDeleted).map(normalizeSanityWorkspaceDoc);
   for (const ws of workspaces) {
-    for (const task of docs.filter(t => t._type === 'task' && (t.workspaceId === ws.id || t.workspace?._ref === ws._id))) {
+    for (const snapshotTask of docs.filter(t => t._type === 'task' && (t.workspaceId === ws.id || t.workspace?._ref === ws._id))) {
+      const task = documentSync.preferAcknowledged(snapshotTask);
       const locations = ws.branches.flatMap((branch: any) => branch.taskDocuments.map((doc: any) => ({ branch, doc })));
       let target = locations.find(({ branch, doc }: any) => task.documentKey
         ? `${branch.name}::${doc.id}` === task.documentKey
@@ -1314,7 +1346,7 @@ export async function syncAllWorkspacesToSanity(workspaces: any[], configOverrid
 /**
  * Deletes any single document from Sanity Content Lake by its exact or partial _id.
  */
-export async function deleteDocumentFromSanity(docId: string, configOverride?: Partial<SanityConfig>): Promise<{ ok: boolean; message: string }> {
+export async function deleteDocumentFromSanity(docId: string, configOverride?: Partial<SanityConfig>, expectedDocument?: any): Promise<{ ok: boolean; message: string }> {
   const config = { ...getSanityConfig(), ...configOverride };
   if (!config.projectId || !config.dataset || !config.token) {
     return { ok: false, message: 'Configura el API Token de Sanity para eliminar en remoto' };
@@ -1324,7 +1356,7 @@ export async function deleteDocumentFromSanity(docId: string, configOverride?: P
     const session = getSyncSession(config);
     if (!session) throw new Error('La sesión de Sanity todavía no está preparada');
     assertSyncSession(session);
-    let doc = documentSync.base(docId, session);
+    let doc = expectedDocument || documentSync.base(docId, session);
     if (!doc) {
       doc = await createClient(session.config).getDocument(docId, { signal: session.controller.signal });
       assertSyncSession(session);
@@ -1341,12 +1373,14 @@ export async function deleteDocumentFromSanity(docId: string, configOverride?: P
 /**
  * Deletes a workspace document and its associated tasks from Sanity.
  */
-export async function deleteWorkspaceFromSanity(workspaceId: string, configOverride?: Partial<SanityConfig>): Promise<{ ok: boolean; message: string }> {
+export async function deleteWorkspaceFromSanity(workspaceId: string, configOverride?: Partial<SanityConfig>, expectedDocument?: any): Promise<{ ok: boolean; message: string }> {
   const config = { ...getSanityConfig(), ...configOverride };
   try {
     const id = sanitizeSanityDocId(workspaceId.replace(/^workspace-/, ''));
-    const docs = await fetchSanityDocumentsList(config);
+    const expected = expectedDocument || documentSync.base(`workspace-${id}`);
+    const docs = await fetchSanityDocumentsList(config, false, false, false);
     const workspace = docs.find(d => d._type === 'workspace' && d.workspaceId === id);
+    if (expected) { await documentSync.remove(expected._id, 'workspace', config, expected); return { ok: true, message: 'Workspace eliminado' }; }
     return deleteDocumentFromSanity(workspace?._id || `workspace-${id}`, config);
   } catch (error: any) { return { ok: false, message: error.message }; }
 }

@@ -1,3 +1,4 @@
+import { deleteTaskFromMarkdown } from '../utils/markdownSync';
 import { getStorageScope, localScope } from './syncSessionService';
 import { CanvasVisualDocument } from './sanityService';
 
@@ -43,6 +44,7 @@ export interface Workspace {
   syncOwner?: string;
   syncRestorationId?: string;
   isPlaceholder?: boolean;
+  localOnlyDeletions?: { branchName: string; documentId: string; taskId?: string }[];
   id: string;
   name: string;
   githubRepo: GitHubRepoInfo;
@@ -709,4 +711,18 @@ export function parseGitHubRepoInput(input: string): { owner: string; repo: stri
   const url = `https://github.com/${fullName}`;
 
   return { owner, repo, fullName, url };
+}
+
+// Local hiding is separate from cloud deletion and survives reloads.
+export function applyLocalDeletions(workspace: Workspace, masks = workspace.localOnlyDeletions || []): Workspace {
+  return { ...workspace, localOnlyDeletions: masks, branches: workspace.branches.map(b => ({ ...b,
+    taskDocuments: b.taskDocuments.filter(d => !masks.some(m => m.branchName === b.name && m.documentId === d.id && !m.taskId))
+      .map(d => ({ ...d, content: masks.filter(m => m.branchName === b.name && m.documentId === d.id && m.taskId)
+        .reduce((content, m) => deleteTaskFromMarkdown(content, m.taskId!), d.content) })) })) };
+}
+
+export function isEmptyWorkspacePlaceholder(workspace: Workspace): boolean {
+  return !!workspace.isPlaceholder && workspace.name === 'Mi Workspace' && workspace.branches.length === 1 &&
+    workspace.branches[0].taskDocuments.length === 1 &&
+    workspace.branches[0].taskDocuments[0].content.replace(/^(?:# Tareas|## General)\s*$/gm, '').trim() === '';
 }

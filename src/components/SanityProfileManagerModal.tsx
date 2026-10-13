@@ -5,6 +5,7 @@ import {
   SanityLocalProfile,
   SanityConfig,
   getSavedSanityProfiles,
+  getSanityConfig,
   saveSanityProfile,
   deleteSanityProfile,
   getActiveSanityProfileId,

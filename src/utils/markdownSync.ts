@@ -1128,3 +1128,17 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
   }
 }
 
+
+// Restore a removed task without losing its original metadata or subtasks.
+export function restoreTaskFromMarkdown(markdown: string, source: string, taskId: string): string {
+  if (scanTaskBlocks(markdown).taskBlocks.some(b => b.detectedId === taskId)) return markdown;
+  const original = scanTaskBlocks(source).taskBlocks.find(b => b.detectedId === taskId);
+  if (!original) return markdown;
+  const inserted = addTaskToMarkdown(markdown, { title: original.detectedTitle, customId: taskId,
+    groupTitle: original.groupTitle, priority: original.detectedPriority }).updatedMarkdown;
+  const target = scanTaskBlocks(inserted).taskBlocks.find(b => b.detectedId === taskId)!;
+  const lines = inserted.split(/\r?\n/);
+  lines.splice(target.taskLineIndex, target.endLineIndex - target.taskLineIndex + 1,
+    ...source.split(/\r?\n/).slice(original.taskLineIndex, original.endLineIndex + 1));
+  return lines.join('\n');
+}

@@ -742,7 +742,7 @@ test('remote-only and compatible changes never increment the conflict count', as
   const store = { scope: getSyncSession()!.scope, workspaces: [local], activeWorkspaceId: local.id,
     remoteBase: [structuredClone(local)], remoteDocuments: [base] };
   const api = createServer((_request, response) => {
-    response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ result: [remote] }));
+    response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(_request.url?.includes('/data/doc/') ? { documents: [remote].filter(d => decodeURIComponent(_request.url!.split('/').pop()!).split(',').includes(d._id)) } : { result: [remote] }));
   });
   await new Promise<void>(resolve => api.listen(0, '127.0.0.1', resolve));
   context.after(() => { api.closeAllConnections(); api.close(); });
@@ -910,7 +910,7 @@ test('analysis identifies deleted tasks and manual resolution restores them in e
   remoteParent.branches[0].taskDocuments[1].content = '# Remote update\n'; remoteParent._rev = 'other-doc-updated';
   const api = createServer((_request, response) => {
     response.writeHead(200, { 'Content-Type': 'application/json' });
-    response.end(JSON.stringify({ result: [...server.documents.values()] }));
+    response.end(JSON.stringify(_request.url?.includes('/data/doc/') ? { documents: [...server.documents.values()].filter(d => decodeURIComponent(_request.url!.split('/').pop()!).split(',').includes(d._id)) } : { result: [...server.documents.values()] }));
   });
   await new Promise<void>(resolve => api.listen(0, '127.0.0.1', resolve));
   context.after(() => { api.closeAllConnections(); api.close(); });

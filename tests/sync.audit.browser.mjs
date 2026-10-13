@@ -17,6 +17,9 @@ const documents = new Map([['workspace-w', {
     content: '# Tareas\n\n## General\n- [ ] Write report\n  id: x\n  priority: P1\n',
   }] }],
 }]]);
+const independent = structuredClone(documents.get('workspace-w'));
+independent._id = 'workspace-q'; independent.workspaceId = 'q'; independent.name = 'Independent workspace';
+documents.set(independent._id, independent);
 const listeners = new Set();
 let revision = 0, mutations = 0;
 const api = createServer(async (request, response) => {
@@ -134,6 +137,20 @@ try {
   const a = await openBrowser(edge, 9338), b = await openBrowser(chrome, 9339);
   await waitUntil(() => Promise.resolve(listeners.size >= 2), 'Both realtime streams did not connect');
   await pause(500);
+  // A conflict in one workspace must preserve both versions and allow another workspace to pull.
+  await a.edit('Write report', 'Alpha report'); await b.edit('Write report', 'Beta report');
+  await waitUntil(async () => (await a.evaluate("window.syncEvents.some(e=>e.result==='conflict')")) ||
+    (await b.evaluate("window.syncEvents.some(e=>e.result==='conflict')")), 'Incompatible edits were not reported as a conflict');
+  const conflictContents = [await a.content(), await b.content()];
+  assert(conflictContents.some(content => content.includes('Alpha report')));
+  assert(conflictContents.some(content => content.includes('Beta report')));
+  const previous = documents.get('workspace-q'), updated = { ...previous, name: 'Independent remote rename', _rev: 'independent-new' };
+  documents.set(updated._id, updated);
+  for (const listener of listeners) listener.write(`event: mutation\ndata: ${JSON.stringify({
+    type: 'mutation', documentId: updated._id, transition: 'update', result: updated, previous,
+  })}\n\n`);
+  const independentPulled = browser => browser.evaluate("Object.entries(localStorage).filter(([key])=>key.startsWith('antask_workspaces_v2:')).flatMap(([,value])=>JSON.parse(value).workspaces).some(ws=>ws.id==='q'&&ws.name==='Independent remote rename')");
+  await waitUntil(async () => await independentPulled(a) && await independentPulled(b), 'A conflicted workspace blocked an independent pull');
   const durableAtPagehide = [];
   for (const [browser, name] of [[a, 'Edge'], [b, 'Chrome']]) {
     const sentinel = '# Last instant edit in ' + name + '\n';
@@ -146,11 +163,11 @@ try {
         .flatMap(branch=>branch.taskDocuments).some(doc=>doc.content===${JSON.stringify(sentinel)});
     })()`));
   }
-  console.log(JSON.stringify({ browsers: ['Edge', 'Chrome'], durableAtPagehide }));
+  console.log(JSON.stringify({ browsers: ['Edge', 'Chrome'], realConflictPreserved: true, independentPullDuringConflict: true, durableAtPagehide }));
   assert.deepEqual(durableAtPagehide, [true, true], 'Live editor input is absent from durable storage at pagehide');
 } catch(error) {
   for (const browser of browsers) {
-    try { console.error(JSON.stringify({errors:browser.errors,body:await browser.evaluate("document.body?.innerText.slice(-1800)")})); }
+    try { console.error(JSON.stringify({events:await browser.evaluate('window.syncEvents'),documents:[...documents.values()].filter(d=>d._type==='workspace'),errors:browser.errors,body:await browser.evaluate("document.body?.innerText.slice(-1800)")})); }
     catch (diagnosticError) { console.error(diagnosticError.message); }
   }
   throw error;

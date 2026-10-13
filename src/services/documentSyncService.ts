@@ -6,7 +6,7 @@ import { assertSyncSession, getSyncSession, logSyncEvent, type SyncSession, type
 
 export class SyncConflict extends Error {}
 type Document = Record<string, any> & { _id: string; _type: string; _rev?: string };
-interface Pending { id: string; writer: string; base: Document | null; document: Document; createdAt: number }
+interface Pending { id: string; writer: string; base: Document | null; document: Document; createdAt: number; conflicted?: boolean }
 let browserWriter: string | undefined;
 function writerIdentity(): string {
   if (browserWriter) return browserWriter;
@@ -15,14 +15,14 @@ function writerIdentity(): string {
   if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(key, browserWriter);
   return browserWriter;
 }
-const ignored = new Set(['_key', '_rev', '_createdAt', '_updatedAt', 'updatedAt', 'lastSavedContent']);
-export function syncComparable(value: any): any {
-  if (Array.isArray(value)) return value.map(syncComparable);
+const ignored = new Set(['_key', '_rev', '_createdAt', '_updatedAt', 'updatedAt', 'lastSavedContent', 'localOnlyDeletions']);
+export function syncComparable(value: any, includeNavigation = false): any {
+  if (Array.isArray(value)) return value.map(item => syncComparable(item, includeNavigation));
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
-    .filter(key => !ignored.has(key) && value[key] !== undefined).map(key => [key, syncComparable(value[key])]));
+    .filter(key => !ignored.has(key) && (includeNavigation || !['activeBranchName', 'activeDocumentId', 'activeWorkspaceId'].includes(key)) && value[key] !== undefined).map(key => [key, syncComparable(value[key], includeNavigation)]));
   return value;
 }
-const equal = (a: any, b: any): boolean => JSON.stringify(syncComparable(a)) === JSON.stringify(syncComparable(b));
+const equal = (a: any, b: any): boolean => JSON.stringify(syncComparable(a, true)) === JSON.stringify(syncComparable(b, true));
 
 export function buildTaskDocumentId(taskId: string, workspaceId?: string, documentKey?: string): string {
   const safe = (value: string) => value.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -207,6 +207,8 @@ export class DocumentSync {
   observe(document: Document, session = getSyncSession()): void {
     if (!session) return;
     assertSyncSession(session);
+    const current = this.base(document._id, session);
+    if (document._rev && current?._rev !== document._rev && this.revisions.has(`${this.key(session, document._id)}:${document._rev}`)) return;
     this.observed.set(this.key(session, document._id), structuredClone(document));
     if (document._rev) {
       const key = `${this.key(session, document._id)}:${document._rev}`;
@@ -216,11 +218,32 @@ export class DocumentSync {
   base(id: string, session = getSyncSession()): Document | null | undefined {
     return session ? this.observed.get(this.key(session, id)) : undefined;
   }
+  preferAcknowledged(document: Document): Document {
+    const session = getSyncSession();
+    if (!session || !document._rev) return document;
+    return this.revisions.has(`${this.key(session, document._id)}:${document._rev}`)
+      ? this.base(document._id, session) || document : document;
+  }
   forget(): void { this.observed.clear(); this.revisions.clear(); this.queued.clear(); }
 
-  discardPending(id: string, session: SyncSession): void {
+  pendingKeys(session: SyncSession): Set<string> {
     assertSyncSession(session);
-    for (const key of Object.keys(localStorage).filter(k => k.startsWith(this.pendingPrefix(session)))) {
+    return new Set(Object.keys(localStorage).filter(k => k.startsWith(this.pendingPrefix(session))));
+  }
+  rebasePending(id: string, document: Document, base: Document, session: SyncSession, keys: Set<string>): void {
+    assertSyncSession(session);
+    for (const key of keys) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const pending: Pending = JSON.parse(raw);
+      if (pending.document._id !== id) continue;
+      localStorage.setItem(key, JSON.stringify({ ...pending, document, base, conflicted: false }));
+    }
+  }
+  discardPending(id: string, session: SyncSession, keys = this.pendingKeys(session)): void {
+    assertSyncSession(session);
+    for (const key of keys) {
+      if (!localStorage.getItem(key)) continue;
       if (JSON.parse(localStorage.getItem(key)!).document._id === id) localStorage.removeItem(key);
     }
   }
@@ -230,9 +253,24 @@ export class DocumentSync {
     if (!session) throw new Error('La sesión de sincronización ha cambiado');
     const client = this.clientFactory(session.config);
     const observedBefore = new Map([...previous, ...snapshot].map(d => [d._id, this.base(d._id, session)]));
-    const documents = [...snapshot];
-    const missing = previous.filter(d => ['workspace', 'task'].includes(d._type) && !d.syncDeleted &&
-      !snapshot.some(current => current._id === d._id)).sort((a, b) => Number(b._type === 'workspace') - Number(a._type === 'workspace'));
+    // Read roots, projections and deletion markers from the document endpoint together.
+    const candidates = [...new Map([...previous, ...snapshot].map(d => [d._id, d])).values()];
+    const ids = candidates.flatMap(d => [d._id, deletionMarkerId(d._id)]);
+    const authoritative: Array<Document | null> = ids.length
+      ? await client.getDocuments(ids, { signal: session.controller.signal }) : [];
+    assertSyncSession(session);
+    const currentById = new Map(authoritative.filter((d): d is Document => !!d).map(d => [d._id, d]));
+    for (const d of currentById.values()) if (d.syncOwner && d.syncOwner !== session.owner)
+      throw new SyncConflict('El documento pertenece a otra cuenta');
+    const documents: Document[] = [];
+    for (const old of candidates) {
+      const current = currentById.get(old._id);
+      const marker = currentById.get(deletionMarkerId(old._id));
+      if (marker && isActiveDeletion(marker)) documents.push({ ...(current || marker.deletedDocument || old), syncDeleted: true });
+      else if (current) documents.push(current);
+    }
+    const missing = candidates.filter(d => ['workspace', 'task'].includes(d._type) &&
+      !documents.some(current => current._id === d._id)).sort((a, b) => Number(b._type === 'workspace') - Number(a._type === 'workspace'));
     for (const old of missing) {
       assertSyncSession(session);
       const current = await client.getDocument(old._id, { signal: session.controller.signal });
@@ -253,12 +291,13 @@ export class DocumentSync {
     });
   }
 
-  async resolve(document: Document, config: SanityConfig): Promise<Document> {
+  async resolve(document: Document, config: SanityConfig, expectedRemote?: Document | null): Promise<Document> {
     const session = getSyncSession(config);
     if (!session) throw new Error('La sesión de Sanity todavía no está preparada');
     const client = this.clientFactory(session.config);
     const remote = await client.getDocument(document._id, { signal: session.controller.signal });
     assertSyncSession(session);
+    if (expectedRemote !== undefined && remote?._rev !== expectedRemote?._rev) throw new SyncConflict('El documento cambio despues del analisis');
     if (remote?.syncOwner && remote.syncOwner !== session.owner) throw new SyncConflict('El documento pertenece a otra cuenta');
     if (remote?.syncDeleted) throw new SyncConflict('El documento fue eliminado remotamente');
     if ((!remote && this.base(document._id, session)) ||
@@ -278,7 +317,7 @@ export class DocumentSync {
   }
 
   // Explicit user action only. Restoration authorization is never placed in the offline queue.
-  async restore(document: Document, config: SanityConfig): Promise<Document> {
+  async restore(document: Document, config: SanityConfig, expectedRemote?: Document | null): Promise<Document> {
     const session = getSyncSession(config);
     if (!session || !config.token) throw new Error('La sesión de Sanity todavía no está preparada');
     const event: SyncLogEvent = { syncId: crypto.randomUUID(), documentId: document._id,
@@ -291,6 +330,9 @@ export class DocumentSync {
       const remote = await client.getDocument(document._id, { signal: session.controller.signal });
       assertSyncSession(session);
       event.remoteRev = remote?._rev ?? null;
+      if (expectedRemote !== undefined && ((remote && (expectedRemote || !remote.syncDeleted) && remote._rev !== expectedRemote?._rev) ||
+        (!remote && expectedRemote && !expectedRemote.syncDeleted)))
+        throw new SyncConflict('El documento cambio despues del analisis');
       if (remote?.syncOwner && remote.syncOwner !== session.owner) throw new SyncConflict('El documento pertenece a otra cuenta');
       const restored = structuredClone({ ...remote, ...document, syncOwner: session.owner, syncDeleted: false });
       const writes: Array<{ document: Document; remote: Document | null }> = [{ document: restored, remote }];
@@ -353,11 +395,12 @@ export class DocumentSync {
     if (document._rev && !observed) {
       reject(new SyncConflict('La revisión local ya no es la revisión descargada. Recarga o resuelve el conflicto.'));
     }
+    if (baseOverride?.syncOwner && baseOverride.syncOwner !== session.owner) reject(new SyncConflict('La base pertenece a otra cuenta'));
     // Explicit revision-bearing saves use the fetched revision as their base.
     // For UI forms, the observed snapshot contains the original field values.
     const persisted: Pending[] = Object.keys(localStorage).filter(k => k.startsWith(this.pendingPrefix(session)))
       .map(k => JSON.parse(localStorage.getItem(k)!)).filter(p => p.document._id === document._id);
-    const latest = persisted.filter(p => p.writer === this.writer &&
+    const latest = persisted.filter(p => !p.conflicted && p.writer === this.writer &&
       p.document.syncRestorationId === document.syncRestorationId).sort((a, b) => b.createdAt - a.createdAt)[0];
     const queued = this.queued.get(key);
     const pending: Pending = {
@@ -387,6 +430,7 @@ export class DocumentSync {
     try {
       return await this.commitDocument(pending, storageKey, session, event);
     } catch (error) {
+      if (error instanceof SyncConflict && getSyncSession() === session) { pending.conflicted = true; localStorage.setItem(storageKey, JSON.stringify(pending)); }
       if (!(error instanceof SyncConflict) || getSyncSession() !== session) event.result = 'rejected';
       logSyncEvent(session, event);
       throw error;
@@ -457,6 +501,11 @@ export class DocumentSync {
         const result = results.find((doc: Document) => doc._id === merged._id);
         if (!result) throw new Error('Sanity no confirmó el documento');
         localStorage.removeItem(storageKey);
+        for (const key of Object.keys(localStorage).filter(k => k.startsWith(this.pendingPrefix(session)))) {
+          const previous: Pending = JSON.parse(localStorage.getItem(key)!);
+          if (previous.conflicted && previous.writer === pending.writer && previous.document._id === pending.document._id &&
+            previous.base?._rev === pending.base?._rev && previous.createdAt < pending.createdAt) localStorage.removeItem(key);
+        }
         logSyncEvent(session, { ...event, result: 'success' });
         return result;
       } catch (error: any) {
@@ -586,18 +635,22 @@ export class DocumentSync {
     const prefix = this.pendingPrefix(session);
     const entries = Object.keys(localStorage).filter(k => k.startsWith(prefix)).sort((a, b) =>
       JSON.parse(localStorage.getItem(a)!).createdAt - JSON.parse(localStorage.getItem(b)!).createdAt);
+    const blocked = new Set<string>();
+    let failure: unknown;
     for (const key of entries) {
       assertSyncSession(session);
       const raw = localStorage.getItem(key);
       if (raw) {
         const pending = JSON.parse(raw);
         const documentKey = this.key(session, pending.document._id);
+        if (blocked.has(documentKey)) continue;
         const previous = this.tails.get(documentKey) || Promise.resolve();
         const work = previous.catch(() => {}).then(() => localStorage.getItem(key) ? this.commit(pending, key, session) : undefined);
         this.tails.set(documentKey, work);
-        try { await work; } finally { if (this.tails.get(documentKey) === work) this.tails.delete(documentKey); }
+        try { await work; } catch (error) { failure ||= error; blocked.add(documentKey); } finally { if (this.tails.get(documentKey) === work) this.tails.delete(documentKey); }
       }
     }
+    if (failure) throw failure;
   }
 
   async remove(id: string, type: string, config: SanityConfig, baseDoc?: Document | null): Promise<Document> {

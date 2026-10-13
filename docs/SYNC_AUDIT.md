@@ -1,3 +1,25 @@
+# Estado de la correccion - 11/10/2026
+
+Corregidos los casos F01-F15 del diagnostico siguiente y los defectos de UI asociados. Restauracion manual permitida; restauracion automatica bloqueada. Sin cambios de schemas ni dependencias.
+
+- BASE original y revision seleccionada en push/delete; una eleccion manual rechaza cambios posteriores a su vista.
+- Resoluciones parciales limitadas al elemento elegido. Conservan otros cambios locales y remotos, y rebasan sus operaciones pendientes tras guardar el resultado.
+- Lecturas directas de documentos, tareas y marcadores antes de hidratar; las revisiones historicas conocidas no reemplazan una confirmada mas reciente.
+- Conflictos independientes por documento/workspace; otros envios y descargas continuan. Sin BASE compartida no se decide por reloj.
+- Borrado local persistido como ocultacion local; autosave y sync inteligente conservan el elemento remoto y sus metadatos. Deshacer restaura solo el elemento afectado.
+- El texto vivo se asocia a la clave del editor, incluso si la seleccion del store cambia durante una importacion/descarga.
+- Editor vivo persistido al salir o cambiar de documento. El editor recibe la reconciliacion antes del checkpoint; la navegacion local no cuenta como cambio de contenido.
+- Arranque: normalizar el Markdown vacio del placeholder no lo convierte en un workspace real ni lo sube a la nube.
+- Scope, cuenta, ciclo de restauracion y revision original conservados en acciones diferidas. Los estados de UI y los errores reflejan pendientes y conflictos reales.
+
+Validacion: `npm test` (verificaciones del nucleo y 102/102 pruebas de sincronizacion), TypeScript/lint y build. Las suites de Edge/Chrome cubren tiempo real bidireccional, cambios compatibles e incompatibles, preservacion de ambas versiones, descarga independiente durante conflicto, cursor, archivos y ramas y guardado inmediato en pagehide. Los servidores son simulados; no se ha escrito en el dataset real ni se declara cobertura de todas las condiciones de produccion.
+
+Criterios de referencia: control de revisiones y cambios de colaboradores en [Google Docs](https://developers.google.com/workspace/docs/api/how-tos/best-practices); eliminaciones explicitas y avance de checkpoint en [OneDrive/Graph](https://learn.microsoft.com/en-us/graph/api/driveitem-delta?view=graph-rest-1.0); consistencia y transacciones en [Sanity](https://www.sanity.io/docs/content-lake/transactions).
+
+El diagnostico de abajo describe el estado anterior en `b50942c`; sus resultados fallidos y numeros de linea son historicos.
+
+---
+
 # Auditoría de sincronización — 11/10/2026
 
 Revisión de `b50942c`. Prioridad: seguridad de datos. Se mantiene la regla acordada: restauración manual permitida; restauración automática bloqueada. No se ha modificado código funcional, schemas ni dependencias.

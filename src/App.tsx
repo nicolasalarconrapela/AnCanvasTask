@@ -103,6 +103,8 @@ import {
   renameBranchInWorkspace,
   toggleBranchProtectionInWorkspace,
   flushWorkspaceStoreSaves,
+  applyLocalDeletions,
+  isEmptyWorkspacePlaceholder,
   getActiveWorkspace,
   getActiveBranch,
   getActiveDocument,
@@ -878,11 +880,27 @@ export default function App() {
   const debouncedSanityTasksRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const markdownRef = useRef<string>(markdownInput);
   markdownRef.current = markdownInput;
+  const pendingMarkdownRef = useRef<{ key: string; scope?: string; content: string } | null>(null);
+  const persistLiveMarkdown = useCallback(() => {
+    const pending = pendingMarkdownRef.current;
+    const store = workspaceStoreRef.current;
+    if (pending && store.scope === pending.scope && store.scope !== 'loading') {
+      const next = { ...store, workspaces: store.workspaces.map(w => ({ ...w,
+        branches: w.branches.map(b => ({ ...b, taskDocuments: b.taskDocuments.map(d =>
+          `${w.id}::${b.name}::${d.id}` === pending.key ? { ...d, content: pending.content } : d) })) })) };
+      workspaceStoreRef.current = next;
+      saveWorkspaceStore(next);
+      setWorkspaceStore(next);
+    }
+    pendingMarkdownRef.current = null;
+    flushWorkspaceStoreSaves();
+  }, []);
   const lastConflictNotifiedTimeRef = useRef<number>(0);
   const isAutoSavingRef = useRef<boolean>(false);
   const [activeSanityConfig, setActiveSanityConfig] = useState<SanityConfig>(() => getSanityConfig());
   const [syncReady, setSyncReady] = useState(false);
   const syncReadyRef = useRef(false);
+  const blockedWorkspaceIdsRef = useRef(new Set<string>());
   const refreshRemoteRef = useRef<() => Promise<void>>(async () => {});
 
   // Dynamic profile / configuration sync listener (INV-02, INV-07)
@@ -944,7 +962,9 @@ export default function App() {
               assertSyncSession(session);
               syncReadyRef.current = false;
               setSyncReady(false);
-              if (session.config.token) await documentSync.flush(session);
+              if (session.config.token) await documentSync.flush(session).catch(error => {
+                if (!(error instanceof SyncConflict)) throw error;
+              });
               let docs = await fetchSanityDocumentsList(session.config, true, false, false);
               docs = await documentSync.reconcileDeletions(workspaceStoreRef.current.remoteDocuments || [], docs, session.config);
               assertSyncSession(session);
@@ -954,15 +974,44 @@ export default function App() {
               const remote = workspacesFromSanityDocuments(docs);
               const activeWs = previous.workspaces.find(w => w.id === previous.activeWorkspaceId);
               const activeBr = activeWs?.branches.find(b => b.name === activeWs.activeBranchName) || activeWs?.branches[0];
-              const activeDoc = activeBr?.taskDocuments.find(d => d.id === activeBr.activeDocumentId) || activeBr?.taskDocuments[0];
               // Include keystrokes that have not reached the debounced local store yet.
-              const local = previous.workspaces.map(w => w.id !== activeWs?.id ? w : { ...w,
-                branches: w.branches.map(b => b.name !== activeBr?.name ? b : { ...b,
-                  taskDocuments: b.taskDocuments.map(d => d.id !== activeDoc?.id ? d : { ...d, content: markdownRef.current }) }) })
-                .filter(w => !w.isPlaceholder || w.name !== 'Mi Workspace' ||
-                  w.branches.some(b => b.taskDocuments.some(d => d.content.trim() !== '# Tareas\n\n## General')));
+              const local = previous.workspaces.map(w => ({ ...w,
+                branches: w.branches.map(b => ({ ...b, taskDocuments: b.taskDocuments.map(d =>
+                  `${w.id}::${b.name}::${d.id}` === activeDocKeyRef.current ? { ...d, content: markdownRef.current } : d) })) }))
+                .filter(w => !isEmptyWorkspacePlaceholder(w));
 
-              const merged = mergeSyncValue(previous.remoteBase || [], local, remote, '/workspaces') as Workspace[];
+              const blocked = new Set<string>();
+              const merged: Workspace[] = [];
+              for (const id of new Set([...local, ...remote, ...(previous.remoteBase || [])].map(w => w.id))) {
+                const localWs = local.find(w => w.id === id);
+                const remoteWs = remote.find(w => w.id === id);
+                const baseWs = previous.remoteBase?.find(w => w.id === id);
+                const masks = localWs?.localOnlyDeletions || [];
+                try {
+                  const value = mergeSyncValue(baseWs && applyLocalDeletions(baseWs, masks), localWs,
+                    remoteWs && applyLocalDeletions(remoteWs, masks), '/workspace');
+                  if (value) merged.push(value);
+                } catch (error) {
+                  if (!(error instanceof SyncConflict)) throw error;
+                  blocked.add(id);
+                  logSyncEvent(session, { syncId, documentId: localWs?._id || remoteWs?._id || `workspace-${id}`,
+                    baseRev: previous.remoteDocuments?.find(d => d.workspaceId === id && d._type === 'workspace')?._rev ?? null,
+                    remoteRev: docs.find(d => d.workspaceId === id && d._type === 'workspace')?._rev ?? null,
+                    operation: 'merge', result: 'conflict' });
+                  if (localWs) merged.push(localWs);
+                }
+              }
+              blockedWorkspaceIdsRef.current = blocked;
+              const isBlocked = (d: any) => blocked.has(d.workspaceId || d._id?.replace(/^workspace-/, '')) ||
+                blocked.has(d.workspace?._ref?.replace(/^workspace-/, ''));
+              const acceptedDocuments = docs.filter(d => !isBlocked(d));
+              const checkpoint = [...remote.filter(w => !blocked.has(w.id)), ...(previous.remoteBase || []).filter(w => blocked.has(w.id))];
+              const checkpointDocuments = [...acceptedDocuments, ...(previous.remoteDocuments || []).filter(isBlocked)];
+              if (blocked.size && Date.now() - lastConflictNotifiedTimeRef.current > 30000) {
+                lastConflictNotifiedTimeRef.current = Date.now();
+                pushToast(i18n._(msg`Conflicto detectado en la sincronización`), 'warning', {
+                  label: i18n._(msg`Resolver conflicto`), onClick: () => setIsSyncOverrideModalOpen(true) }, 8000);
+              }
               const baseWorkspaces = merged.length ? merged : [previous.workspaces.find(w => w.isPlaceholder) || createEmptyWorkspace()];
 
               // Keep the active document and navigation intact in this browser session
@@ -982,21 +1031,22 @@ export default function App() {
               });
 
               const next: WorkspaceStoreState = { ...previous, scope: session.scope, workspaces,
-                remoteBase: remote, remoteDocuments: docs,
+                remoteBase: checkpoint, remoteDocuments: checkpointDocuments,
                 activeWorkspaceId: workspaces.some(w => w.id === previous.activeWorkspaceId) ? previous.activeWorkspaceId : workspaces[0].id };
               const reconciledDoc = getActiveDocument(getActiveBranch(getActiveWorkspace(next)));
               if (markdownStoreSyncDebounceRef.current) clearTimeout(markdownStoreSyncDebounceRef.current);
               if (markdownEditorDebounceRef.current) clearTimeout(markdownEditorDebounceRef.current);
+              pendingMarkdownRef.current = null;
               markdownRef.current = reconciledDoc.content;
               setMarkdownInput(reconciledDoc.content);
-              docs.forEach(d => documentSync.observe(d, session));
+              acceptedDocuments.forEach(d => documentSync.observe(d, session));
               workspaceStoreRef.current = next;
               saveWorkspaceStore(next);
               setWorkspaceStore(next);
               syncReadyRef.current = true;
               setSyncReady(true);
-              setSyncStatus(session.config.token ? 'synced' : 'local');
-              docs.forEach(d => {
+              setSyncStatus(session.config.token && !blocked.size && JSON.stringify(syncComparable(workspaces)) === JSON.stringify(syncComparable(remote)) ? 'synced' : 'local');
+              acceptedDocuments.forEach(d => {
                 const base = previous.remoteBase?.find(w => w._id === d._id);
                 const localWorkspace = local.find(w => w._id === d._id);
                 const remoteWorkspace = remote.find(w => w._id === d._id);
@@ -1393,13 +1443,15 @@ export default function App() {
 
         // 2. Persist to canvas visual state cache and remote if configured
         const res = await saveCanvasVisualState(visualState, currentDocKey, scheduledConfig);
-        if (getSyncSession() === scheduledSession) setSyncStatus(res.remote ? 'synced' : 'local');
+        if (getSyncSession() === scheduledSession) { setSyncStatus('local'); if (res.remote) void refreshRemoteRef.current(); }
       }
     }, 700);
   }, [currentDocKey]);
 
   const handleMarkdownEditorChange = useCallback(
     (newMarkdown: string) => {
+      pendingMarkdownRef.current = { key: activeDocKeyRef.current, scope: workspaceStoreRef.current.scope, content: newMarkdown };
+      markdownRef.current = newMarkdown;
       setMarkdownInput(newMarkdown);
 
       if (markdownEditorDebounceRef.current) {
@@ -1462,6 +1514,7 @@ export default function App() {
         if (!hasChanges) return prevStore;
         const nextStore = { ...prevStore, workspaces: nextWs };
         workspaceStoreRef.current = nextStore;
+        if (pendingMarkdownRef.current?.content === markdownInput) pendingMarkdownRef.current = null;
         saveWorkspaceStore(nextStore, 350);
         return nextStore;
       });
@@ -1476,15 +1529,16 @@ export default function App() {
 
   // Persist buffered edits before leaving the page or unmounting the editor.
   useEffect(() => {
-    const handleVisibility = () => { if (document.visibilityState === 'hidden') flushWorkspaceStoreSaves(); };
-    window.addEventListener('pagehide', flushWorkspaceStoreSaves);
+    const persistEditor = persistLiveMarkdown;
+    const handleVisibility = () => { if (document.visibilityState === 'hidden') persistEditor(); };
+    window.addEventListener('pagehide', persistEditor);
     document.addEventListener('visibilitychange', handleVisibility);
     return () => {
-      window.removeEventListener('pagehide', flushWorkspaceStoreSaves);
+      window.removeEventListener('pagehide', persistEditor);
       document.removeEventListener('visibilitychange', handleVisibility);
-      flushWorkspaceStoreSaves();
+      persistEditor();
     };
-  }, []);
+  }, [persistLiveMarkdown]);
 
   // Automatic periodic auto-save and cloud conflict detection
   useEffect(() => {
@@ -1574,8 +1628,12 @@ export default function App() {
     const changedDocument = activeDocKeyRef.current !== currentDocKey;
 
     if (changedDocument) {
+      if (markdownStoreSyncDebounceRef.current) clearTimeout(markdownStoreSyncDebounceRef.current);
+      if (markdownEditorDebounceRef.current) clearTimeout(markdownEditorDebounceRef.current);
+      persistLiveMarkdown();
       appliedRemoteLayoutRef.current = layoutRevision;
       isSwitchingDocRef.current = true;
+      markdownRef.current = activeDocument.content;
       activeDocKeyRef.current = currentDocKey;
       logWorkspaceTrace(`Cargando documento activo: ${currentDocKey}`, {
         workspace: activeWorkspace.name,
@@ -1773,6 +1831,7 @@ export default function App() {
       }
 
       setWorkspaceStore((prev) => {
+        if (prev.workspaces.some(w => w.id === pending.workspace.id)) return prev;
         const isOnlyFreshPlaceholder =
           prev.workspaces.length === 1 &&
           prev.workspaces[0].name === 'Mi Workspace' &&
@@ -1813,10 +1872,11 @@ export default function App() {
 
   const handleDeleteWorkspace = useCallback(
     (wsId: string, deleteRemote: boolean = false) => {
+      persistLiveMarkdown();
       const cleanTargetId = wsId.replace(/^workspace-/, '');
       const deletionSession = getSyncSession();
       const deletionConfig = getSanityConfig();
-      const targetWs = workspaceStore.workspaces.find(
+      const targetWs = workspaceStoreRef.current.workspaces.find(
         (w) =>
           w.id === wsId ||
           w.id === cleanTargetId ||
@@ -1824,6 +1884,8 @@ export default function App() {
           w.id.replace(/^workspace-/, '') === cleanTargetId
       );
 
+      const deletionBase = documentSync.base(targetWs?._id || `workspace-${targetWs?.id || cleanTargetId}`, deletionSession);
+      if (deleteRemote && !deletionBase) { pushToast('Descarga el workspace antes de eliminarlo', 'warning'); return; }
       if (!targetWs) {
         if (deleteRemote) {
           const timeoutId = setTimeout(() => {
@@ -1832,7 +1894,7 @@ export default function App() {
             if (getSyncSession() !== deletionSession) return;
             const config = deletionConfig;
             if (config.projectId && config.dataset && config.token) {
-              deleteWorkspaceFromSanity(cleanTargetId, config).then(res => {
+              deleteWorkspaceFromSanity(cleanTargetId, config, deletionBase).then(res => {
                 if (getSyncSession() === deletionSession && !res.ok) pushToast(res.message, 'error');
               }).catch((e) => {
                 console.warn('Error deleting remote workspace permanently from Sanity:', e);
@@ -1883,8 +1945,16 @@ export default function App() {
           if (getSyncSession() !== deletionSession) return;
           const config = deletionConfig;
           if (config.projectId && config.dataset && config.token) {
-            deleteWorkspaceFromSanity(actualWsId, config).then(res => {
-              if (getSyncSession() === deletionSession && !res.ok) pushToast(res.message, 'error');
+            deleteWorkspaceFromSanity(actualWsId, config, deletionBase).then(res => {
+              if (getSyncSession() !== deletionSession || res.ok) return;
+              setWorkspaceStore(prev => {
+                if (prev.workspaces.some(w => w.id === targetWs.id)) return prev;
+                const next = { ...prev, workspaces: [...prev.workspaces, targetWs] };
+                workspaceStoreRef.current = next;
+                saveWorkspaceStore(next);
+                return next;
+              });
+              pushToast(res.message, 'error');
             }).catch((e) => {
               console.warn('Error deleting workspace permanently from Sanity:', e);
             });
@@ -3706,18 +3776,18 @@ export default function App() {
     const timer = setTimeout(async () => {
       try {
         assertSyncSession(session);
-        if (!syncReadyRef.current) return;
+        if (!syncReadyRef.current || blockedWorkspaceIdsRef.current.has(activeWorkspace.id)) return;
         const baseWs = workspaceStore.remoteBase?.find(w => w.id === activeWorkspace.id);
-        if (JSON.stringify(syncComparable(baseWs)) === JSON.stringify(syncComparable(activeWorkspace))) return;
+        if (JSON.stringify(syncComparable(baseWs && applyLocalDeletions(baseWs, activeWorkspace.localOnlyDeletions))) === JSON.stringify(syncComparable(activeWorkspace))) return;
         const normalized = autoAssignAllMissingTaskIds(markdownInput).updatedMarkdown;
         if (normalized !== markdownInput) { setMarkdownInput(normalized); return; }
-        if (!baseWs && activeWorkspace.isPlaceholder && activeWorkspace.name === 'Mi Workspace' && markdownInput.trim() === '# Tareas\n\n## General') return;
+        if (!baseWs && isEmptyWorkspacePlaceholder(activeWorkspace)) return;
         const snapshot = { ...activeWorkspace, branches: activeWorkspace.branches.map(b => b.name === activeBranch.name
           ? { ...b, taskDocuments: b.taskDocuments.map(d => d.id === activeDocument.id ? { ...d, content: markdownInput } : d) } : b) };
         setSyncStatus('saving');
         const result = await saveWorkspaceToSanity(snapshot, session.config);
         assertSyncSession(session);
-        if (!result.ok) throw new Error(result.message);
+        if (!result.ok) throw result.conflict ? new SyncConflict(result.message) : new Error(result.message);
         await refreshRemoteRef.current();
       } catch (error: any) {
         if (getSyncSession() === session) {
@@ -6825,18 +6895,22 @@ export default function App() {
           workspaceStoreRef.current = newStore;
           setWorkspaceStore(newStore);
           saveWorkspaceStore(newStore);
-          void refreshRemoteRef.current();
           const activeWs = getActiveWorkspace(newStore);
           const activeBr = getActiveBranch(activeWs);
           const activeDc = getActiveDocument(activeBr);
           if (activeDc) {
             setCurrentFileName(activeDc.path);
+            pendingMarkdownRef.current = null;
+            markdownRef.current = activeDc.content;
+            if (markdownStoreSyncDebounceRef.current) clearTimeout(markdownStoreSyncDebounceRef.current);
+            if (markdownEditorDebounceRef.current) clearTimeout(markdownEditorDebounceRef.current);
             setMarkdownInput(activeDc.content);
             setLastSavedMarkdown(activeDc.lastSavedContent);
             if (editor) {
               loadTasksFromMarkdown(editor, activeDc.content, activeDc.visualState);
             }
           }
+          void refreshRemoteRef.current();
         }}
         onShowToast={pushToast}
         onOpenSanityConfig={() => setIsSanityModalOpen(true)}

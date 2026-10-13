@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { beforeEach, afterEach, test } from 'node:test';
-import { DocumentSync, documentSync, SyncConflict } from '../src/services/documentSyncService';
+import { DocumentSync, documentSync, SyncConflict, taskFields } from '../src/services/documentSyncService';
 import { beginSyncSession, getSyncSession, invalidateSyncSession } from '../src/services/syncSessionService';
-import { flushWorkspaceStoreSaves } from '../src/services/workspaceService';
-import { analyzeSyncDifferences, compareMarkdownDocuments, resolveSyncItem, executeBatchSync, deleteSyncItem } from '../src/services/syncEngineService';
-import { saveWorkspaceToSanity, deleteWorkspaceFromSanity, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments } from '../src/services/sanityService';
+import { flushWorkspaceStoreSaves, loadWorkspaceStore, applyLocalDeletions, isEmptyWorkspacePlaceholder, createEmptyWorkspace } from '../src/services/workspaceService';
+import { analyzeSyncDifferences, compareMarkdownDocuments, resolveSyncItem, executeBatchSync, deleteSyncItem, undoLocalSyncDeletion, classifySyncDifference } from '../src/services/syncEngineService';
+import { saveWorkspaceToSanity, deleteWorkspaceFromSanity, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments, fetchSanityDocumentsList } from '../src/services/sanityService';
 
 class MemoryStorage implements Storage {
   [key: string]: any;
@@ -102,7 +102,7 @@ beforeEach(async () => {
 });
 afterEach(() => { flushWorkspaceStoreSaves(); invalidateSyncSession(); globalThis.fetch = originalFetch; });
 
-// Review-only reproductions. Assertions express safe behavior, so confirmed defects fail.
+// Regression tests for the confirmed data-safety defects.
 function storeFor(raw: any) {
   const ws = normalizeSanityWorkspaceDoc(raw);
   return { scope: getSyncSession()!.scope, workspaces: [structuredClone(ws)], remoteBase: [structuredClone(ws)],
@@ -112,9 +112,9 @@ function useSingleton(context: any, raw: any) {
   documentSync.forget(); context.mock.method(documentSync as any, 'clientFactory', server.client);
   server.documents.set(raw._id, structuredClone(raw)); documentSync.observe(raw);
 }
-async function mockApiConfig(context: any, docs: any[]) {
+async function mockApiConfig(context: any, docs: any[], direct = docs) {
   const api = createServer((_request, response) => {
-    response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ result: docs }));
+    response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(_request.url?.includes('/data/doc/') ? { documents: direct.filter(d => decodeURIComponent(_request.url!.split('/').pop()!).split(',').includes(d._id)) } : { result: docs }));
   });
   await new Promise<void>(resolve => api.listen(0, '127.0.0.1', resolve));
   context.after(() => { api.closeAllConnections(); api.close(); });
@@ -270,3 +270,159 @@ test('AUDIT P0: deleting only locally must not become a remote deletion through 
   assert.notEqual(server.documents.get(remoteTask._id).syncDeleted, true);
 });
 
+
+test('AUDIT: scoped local deletion and undo preserve another document with the same task ID', async context => {
+  const raw = workspace(); raw.branches[0].taskDocuments.push({ id: 'other', name: 'OTHER.md', path: 'OTHER.md', content: markdown });
+  useSingleton(context, raw); const store = storeFor(raw);
+  const item: any = { entityType: 'task', workspaceId: 'w', branchName: 'main', documentPath: 'TASKS.md',
+    localData: { taskId: 'x' }, id: 'task_x', title: 'Task x' };
+  const deleted = (await deleteSyncItem(item, 'local', store, config)).updatedStore!;
+  assert.equal(deleted.workspaces[0].branches[0].taskDocuments[1].content, markdown);
+  deleted.workspaces[0].name = 'New unrelated rename';
+  deleted.workspaces[0].branches[0].taskDocuments[1].content += '\nNew notes\n';
+  const restored = undoLocalSyncDeletion(deleted, store, item);
+  assert.equal(restored.workspaces[0].name, 'New unrelated rename');
+  assert(taskFields(restored.workspaces[0].branches[0].taskDocuments[0].content).some(t => t.taskId === 'x'));
+  assert(restored.workspaces[0].branches[0].taskDocuments[1].content.includes('New notes'));
+});
+
+test('AUDIT: local hiding survives reload and a remote task edit without resurrection', async context => {
+  const raw = workspace(); useSingleton(context, raw); const saved = await documentSync.write(raw, config);
+  const store = storeFor(saved); const task = [...server.documents.values()].find(d => d._type === 'task');
+  const item: any = { entityType: 'task', workspaceId: 'w', branchName: 'main', documentPath: 'TASKS.md',
+    localData: { taskId: 'x' }, remoteData: task, title: 'Task x', id: 'task_x' };
+  await deleteSyncItem(item, 'local', store, config);
+  const loaded = loadWorkspaceStore(store.scope);
+  const remote = normalizeSanityWorkspaceDoc(saved);
+  remote.branches[0].taskDocuments[0].content = markdown.replace('[ ] A', '[ ] Remote newer title');
+  assert(!applyLocalDeletions(remote, loaded.workspaces[0].localOnlyDeletions).branches[0].taskDocuments[0].content.includes('id: x'));
+});
+
+test('AUDIT: choosing one local file neither uploads nor discards unrelated local edits', async context => {
+  const raw = workspace(); useSingleton(context, raw); const store = storeFor(raw);
+  store.workspaces[0].name = 'Unsent local rename';
+  store.workspaces[0].branches[0].taskDocuments[0].content = markdown.replace('[ ] A', '[ ] Chosen local title');
+  const item = compareMarkdownDocuments(store, [normalizeSanityWorkspaceDoc(raw)])[0];
+  const result = await resolveSyncItem(item, 'keep_local', store, config, true);
+  assert.equal(server.documents.get(raw._id).name, raw.name);
+  assert.equal(result.updatedStore!.workspaces[0].name, 'Unsent local rename');
+  assert.equal(result.updatedStore!.remoteBase![0].name, normalizeSanityWorkspaceDoc(raw).name);
+});
+
+test('AUDIT: an explicit workspace choice rejects changes after its preview', async context => {
+  const raw = workspace(); useSingleton(context, raw); const store = storeFor(raw);
+  store.workspaces[0].name = 'Chosen local rename';
+  const item: any = { entityType: 'workspace', workspaceId: 'w', localData: store.workspaces[0], remoteWorkspaceDocument: raw };
+  server.documents.set(raw._id, { ...raw, name: 'New remote rename', _rev: 'new-remote' });
+  await assert.rejects(resolveSyncItem(item, 'keep_local', store, config, true), SyncConflict);
+  assert.equal(server.documents.get(raw._id).name, 'New remote rename');
+});
+
+test('AUDIT: a new independent task projection is not replaced by an older acknowledged version', async context => {
+  const raw = workspace(); useSingleton(context, raw); const saved = await documentSync.write(raw, config);
+  const task = [...server.documents.values()].find(d => d._type === 'task');
+  const fresh = { ...task, title: 'Studio edit', _rev: 'not-seen-before' };
+  assert(workspacesFromSanityDocuments([saved, fresh])[0].branches[0].taskDocuments[0].content.includes('Studio edit'));
+});
+
+test('AUDIT: hidden tasks retain unknown metadata and subtasks in cloud autosave', async context => {
+  const raw = workspace(); raw.branches[0].taskDocuments[0].content += '  custom: preserve\n  Subtasks: 0/1\n';
+  useSingleton(context, raw); const saved = await documentSync.write(raw, config); const store = storeFor(saved);
+  const remoteTask = [...server.documents.values()].find(d => d._type === 'task');
+  const item: any = { entityType: 'task', workspaceId: 'w', branchName: 'main', documentPath: 'TASKS.md',
+    localData: { taskId: 'x' }, remoteData: remoteTask, title: 'Task x', id: 'task_x' };
+  const deleted = (await deleteSyncItem(item, 'local', store, config)).updatedStore!;
+  const result = await saveWorkspaceToSanity(deleted.workspaces[0], config); assert(result.ok, result.message);
+  const content = server.documents.get(raw._id).branches[0].taskDocuments[0].content;
+  assert(content.includes('custom: preserve')); assert(content.includes('Subtasks: 0/1'));
+  const restored = undoLocalSyncDeletion(deleted, store, item);
+  assert(restored.workspaces[0].branches[0].taskDocuments[0].content.includes('Subtasks: 0/1'));
+});
+
+test('AUDIT: a failed batch workspace does not block an independent workspace', async context => {
+  const raw = workspace(), other = { ...workspace(), _id: 'workspace-q', workspaceId: 'q', name: 'Q' };
+  useSingleton(context, raw); server.documents.set(other._id, other); documentSync.observe(other);
+  const store = storeFor(raw), second = storeFor(other);
+  store.workspaces.push(second.workspaces[0]); store.remoteBase!.push(second.remoteBase![0]); store.remoteDocuments!.push(other);
+  store.workspaces[0].name = 'Local first'; store.workspaces[1].name = 'Local second';
+  server.documents.set(raw._id, { ...raw, name: 'Remote first', _rev: 'new-first' });
+  const items: any[] = store.workspaces.map(w => ({ id: w.id, entityType: 'workspace', workspaceId: w.id,
+    localData: w, diffType: 'local_override', resolutionStrategy: 'keep_local' }));
+  const result = await executeBatchSync(items, 'smart', store, config);
+  assert.equal(result.success, false); assert.equal(result.resolvedCount, 1);
+  assert.equal(server.documents.get(raw._id).name, 'Remote first'); assert.equal(server.documents.get(other._id).name, 'Local second');
+});
+
+test('AUDIT: task deletion rejects the revision selected before a remote edit', async context => {
+  const raw = workspace(); useSingleton(context, raw); const saved = await documentSync.write(raw, config); const store = storeFor(saved);
+  const task = [...server.documents.values()].find(d => d._type === 'task');
+  const current = { ...task, title: 'New remote title', _rev: 'new-task' };
+  server.documents.set(task._id, current); documentSync.observe(current);
+  const item: any = { entityType: 'task', workspaceId: 'w', branchName: 'main', documentPath: 'TASKS.md',
+    localData: { taskId: 'x' }, remoteData: task, title: 'Task x', id: 'task_x' };
+  const result = await deleteSyncItem(item, 'both', store, config);
+  assert.equal(result.success, false); assert.equal(result.updatedStore, store);
+  assert.equal(server.documents.get(task._id).title, 'New remote title'); assert(!server.documents.get(task._id).syncDeleted);
+});
+
+test('AUDIT: authoritative batch reads prevent mixed hydration on a fresh device', async context => {
+  const raw = workspace(); useSingleton(context, raw); const saved = await documentSync.write(raw, config);
+  const oldTask = structuredClone([...server.documents.values()].find(d => d._type === 'task'));
+  const updated = structuredClone(saved); updated.branches[0].taskDocuments[0].content = markdown.replace('[ ] A', '[ ] Newest title');
+  const current = await documentSync.write(updated, config);
+  const docs = [...server.documents.values()]; documentSync.forget();
+  const read = await fetchSanityDocumentsList(await mockApiConfig(context, [current, oldTask], docs), true, false, false);
+  assert(workspacesFromSanityDocuments(read)[0].branches[0].taskDocuments[0].content.includes('Newest title'));
+});
+
+test('AUDIT: device navigation is not a synchronized content change', () => {
+  const base = normalizeSanityWorkspaceDoc(workspace());
+  const local = { ...base, activeBranchName: 'local-tab', branches: base.branches.map((b: any) => ({ ...b, activeDocumentId: 'local-doc' })) };
+  assert.equal(classifySyncDifference(base, local, base), 'synced');
+});
+
+test('AUDIT: a foreign account baseline cannot authorize a cloud write', async () => {
+  const raw = task(); server.documents.set(raw._id, raw); sync.observe(raw);
+  await assert.rejects(sync.write({ ...raw, completed: true }, config, { ...raw, syncOwner: 'other-account' }), SyncConflict);
+  assert.equal(server.commits, 0);
+});
+
+test('AUDIT: intelligent workspace upload preserves a local-only task deletion scope', async context => {
+  const raw = workspace(); useSingleton(context, raw); const saved = await documentSync.write(raw, config); const store = storeFor(saved);
+  const remoteTask = [...server.documents.values()].find(d => d._type === 'task');
+  const item: any = { entityType: 'task', workspaceId: 'w', branchName: 'main', documentPath: 'TASKS.md',
+    localData: { taskId: 'x' }, remoteData: remoteTask, title: 'Task x', id: 'task_x' };
+  const hidden = (await deleteSyncItem(item, 'local', store, config)).updatedStore!;
+  hidden.workspaces[0].name = 'Local metadata edit';
+  const wsItem: any = { entityType: 'workspace', workspaceId: 'w', localData: hidden.workspaces[0],
+    diffType: 'local_override', resolutionStrategy: 'keep_local' };
+  const result = await executeBatchSync([wsItem], 'smart', hidden, config); assert(result.success, result.message);
+  assert.equal(server.documents.get(remoteTask._id).syncDeleted, undefined);
+  assert.equal(server.documents.get(raw._id).name, 'Local metadata edit');
+});
+
+test('AUDIT: partial remote resolution retains and replays unrelated queued workspace edits', async context => {
+  const raw = workspace(); useSingleton(context, raw); const saved = await documentSync.write(raw, config); const store = storeFor(saved);
+  const baseTask = [...server.documents.values()].find(d => d._type === 'task');
+  store.workspaces[0].name = 'Queued unrelated rename';
+  server.offline = true; await assert.rejects(documentSync.write({ ...saved, name: store.workspaces[0].name }, config), /offline/);
+  server.offline = false;
+  const remoteTask = { ...baseTask, title: 'Chosen remote title', _rev: 'new-task' }; server.documents.set(baseTask._id, remoteTask);
+  const remoteWorkspace = workspacesFromSanityDocuments([saved, remoteTask])[0];
+  const item: any = { entityType: 'task', workspaceId: 'w', branchName: 'main', documentPath: 'TASKS.md',
+    localData: { taskId: 'x' }, remoteData: remoteTask, remoteWorkspace, remoteWorkspaceDocument: saved };
+  await resolveSyncItem(item, 'keep_remote', store, config, true);
+  assert(pendingKeys().length > 0);
+  await documentSync.flush(getSyncSession()!);
+  assert.equal(server.documents.get(raw._id).name, 'Queued unrelated rename');
+  assert(server.documents.get(raw._id).branches[0].taskDocuments[0].content.includes('Chosen remote title'));
+});
+
+test('AUDIT: canvas normalization of an empty placeholder does not create cloud content', () => {
+  const placeholder = createEmptyWorkspace();
+  assert(isEmptyWorkspacePlaceholder(placeholder));
+  placeholder.branches[0].taskDocuments[0].content = '# Tareas\n\n';
+  assert(isEmptyWorkspacePlaceholder(placeholder));
+  placeholder.branches[0].taskDocuments[0].content += 'Actual local note\n';
+  assert(!isEmptyWorkspacePlaceholder(placeholder));
+});

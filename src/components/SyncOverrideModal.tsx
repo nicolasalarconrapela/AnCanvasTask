@@ -10,6 +10,7 @@ import {
   resolveSyncItem,
   executeBatchSync,
   deleteSyncItem,
+  undoLocalSyncDeletion,
   formatRelativeTime,
   exportSyncBundle,
   downloadSyncBundleAsFile,
@@ -17,7 +18,6 @@ import {
   applySyncBundle,
   SyncBundle,
 } from '../services/syncEngineService';
-import { deleteTaskFromMarkdown } from '../utils/markdownSync';
 import { WorkspaceStoreState } from '../services/workspaceService';
 import { getSanityConfig } from '../services/sanityService';
 
@@ -97,6 +97,8 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         item: SyncItemDiff;
         scope: 'local' | 'remote' | 'both';
         priorStore?: WorkspaceStoreState;
+        session: ReturnType<typeof getSyncSession>;
+        config: ReturnType<typeof getSanityConfig>;
       }
     >
   >(new Map());
@@ -159,8 +161,8 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       pendingDeletionsRef.current.clear();
       currentPending.forEach((p) => {
         clearTimeout(p.timeoutId);
-        if (p.scope === 'remote' || p.scope === 'both') {
-          deleteSyncItem(p.item, p.scope, workspaceStoreRef.current, getSanityConfig()).catch(() => {});
+        if (getSyncSession() === p.session && (p.scope === 'remote' || p.scope === 'both')) {
+          deleteSyncItem(p.item, p.scope, workspaceStoreRef.current, p.config).catch(() => {});
         }
       });
     };
@@ -261,7 +263,9 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       pendingDeletionsRef.current.delete(itemId);
 
       if (pending.priorStore) {
-        onUpdateWorkspaceStore(pending.priorStore);
+        const restored = undoLocalSyncDeletion(workspaceStoreRef.current, pending.priorStore, pending.item);
+        workspaceStoreRef.current = restored;
+        onUpdateWorkspaceStore(restored);
       }
 
       setResult((prev) => {
@@ -292,7 +296,9 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       }
 
       if (priorStore) {
-        onUpdateWorkspaceStore(priorStore);
+        const restored = (itemsToRestore || []).reduce((store, item) => undoLocalSyncDeletion(store, priorStore, item), workspaceStoreRef.current);
+        workspaceStoreRef.current = restored;
+        onUpdateWorkspaceStore(restored);
       }
 
       setResult((prev) => {
@@ -324,6 +330,8 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     clearSelection();
 
     const priorStore = { ...workspaceStoreRef.current };
+    const deletionSession = getSyncSession();
+    const deletionConfig = getSanityConfig();
 
     // Optimistically remove from result
     setResult((prev) =>
@@ -337,73 +345,14 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
 
     // If local deletion is needed
     if (bulkDeleteScope === 'local' || bulkDeleteScope === 'both') {
-      let currentWorkspaces = [...workspaceStoreRef.current.workspaces];
-      const wsIdsToRemove = new Set<string>();
-
       for (const item of itemsToDelete) {
-        if (item.entityType === 'workspace') {
-          const cleanWsId = (
-            item.localData?.id ||
-            item.remoteData?.workspaceId ||
-            item.remoteData?.id ||
-            item.id.replace(/^ws_/, '')
-          ).toString();
-          wsIdsToRemove.add(cleanWsId);
-          wsIdsToRemove.add(item.id);
-          wsIdsToRemove.add(`ws_${cleanWsId}`);
-          wsIdsToRemove.add(cleanWsId.replace(/^workspace-/, ''));
+        const res = await deleteSyncItem(item, 'local', workspaceStoreRef.current, deletionConfig);
+      if (getSyncSession() !== deletionSession) return;
+        if (res.updatedStore) {
+          workspaceStoreRef.current = res.updatedStore;
+          onUpdateWorkspaceStore(res.updatedStore);
         }
       }
-
-      if (wsIdsToRemove.size > 0) {
-        currentWorkspaces = currentWorkspaces.filter(
-          (w) =>
-            !wsIdsToRemove.has(w.id) &&
-            !wsIdsToRemove.has(`ws_${w.id}`) &&
-            !wsIdsToRemove.has(w.id.replace(/^workspace-/, ''))
-        );
-      }
-
-      // Also remove any task items locally from markdown
-      const tasksToDelete = itemsToDelete.filter((i) => i.entityType === 'task');
-      if (tasksToDelete.length > 0) {
-        currentWorkspaces = currentWorkspaces.map((w) => ({
-          ...w,
-          branches: w.branches.map((b) => ({
-            ...b,
-            taskDocuments: b.taskDocuments.map((d) => {
-              let md = d.content;
-              for (const taskItem of tasksToDelete) {
-                const taskId =
-                  taskItem.localData?.taskId ||
-                  taskItem.localData?.temporaryId ||
-                  taskItem.remoteData?.taskId ||
-                  taskItem.remoteData?._id?.replace(/^task-/, '') ||
-                  taskItem.id.replace(/^task_/, '');
-                md = deleteTaskFromMarkdown(md, taskId, taskItem.localData?.title);
-              }
-              return md !== d.content
-                ? {
-                    ...d,
-                    content: md,
-                    lastSavedContent: md,
-                    updatedAt: new Date().toISOString(),
-                  }
-                : d;
-            }),
-          })),
-        }));
-      }
-
-      const nextStore: WorkspaceStoreState = {
-        ...workspaceStoreRef.current,
-        workspaces: currentWorkspaces,
-        activeWorkspaceId:
-          currentWorkspaces.find((w) => w.id === workspaceStoreRef.current.activeWorkspaceId)?.id ||
-          currentWorkspaces[0]?.id ||
-          workspaceStoreRef.current.activeWorkspaceId,
-      };
-      onUpdateWorkspaceStore(nextStore);
     }
 
     // If scope is remote-only, execute immediately
@@ -411,7 +360,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       try {
         let successCount = 0;
         for (const item of itemsToDelete) {
-          const res = await deleteSyncItem(item, 'remote', workspaceStoreRef.current, getSanityConfig());
+          const res = await deleteSyncItem(item, 'remote', workspaceStoreRef.current, deletionConfig);
           if (res.success) successCount++;
         }
         onShowToast(
@@ -425,17 +374,21 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     }
 
     // Schedule delayed permanent deletion for all items
-    const deletionSession = getSyncSession();
-    const deletionConfig = getSanityConfig();
     const timeoutId = setTimeout(async () => {
       if (getSyncSession() !== deletionSession) return;
       for (const id of itemIdsArray) {
         pendingDeletionsRef.current.delete(id);
       }
       try {
-        if (bulkDeleteScope === 'remote' || bulkDeleteScope === 'both') {
+        if (bulkDeleteScope === 'both') {
           for (const item of itemsToDelete) {
-            await deleteSyncItem(item, bulkDeleteScope, workspaceStoreRef.current, deletionConfig);
+            const res = await deleteSyncItem(item, bulkDeleteScope, { ...workspaceStoreRef.current, remoteDocuments: priorStore.remoteDocuments }, deletionConfig);
+            if (!res.success) {
+              const restored = undoLocalSyncDeletion(workspaceStoreRef.current, priorStore, item);
+              workspaceStoreRef.current = restored;
+              onUpdateWorkspaceStore(restored);
+              onShowToast(res.message, 'error');
+            }
           }
         }
       } catch (err) {
@@ -449,14 +402,13 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         item,
         scope: bulkDeleteScope,
         priorStore,
+        session: deletionSession, config: deletionConfig,
       });
     }
 
     const scopeLabel =
       bulkDeleteScope === 'both'
         ? i18n._(msg`localmente y en Sanity Cloud`)
-        : bulkDeleteScope === 'remote'
-        ? i18n._(msg`en Sanity Cloud`)
         : i18n._(msg`en local`);
 
     onShowToast(
@@ -486,6 +438,8 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     }
 
     const priorStore = { ...workspaceStoreRef.current };
+    const deletionSession = getSyncSession();
+    const deletionConfig = getSanityConfig();
 
     // Optimistically remove from result items
     setResult((prev) =>
@@ -499,64 +453,11 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
 
     // If local deletion is needed, calculate and apply immediately to workspaceStore
     if (scope === 'local' || scope === 'both') {
-      if (item.entityType === 'workspace') {
-        const cleanWsId = (
-          item.localData?.id ||
-          item.remoteData?.workspaceId ||
-          item.remoteData?.id ||
-          item.id.replace(/^ws_/, '')
-        ).toString();
-        const nextWorkspaces = workspaceStoreRef.current.workspaces.filter(
-          (w) =>
-            w.id !== cleanWsId &&
-            w.id !== item.id &&
-            `ws_${w.id}` !== item.id &&
-            w.id.replace(/^workspace-/, '') !== cleanWsId.replace(/^workspace-/, '')
-        );
-        if (nextWorkspaces.length > 0 || workspaceStoreRef.current.workspaces.length > 0) {
-          const nextStore: WorkspaceStoreState = {
-            ...workspaceStoreRef.current,
-            workspaces: nextWorkspaces,
-            activeWorkspaceId:
-              nextWorkspaces.find((w) => w.id === workspaceStoreRef.current.activeWorkspaceId)?.id ||
-              nextWorkspaces[0]?.id ||
-              workspaceStoreRef.current.activeWorkspaceId,
-          };
-          onUpdateWorkspaceStore(nextStore);
-        }
-      } else if (item.entityType === 'task') {
-        const taskId =
-          item.localData?.taskId ||
-          item.localData?.temporaryId ||
-          item.remoteData?.taskId ||
-          item.remoteData?._id?.replace(/^task-/, '') ||
-          item.id.replace(/^task_/, '');
-        const updatedWorkspaces = workspaceStoreRef.current.workspaces.map((w) => ({
-          ...w,
-          branches: w.branches.map((b) => ({
-            ...b,
-            taskDocuments: b.taskDocuments.map((d) => {
-              const newContent = deleteTaskFromMarkdown(
-                d.content,
-                taskId,
-                item.localData?.title
-              );
-              return newContent !== d.content
-                ? {
-                    ...d,
-                    content: newContent,
-                    lastSavedContent: newContent,
-                    updatedAt: new Date().toISOString(),
-                  }
-                : d;
-            }),
-          })),
-        }));
-        const nextStore: WorkspaceStoreState = {
-          ...workspaceStoreRef.current,
-          workspaces: updatedWorkspaces,
-        };
-        onUpdateWorkspaceStore(nextStore);
+      const res = await deleteSyncItem(item, 'local', workspaceStoreRef.current, deletionConfig);
+      if (getSyncSession() !== deletionSession) return;
+      if (res.updatedStore) {
+        workspaceStoreRef.current = res.updatedStore;
+        onUpdateWorkspaceStore(res.updatedStore);
       }
     }
 
@@ -578,16 +479,17 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
     }
 
     // Schedule permanent execution after 30 seconds
-    const deletionSession = getSyncSession();
-    const deletionConfig = getSanityConfig();
     const timeoutId = setTimeout(async () => {
       if (getSyncSession() !== deletionSession) return;
       pendingDeletionsRef.current.delete(item.id);
       try {
-        if (scope === 'remote' || scope === 'both') {
-          const res = await deleteSyncItem(item, scope, workspaceStoreRef.current, deletionConfig);
+        if (scope === 'both') {
+          const res = await deleteSyncItem(item, scope, { ...workspaceStoreRef.current, remoteDocuments: priorStore.remoteDocuments }, deletionConfig);
           if (!res.success) {
-            console.warn('Permanent remote deletion failed:', res.message);
+            const restored = undoLocalSyncDeletion(workspaceStoreRef.current, priorStore, item);
+            workspaceStoreRef.current = restored;
+            onUpdateWorkspaceStore(restored);
+            onShowToast(res.message, 'error');
           }
         }
       } catch (err) {
@@ -600,14 +502,13 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       item,
       scope,
       priorStore,
+      session: deletionSession, config: deletionConfig,
     });
 
     const itemCleanName = item.title.replace(/^(Workspace:\s*|Tarea:\s*)/, '');
     const scopeLabel =
       scope === 'both'
         ? i18n._(msg`localmente y en Sanity Cloud`)
-        : scope === 'remote'
-        ? i18n._(msg`en Sanity Cloud`)
         : i18n._(msg`en local`);
 
     onShowToast(
@@ -633,16 +534,6 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
       }
       if (res.success) {
         onShowToast(res.message, 'success');
-        setResult((prev) =>
-          prev
-            ? {
-                ...prev,
-                counts: { ...prev.counts, conflicts: 0, synced: prev.counts.total },
-                hasPendingChanges: false,
-                items: prev.items.map((i) => ({ ...i, diffType: 'synced', summaryChanges: [] })),
-              }
-            : null
-        );
         await handleRunAnalysis(res.updatedStore);
       } else {
         onShowToast(res.message, 'error');
@@ -1739,7 +1630,7 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
             <button
               id="btn-sync-re-analyze"
               type="button"
-              onClick={handleRunAnalysis}
+              onClick={() => void handleRunAnalysis()}
               disabled={isAnalyzing || isProcessing}
               className="btn-m3-secondary px-2.5 py-1 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
               title={i18n._(msg`Volver a analizar diferencias`)}

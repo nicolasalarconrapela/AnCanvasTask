@@ -4,6 +4,7 @@ import {
   saveWorkspaceStore,
   createEmptyWorkspace,
   sanitizeWorkspace,
+  applyLocalDeletions,
 } from './workspaceService';
 import {
   getSanityConfig,
@@ -15,12 +16,14 @@ import {
   normalizeSanityWorkspaceDoc,
   SanityConfig,
   saveWorkspaceToSanity,
+  buildWorkspaceSyncDocument,
 } from './sanityService';
 import { parseTasksMarkdown, type ParsedGroup } from '../utils/taskMarkdown';
 import { documentSync, SyncConflict, mergeSyncValue, buildTaskDocumentId, syncComparable, applyTaskToMarkdown, taskFields } from './documentSyncService';
 import { getSyncSession, assertSyncSession } from './syncSessionService';
 import {
   deleteTaskFromMarkdown,
+  restoreTaskFromMarkdown,
 } from '../utils/markdownSync';
 
 export type SyncDifferenceType =
@@ -102,9 +105,7 @@ export function compareMarkdownDocuments(store: WorkspaceStoreState, remote: Wor
         let diffType: SyncDifferenceType = !local ? 'only_remote' : !cloud ? 'only_local' : 'synced';
         if (local && cloud && comparable(local) !== comparable(cloud)) {
           if (!base) {
-            const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
-            const cloudTime = cloud.updatedAt ? new Date(cloud.updatedAt).getTime() : 0;
-            diffType = localTime >= cloudTime ? 'local_override' : 'remote_override';
+            diffType = 'conflict';
           } else {
             diffType = classifySyncDifference(base, local, cloud);
           }
@@ -211,9 +212,7 @@ export async function analyzeSyncDifferences(
       if (localWs.name !== remoteWs.name) {
         changes.push(`Nombre modificado: "${remoteWs.name}" → "${localWs.name}"`);
       }
-      if (localWs.activeBranchName !== remoteWs.activeBranchName) {
-        changes.push(`Rama activa diferente: Remoto="${remoteWs.activeBranchName}", Local="${localWs.activeBranchName}"`);
-      }
+
       if (localWs.githubRepo?.fullName !== remoteWs.githubRepo?.fullName) {
         changes.push(`Repositorio modificado: "${remoteWs.githubRepo?.fullName}" vs "${localWs.githubRepo?.fullName}"`);
       }
@@ -263,12 +262,10 @@ export async function analyzeSyncDifferences(
 
       let diffType: SyncDifferenceType = 'synced';
 
-      if (changes.length > 0 || contentDiffers) {
+      if (JSON.stringify(syncComparable(localWs)) !== JSON.stringify(syncComparable(remoteWs))) {
         const base = workspaceStore.remoteBase?.find(w => w.id === localWs.id);
         if (!base) {
-          const localTime = localWs.updatedAt ? new Date(localWs.updatedAt).getTime() : 0;
-          const remoteTime = remoteWs.updatedAt ? new Date(remoteWs.updatedAt).getTime() : 0;
-          diffType = localTime >= remoteTime ? 'local_override' : 'remote_override';
+          diffType = 'conflict';
         } else {
           diffType = classifySyncDifference(base, localWs, remoteWs);
         }
@@ -390,9 +387,7 @@ export async function analyzeSyncDifferences(
               const base = workspaceStore.remoteDocuments?.find(d => d._id === matchedRemote._id);
               let diffType: SyncDifferenceType = 'local_override';
               if (!base) {
-                const localTime = doc.updatedAt ? new Date(doc.updatedAt).getTime() : 0;
-                const remoteTime = (matchedRemote.updatedAt || matchedRemote._updatedAt) ? new Date(matchedRemote.updatedAt || matchedRemote._updatedAt).getTime() : 0;
-                diffType = localTime >= remoteTime ? 'local_override' : 'remote_override';
+                diffType = 'conflict';
               } else {
                 diffType = classifySyncDifference(select(base), fields, select(matchedRemote));
               }
@@ -451,7 +446,7 @@ export async function analyzeSyncDifferences(
 
   for (const item of items) {
     item.remoteWorkspace = remoteWorkspaces.find(w => w.id === item.workspaceId);
-    item.remoteWorkspaceDocument = remoteSanityDocs.find(d => d._type === 'workspace' && !d.syncDeleted && d.workspaceId === item.workspaceId);
+    item.remoteWorkspaceDocument = remoteSanityDocs.find(d => d._type === 'workspace' && d.workspaceId === item.workspaceId);
     const base = workspaceStore.remoteBase?.find(w => w.id === item.workspaceId);
     const localDoc = workspaceStore.workspaces.find(w => w.id === item.workspaceId)?.branches.find(b => b.name === item.branchName)
       ?.taskDocuments.find(d => d.path === item.documentPath);
@@ -513,27 +508,28 @@ export async function resolveSyncItem(
   assertSyncSession(session);
   if (item.requiresRestoration && !manual) throw new SyncConflict('La restauración requiere una acción manual');
   const push = (document: any) => manual && item.requiresRestoration
-    ? documentSync.restore(document, config) : documentSync.resolve(document, config);
+    ? documentSync.restore(document, config, item.entityType === 'task' ? item.remoteData || null : item.remoteWorkspaceDocument || null) : documentSync.write(document, config);
+  const pendingBefore = documentSync.pendingKeys(session);
+  const discardAfterSuccess: string[] = [];
   let resolved: any;
   let baseline: any;
   if (item.entityType === 'workspace') {
     if (strategy === 'keep_remote') {
       if (!item.remoteData) return { success: false, message: 'No hay datos remotos para importar' };
       resolved = item.remoteData;
-      documentSync.discardPending(resolved._id || `workspace-${resolved.id}`, session);
+      discardAfterSuccess.push(resolved._id || `workspace-${resolved.id}`);
     } else {
       if (!item.localData) return { success: false, message: 'No hay datos locales para enviar' };
       const base = workspaceStore.remoteBase?.find(w => w.id === item.workspaceId);
       if (strategy === 'merge' && !base) throw new Error('No hay base compartida. Selecciona conservar local o remoto');
       const local = strategy === 'merge' ? mergeSyncValue(base, item.localData, item.remoteData, '/workspace') : item.localData;
       const id = local._id || `workspace-${local.id}`;
-      const intention = { ...documentSync.base(id, session), _id: id, _type: 'workspace',
-        _rev: local._rev, syncRestorationId: local.syncRestorationId,
-        workspaceId: local.id, name: local.name, githubRepo: local.githubRepo, branches: local.branches,
-        activeBranchName: local.activeBranchName, createdAt: local.createdAt };
+      const intention = buildWorkspaceSyncDocument(local);
       const document = strategy === 'merge'
         ? await documentSync.write({ ...intention, _rev: item.localData._rev }, config)
-        : await push(intention);
+        : manual && !item.requiresRestoration
+          ? await documentSync.resolve(intention, config, item.remoteWorkspaceDocument || workspaceStore.remoteDocuments?.find(d => d._id === id) || null)
+          : await push(intention);
       resolved = normalizeSanityWorkspaceDoc(document);
     }
   } else if (item.entityType === 'task') {
@@ -563,19 +559,21 @@ export async function resolveSyncItem(
     if (strategy === 'keep_remote') {
       if (!item.remoteData) return { success: false, message: 'No hay tarea remota para importar' };
       task = item.remoteData;
-      documentSync.discardPending(task._id, session);
+      discardAfterSuccess.push(task._id);
       // Rejecting an offline workspace snapshot must not replay it later.
-      documentSync.discardPending(ws._id || `workspace-${ws.id}`, session);
+      discardAfterSuccess.push(ws._id || `workspace-${ws.id}`);
     } else {
       if (!fields) return { success: false, message: 'No hay tarea local para enviar' };
       const base = workspaceStore.remoteDocuments?.find(d => d._id === item.remoteData?._id);
       if (strategy === 'merge' && !base) throw new Error('No hay base compartida para fusionar la tarea');
-      const intention = { ...(item.remoteData || {}), ...fields, _type: 'task',
+      const intention = { ...(base || {}), ...fields, _rev: base?._rev, _type: 'task',
         _id: item.remoteData?._id || buildTaskDocumentId(fields.taskId, ws.id, documentKey),
         workspaceId: ws.id, documentKey, branchName: branch.name, documentPath: doc.path };
       task = strategy === 'merge'
         ? await documentSync.write({ ...mergeSyncValue(base, intention, item.remoteData), _rev: base._rev }, config, base)
-        : await push(intention);
+        : manual && !item.requiresRestoration
+          ? await documentSync.write({ ...intention, _rev: item.remoteData?._rev }, config, item.remoteData || null)
+          : await push(intention);
     }
     resolved = { ...ws, branches: ws.branches.map(b => b.name === branch.name ? { ...b,
       taskDocuments: b.taskDocuments.map(d => d.id === doc.id ? { ...d, content: applyTaskToMarkdown(d.content, task) } : d) } : b) };
@@ -612,7 +610,7 @@ export async function resolveSyncItem(
         ...ws,
         branches: ws.branches.map(b => b.name === branchName ? { ...b, taskDocuments: updatedDocs } : b),
       };
-      documentSync.discardPending(ws._id || `workspace-${ws.id}`, session);
+      discardAfterSuccess.push(ws._id || `workspace-${ws.id}`);
       baseline = item.remoteWorkspace;
     } else {
       if (!item.localData && strategy !== 'merge') return { success: false, message: 'No hay datos locales para enviar' };
@@ -635,26 +633,39 @@ export async function resolveSyncItem(
       };
 
       const id = updatedWs._id || `workspace-${updatedWs.id}`;
-      const intention = {
-        ...documentSync.base(id, session),
-        _rev: ws._rev, syncRestorationId: ws.syncRestorationId,
-        _id: id,
-        _type: 'workspace',
-        workspaceId: updatedWs.id,
-        name: updatedWs.name,
-        githubRepo: updatedWs.githubRepo,
-        branches: updatedWs.branches,
-        activeBranchName: updatedWs.activeBranchName,
-        createdAt: updatedWs.createdAt,
-      };
-      const document = strategy === 'merge'
-        ? await documentSync.write({ ...intention, _rev: ws._rev }, config)
-        : await push(intention);
-      resolved = normalizeSanityWorkspaceDoc(document);
+      const originalBase = workspaceStore.remoteDocuments?.find(d => d._id === id) || documentSync.base(id, session);
+      const cloud = buildWorkspaceSyncDocument(updatedWs);
+      const chosenCloudDocument = cloud.branches.find((b: any) => b.name === branchName)?.taskDocuments.find((d: any) => d.id === finalDoc.id) || finalDoc;
+      const intention = item.requiresRestoration ? cloud
+        : { ...originalBase, _id: id, _type: 'workspace', _rev: ws._rev,
+          branches: (originalBase?.branches || updatedWs.branches).map((b: any) => b.name !== branchName ? b : { ...b,
+            taskDocuments: [...b.taskDocuments.filter((d: any) => d.id !== finalDoc.id), chosenCloudDocument] }) };
+      let selectedBase = workspaceStore.remoteDocuments?.find(d => d._id === id) || documentSync.base(id, session);
+      if (manual && !item.requiresRestoration && selectedBase) {
+        selectedBase = structuredClone(selectedBase);
+        const selectedBranch = selectedBase.branches.find((b: any) => b.name === branchName);
+        if (selectedBranch) {
+          selectedBranch.taskDocuments = selectedBranch.taskDocuments.filter((d: any) => d.id !== finalDoc.id);
+          if (item.remoteData) selectedBranch.taskDocuments.push(structuredClone(item.remoteData));
+        }
+      }
+      const document = item.requiresRestoration ? await push(intention)
+        : await documentSync.write(intention, config, selectedBase || null);
+      baseline = normalizeSanityWorkspaceDoc(document);
+      resolved = { ...updatedWs, _rev: baseline._rev };
     }
   } else return { success: false, message: 'Tipo de elemento no compatible' };
   assertSyncSession(session);
-  if (baseline) resolved = mergeSyncValue(workspaceStore.remoteBase?.find(w => w.id === resolved.id), resolved, baseline, '/workspace');
+  if (item.entityType === 'workspace' && !baseline) baseline = structuredClone(resolved);
+  const localWorkspace = workspaceStore.workspaces.find(w => w.id === resolved.id);
+  const remainingMasks = (localWorkspace?.localOnlyDeletions || []).filter(m =>
+    !(m.branchName === item.branchName && (item.entityType === 'task' ? m.taskId === (item.localData?.taskId || item.remoteData?.taskId)
+      : item.entityType === 'task_document' ? m.documentId === (item.localData?.id || item.remoteData?.id) : item.entityType === 'workspace')));
+  if (baseline) {
+    const base = workspaceStore.remoteBase?.find(w => w.id === resolved.id);
+    resolved = mergeSyncValue(base && applyLocalDeletions(base, remainingMasks), resolved, applyLocalDeletions(baseline, remainingMasks), '/workspace');
+  }
+  resolved = applyLocalDeletions(resolved, remainingMasks);
   if (strategy === 'keep_remote') {
     if (item.remoteWorkspaceDocument) documentSync.observe(item.remoteWorkspaceDocument, session);
     if (item.entityType === 'task') documentSync.observe(item.remoteData, session);
@@ -668,6 +679,14 @@ export async function resolveSyncItem(
     remoteBase: replace(workspaceStore.remoteBase || [], structuredClone(baseline || resolved)),
     remoteDocuments };
   saveWorkspaceStore(updatedStore);
+  for (const id of discardAfterSuccess) {
+    const parentId = resolved._id || `workspace-${resolved.id}`;
+    const parentBase = documentSync.base(parentId, session);
+    if (item.entityType !== 'workspace' && id === parentId && parentBase && baseline &&
+      JSON.stringify(syncComparable(resolved)) !== JSON.stringify(syncComparable(applyLocalDeletions(baseline, remainingMasks))))
+      documentSync.rebasePending(id, buildWorkspaceSyncDocument(resolved), parentBase, session, pendingBefore);
+    else documentSync.discardPending(id, session, pendingBefore);
+  }
   return { success: true, message: 'Sincronizacion resuelta', updatedStore };
 }
 
@@ -688,9 +707,12 @@ export async function executeBatchSync(
   const config = { ...getSanityConfig(), ...configOverride };
   let currentStore = { ...workspaceStore };
   let resolvedCount = 0;
+  const failures: string[] = [];
+  const blocked = new Set<string>();
 
   try {
     for (const item of items) {
+      if (blocked.has(item.workspaceId || item.id)) continue;
       // Files are displayed individually but persisted with their workspace.
       if (item.entityType === 'task_document') continue;
       if (item.diffType === 'synced' && mode === 'smart') continue;
@@ -712,19 +734,21 @@ export async function executeBatchSync(
         }
       }
 
-      const res = await resolveSyncItem(item, strategy, currentStore, config, mode !== 'smart');
-      if (res.success) {
+      try {
+        const res = await resolveSyncItem(item, strategy, currentStore, config, mode !== 'smart');
+        if (!res.success) throw new Error(res.message);
         resolvedCount++;
-        if (res.updatedStore) {
-          currentStore = res.updatedStore;
-        }
-      } else { throw new Error(res.message); }
+        if (res.updatedStore) currentStore = res.updatedStore;
+      } catch (error: any) {
+        failures.push(error.message);
+        blocked.add(item.workspaceId || item.id);
+      }
     }
 
     return {
-      success: true,
+      success: failures.length === 0,
       resolvedCount,
-      message: `Sincronización completada (${resolvedCount} elemento(s) procesados)`,
+      message: failures.length ? failures.join('; ') : `Sincronización completada (${resolvedCount} elemento(s) procesados)`,
       updatedStore: currentStore,
     };
   } catch (err: any) {
@@ -747,6 +771,21 @@ export async function deleteSyncItem(
   configOverride?: Partial<SanityConfig>
 ): Promise<{ success: boolean; message: string; updatedStore?: WorkspaceStoreState }> {
   const config = { ...getSanityConfig(), ...configOverride };
+  const deletionSession = getSyncSession(config);
+  if (!deletionSession || workspaceStore.scope !== deletionSession.scope) throw new Error('La cuenta de sincronizacion ha cambiado');
+  assertSyncSession(deletionSession);
+  if (scope === 'local' && item.entityType !== 'workspace') {
+    workspaceStore = { ...workspaceStore, workspaces: workspaceStore.workspaces.map(ws => {
+      if (ws.id !== item.workspaceId) return ws;
+      const branch = ws.branches.find(b => b.name === item.branchName);
+      const doc = branch?.taskDocuments.find(d => item.remoteData?.documentKey
+        ? `${branch.name}::${d.id}` === item.remoteData.documentKey : d.path === item.documentPath);
+      if (!doc) return ws;
+      const mask = { branchName: branch!.name, documentId: doc.id,
+        ...(item.entityType === 'task' ? { taskId: item.localData?.taskId || item.remoteData?.taskId } : {}) };
+      return { ...ws, localOnlyDeletions: [...(ws.localOnlyDeletions || []), mask] };
+    }) };
+  }
 
   if (item.entityType === 'workspace') {
     const wsId =
@@ -791,15 +830,15 @@ export async function deleteSyncItem(
         workspaces: nextWorkspaces,
         activeWorkspaceId: nextActiveId,
       };
-      saveWorkspaceStore(updatedStore);
+
     }
 
     // 2. Delete remotely if scope is 'remote' or 'both'
     if (scope === 'remote' || scope === 'both') {
       if (config.projectId && config.dataset && config.token) {
-        const delRes = await deleteWorkspaceFromSanity(cleanId, config);
+        const delRes = await deleteWorkspaceFromSanity(cleanId, config, workspaceStore.remoteDocuments?.find(d => d._type === 'workspace' && d.workspaceId === cleanId) || item.remoteWorkspaceDocument);
         if (!delRes.ok) {
-          return { success: false, message: delRes.message, updatedStore };
+          return { success: false, message: delRes.message, updatedStore: workspaceStore };
         }
       } else {
         return {
@@ -816,6 +855,8 @@ export async function deleteSyncItem(
         ? 'en Sanity Cloud'
         : 'en local';
 
+    assertSyncSession(deletionSession);
+    if (updatedStore) saveWorkspaceStore(updatedStore);
     return {
       success: true,
       message: `Workspace "${item.title.replace(/^Workspace:\s*/, '')}" eliminado ${scopeLabel}`,
@@ -865,26 +906,17 @@ export async function deleteSyncItem(
           ...workspaceStore,
           workspaces: updatedWorkspaces,
         };
-        saveWorkspaceStore(updatedStore);
+
       }
     }
 
     // 2. Delete remotely if scope is 'remote' or 'both'
     if (scope === 'remote' || scope === 'both') {
       if (config.projectId && config.dataset && config.token) {
-        const explicitId = item.remoteData?._id;
-        let delRes = { ok: false, message: '' };
-        if (explicitId) {
-          delRes = await deleteDocumentFromSanity(explicitId, config);
-        }
+        const explicitId = item.remoteData?._id || buildTaskDocumentId(taskId, item.workspaceId, item.remoteData?.documentKey);
+        const delRes = await deleteDocumentFromSanity(explicitId, config, item.remoteData || workspaceStore.remoteDocuments?.find(d => d._id === explicitId));
         if (!delRes.ok) {
-          delRes = await deleteDocumentFromSanity(buildTaskDocumentId(taskId, item.workspaceId, item.remoteData?.documentKey), config);
-        }
-        if (!delRes.ok && taskId) {
-          delRes = await deleteDocumentFromSanity(`task-${taskId}`, config);
-        }
-        if (!delRes.ok) {
-          return { success: false, message: delRes.message, updatedStore };
+          return { success: false, message: delRes.message, updatedStore: workspaceStore };
         }
       } else {
         return {
@@ -901,6 +933,8 @@ export async function deleteSyncItem(
         ? 'en Sanity Cloud'
         : 'en local';
 
+    assertSyncSession(deletionSession);
+    if (updatedStore) saveWorkspaceStore(updatedStore);
     return {
       success: true,
       message: `Tarea "${item.title.replace(/^Tarea:\s*(\[[^\]]+\]\s*)?/, '')}" eliminada ${scopeLabel}`,
@@ -929,7 +963,7 @@ export async function deleteSyncItem(
         ...workspaceStore,
         workspaces: updatedWorkspaces,
       };
-      saveWorkspaceStore(updatedStore);
+
     }
 
     if (scope === 'remote' || scope === 'both') {
@@ -938,17 +972,12 @@ export async function deleteSyncItem(
         if (ws) {
           const id = ws._id || `workspace-${ws.id}`;
           const session = getSyncSession(config);
-          await documentSync.resolve({
-            ...documentSync.base(id, session),
-            _id: id,
-            _type: 'workspace',
-            workspaceId: ws.id,
-            name: ws.name,
-            githubRepo: ws.githubRepo,
-            branches: ws.branches,
-            activeBranchName: ws.activeBranchName,
-            createdAt: ws.createdAt,
-          }, config);
+          const expected = workspaceStore.remoteDocuments?.find(d => d._id === id) || documentSync.base(id, session);
+          if (!expected) throw new SyncConflict('No hay base compartida para eliminar el documento');
+          await documentSync.write({ ...expected,
+            branches: expected.branches.map((b: any) => b.name !== item.branchName ? b : ({ ...b,
+              taskDocuments: b.taskDocuments.filter((d: any) => item.remoteData?.id ? d.id !== item.remoteData.id : d.path !== item.documentPath) })),
+          }, config, expected);
         }
       } else {
         return {
@@ -965,6 +994,8 @@ export async function deleteSyncItem(
         ? 'en Sanity Cloud'
         : 'en local';
 
+    assertSyncSession(deletionSession);
+    if (updatedStore) saveWorkspaceStore(updatedStore);
     return {
       success: true,
       message: `Documento "${item.title}" eliminado ${scopeLabel}`,
@@ -1307,4 +1338,29 @@ export async function applySyncBundle(
     message: `Almacén local actualizado exitosamente con ${bundle.workspaceStore.workspaces.length} workspace(s).`,
     updatedStore,
   };
+}
+
+export function undoLocalSyncDeletion(current: WorkspaceStoreState, prior: WorkspaceStoreState, item: SyncItemDiff): WorkspaceStoreState {
+  if (current.scope !== prior.scope) return current;
+  const original = prior.workspaces.find(w => w.id === item.workspaceId || w.id === item.localData?.id);
+  if (!original) return current;
+  const existing = current.workspaces.find(w => w.id === original.id);
+  if (!existing) return { ...current, workspaces: [...current.workspaces, structuredClone(original)] };
+  const taskId = item.localData?.taskId || item.remoteData?.taskId;
+  const restored = { ...existing, branches: existing.branches.map(b => {
+    if (b.name !== item.branchName) return b;
+    const sourceBranch = original.branches.find(source => source.name === b.name);
+    const source = sourceBranch?.taskDocuments.find(d => item.remoteData?.documentKey
+      ? `${b.name}::${d.id}` === item.remoteData.documentKey : d.path === item.documentPath);
+    if (!source) return b;
+    const documents = b.taskDocuments.map(d => {
+      if (d.id !== source.id || item.entityType !== 'task' || taskFields(d.content).some(t => t.taskId === taskId)) return d;
+      return { ...d, content: restoreTaskFromMarkdown(d.content, source.content, taskId) };
+    });
+    if (!documents.some(d => d.id === source.id)) documents.push(structuredClone(source));
+    return { ...b, taskDocuments: documents };
+  }), localOnlyDeletions: (existing.localOnlyDeletions || []).filter(m =>
+    !(m.branchName === item.branchName && (item.entityType === 'task' ? m.taskId === taskId
+      : m.documentId === (item.localData?.id || item.remoteData?.id)))) };
+  return { ...current, workspaces: current.workspaces.map(w => w.id === restored.id ? restored : w) };
 }
