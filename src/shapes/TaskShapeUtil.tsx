@@ -4,6 +4,7 @@ import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { i18n, formatTaskCount } from '../i18n';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   BaseBoxShapeUtil,
   createShapeId,
@@ -156,6 +157,31 @@ function TaskCardComponent({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState(title);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const [menuCoords, setMenuCoords] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const close = () => setIsMenuOpen(false);
+    const handlePointerDown = (e: PointerEvent) => {
+      const dropdown = document.getElementById(`task-card-menu-dropdown-${shape.id}`);
+      if (
+        dropdown &&
+        !dropdown.contains(e.target as Node) &&
+        !menuButtonRef.current?.contains(e.target as Node)
+      ) {
+        setIsMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('wheel', close, { passive: true });
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('wheel', close);
+      window.removeEventListener('resize', close);
+    };
+  }, [isMenuOpen, shape.id]);
   const [isSelected, setIsSelected] = useState(false);
   const [isSubtasksOpen, setIsSubtasksOpen] = useState(true);
 
@@ -701,12 +727,30 @@ function TaskCardComponent({
 
             {/* Contextual Action Menu Trigger ⋮ */}
             <button
+              ref={menuButtonRef}
               id={`btn-task-card-menu-${shape.id}`}
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                setIsMenuOpen(!isMenuOpen);
+                if (isMenuOpen) {
+                  setIsMenuOpen(false);
+                } else if (menuButtonRef.current) {
+                  const rect = menuButtonRef.current.getBoundingClientRect();
+                  const menuWidth = 175;
+                  const menuHeight = 220;
+                  let top = rect.bottom + 4;
+                  if (top + menuHeight > window.innerHeight && rect.top - menuHeight > 0) {
+                    top = Math.max(8, rect.top - menuHeight - 4);
+                  }
+                  let left = rect.right - menuWidth;
+                  if (left < 8) left = 8;
+                  if (left + menuWidth > window.innerWidth - 8) {
+                    left = window.innerWidth - menuWidth - 8;
+                  }
+                  setMenuCoords({ top, left });
+                  setIsMenuOpen(true);
+                }
               }}
               className="w-5 h-5 flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] rounded cursor-pointer"
               title={_(msg`Más acciones`)}
@@ -721,11 +765,17 @@ function TaskCardComponent({
         </div>
 
         {/* Popover Contextual Menu */}
-        {isMenuOpen && (
+        {isMenuOpen && menuCoords && typeof document !== 'undefined' && createPortal(
           <div
             id={`task-card-menu-dropdown-${shape.id}`}
             onPointerDown={(e) => e.stopPropagation()}
-            className="absolute top-8 right-2 z-50 bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-md p-1 flex flex-col gap-0.5 min-w-[150px] text-xs font-sans"
+            style={{
+              position: 'fixed',
+              top: `${menuCoords.top}px`,
+              left: `${menuCoords.left}px`,
+              zIndex: 99999,
+            }}
+            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-xl p-1 flex flex-col gap-0.5 min-w-[170px] text-xs font-sans pointer-events-auto"
           >
             <button
               id={`btn-task-card-menu-toggle-${shape.id}`}
@@ -820,7 +870,8 @@ function TaskCardComponent({
             >
               <span>{_(msg`🗑 Eliminar`)}</span>
             </button>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* Subtasks Section (Option A: Checklist Integrado Compacto) */}
@@ -1514,7 +1565,8 @@ function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?
   const headingLevel = Math.max(1, Math.min(6, level || (isContainer ? 1 : 2)));
   const headingPrefix = '#'.repeat(headingLevel);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const groupMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const [menuCoords, setMenuCoords] = useState<{ top: number; left: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const activeColorKey = color && SECTION_COLOR_OPTIONS[color] ? color : 'default';
@@ -1567,23 +1619,42 @@ function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?
 
   useEffect(() => {
     if (!isMenuOpen) return;
+    const close = () => setIsMenuOpen(false);
     const handlePointerDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const dropdown = document.getElementById(`task-group-menu-dropdown-${shape.id}`);
+      if (
+        dropdown &&
+        !dropdown.contains(e.target as Node) &&
+        !groupMenuBtnRef.current?.contains(e.target as Node)
+      ) {
         setIsMenuOpen(false);
       }
     };
     window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [isMenuOpen]);
+    window.addEventListener('wheel', close, { passive: true });
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('wheel', close);
+      window.removeEventListener('resize', close);
+    };
+  }, [isMenuOpen, shape.id]);
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const rect = e.currentTarget.getBoundingClientRect();
-    setMenuPosition({
-      x: Math.max(8, e.clientX - rect.left),
-      y: Math.max(8, e.clientY - rect.top),
-    });
+    const menuWidth = 205;
+    const menuHeight = 240;
+    let top = e.clientY + 2;
+    if (top + menuHeight > window.innerHeight && e.clientY - menuHeight > 0) {
+      top = Math.max(8, e.clientY - menuHeight - 2);
+    }
+    let left = e.clientX + 2;
+    if (left + menuWidth > window.innerWidth - 8) {
+      left = window.innerWidth - menuWidth - 8;
+    }
+    if (left < 8) left = 8;
+    setMenuCoords({ top, left });
     setIsMenuOpen(true);
   };
 
@@ -1665,13 +1736,30 @@ function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?
             )}
             {/* Context menu trigger ⋮ */}
             <button
+              ref={groupMenuBtnRef}
               id={`btn-task-group-menu-${shape.id}`}
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                setMenuPosition(null);
-                setIsMenuOpen(!isMenuOpen);
+                if (isMenuOpen) {
+                  setIsMenuOpen(false);
+                } else if (groupMenuBtnRef.current) {
+                  const rect = groupMenuBtnRef.current.getBoundingClientRect();
+                  const menuWidth = 205;
+                  const menuHeight = 240;
+                  let top = rect.bottom + 4;
+                  if (top + menuHeight > window.innerHeight && rect.top - menuHeight > 0) {
+                    top = Math.max(8, rect.top - menuHeight - 4);
+                  }
+                  let left = rect.right - menuWidth;
+                  if (left < 8) left = 8;
+                  if (left + menuWidth > window.innerWidth - 8) {
+                    left = window.innerWidth - menuWidth - 8;
+                  }
+                  setMenuCoords({ top, left });
+                  setIsMenuOpen(true);
+                }
               }}
               className="w-5 h-5 flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] rounded cursor-pointer transition-colors"
               title={isContainer ? i18n._(msg`Opciones de contenedor`) : i18n._(msg`Opciones de sección`)}
@@ -1686,19 +1774,18 @@ function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?
         </div>
 
         {/* Popover Contextual Menu */}
-        {isMenuOpen && (
+        {isMenuOpen && menuCoords && typeof document !== 'undefined' && createPortal(
           <div
             ref={menuRef}
             id={`task-group-menu-dropdown-${shape.id}`}
             onPointerDown={(e) => e.stopPropagation()}
             style={{
-              position: 'absolute',
-              left: menuPosition ? `${menuPosition.x}px` : 'auto',
-              top: menuPosition ? `${menuPosition.y}px` : '36px',
-              right: menuPosition ? 'auto' : '8px',
-              zIndex: 100,
+              position: 'fixed',
+              left: `${menuCoords.left}px`,
+              top: `${menuCoords.top}px`,
+              zIndex: 99999,
             }}
-            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1.5 flex flex-col gap-1 min-w-[190px] text-xs font-sans pointer-events-auto"
+            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-xl p-1.5 flex flex-col gap-1 min-w-[200px] text-xs font-sans pointer-events-auto"
           >
             <div className="px-2 py-1 text-[11px] font-mono text-[var(--on-surface-variant)] border-b border-[var(--outline)] mb-0.5 truncate">
               {`${headingPrefix} ${title}`}
@@ -1789,7 +1876,8 @@ function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?
               <span className="material-symbols-outlined text-[14px]">delete</span>
               <span>{isContainer ? i18n._(msg`Eliminar contenedor`) : i18n._(msg`Eliminar sección`)}</span>
             </button>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     </HTMLContainer>
