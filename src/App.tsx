@@ -5337,7 +5337,7 @@ export default function App() {
             totalTasksCount={allParsedTasks.length}
             filteredTasksCount={filteredTasksCount}
             onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-            onAutoOrganize={() => setIsAutoLayoutConfirmOpen(true)}
+            onAutoOrganize={handleExecuteAutoLayout}
             isAutoOrganizing={isAutoOrganizing}
             currentFileName={currentFileName}
             hasUnsavedChanges={hasUnsavedChanges}
@@ -5501,6 +5501,24 @@ export default function App() {
                         aria-label={i18n._(msg`Ajustar zoom`)}
                       >
                         <span className="material-symbols-outlined text-[16px]">fit_screen</span>
+                      </button>
+
+                      <button
+                        id="btn-canvas-auto-layout"
+                        type="button"
+                        onClick={handleExecuteAutoLayout}
+                        disabled={isAutoOrganizing}
+                        className={`btn-m3-icon w-7 h-7 cursor-pointer transition-colors ${
+                          isAutoOrganizing
+                            ? 'bg-[var(--primary)]/20 text-[var(--primary)] animate-pulse'
+                            : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--primary)]'
+                        }`}
+                        title={i18n._(msg`Reorganizar Canvas de forma autónoma (mantener bordes y grupos)`)}
+                        aria-label={i18n._(msg`Reorganizar Canvas`)}
+                      >
+                        <span className={`material-symbols-outlined text-[16px] ${isAutoOrganizing ? 'animate-spin' : ''}`}>
+                          auto_fix_high
+                        </span>
                       </button>
 
                       <div id="div-app-25-tools" className="w-px h-4 bg-[var(--outline)] my-auto mx-0.5" />

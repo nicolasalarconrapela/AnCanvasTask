@@ -439,6 +439,22 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 </div>
               )}
 
+              {onAutoOrganize && activeView === 'canvas' && (
+                <button
+                  id="btn-filterbar-auto-organize"
+                  type="button"
+                  onClick={onAutoOrganize}
+                  disabled={isAutoOrganizing}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--surface)] text-[var(--on-surface)] border border-[var(--outline)] hover:border-[var(--primary)] hover:text-[var(--primary)] hover:bg-[var(--surface-container-high)] text-xs font-sans transition-colors cursor-pointer"
+                  title={i18n._(msg`Reorganizar Canvas automáticamente (mantener bordes y grupos)`)}
+                >
+                  <span className={`material-symbols-outlined text-[14px] ${isAutoOrganizing ? 'animate-spin' : ''}`}>
+                    auto_fix_high
+                  </span>
+                  <span className="hidden sm:inline">{i18n._(msg`Reorganizar`)}</span>
+                </button>
+              )}
+
               <span id="span-filterbar-task-counter" className="px-2 py-0.5 rounded bg-[var(--surface)] border border-[var(--outline)] text-[11px] font-mono">
                 <span id="span-filterbar-counter-mobile" className="sm:hidden">{filteredTasksCount}/{totalTasksCount}</span>
                 <span id="span-filterbar-counter-desktop" className="hidden sm:inline">

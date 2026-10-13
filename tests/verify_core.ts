@@ -20,6 +20,10 @@ import {
   buildSanityTaskDocId,
   normalizeSanityWorkspaceDoc,
 } from '../src/services/sanityService';
+import {
+  computeAutoLayout,
+  isRectOverlapping,
+} from '../src/utils/autoLayout';
 
 console.log('--- Iniciando suite de pruebas de AnTaskCanvas (Core sin GitHub) ---');
 
@@ -485,9 +489,148 @@ const parsedCleared = parseTasksMarkdown(mdCleared);
 const beNpmCleared = parsedCleared.find((g) => g.title === 'NPM' && g.branchTitle === 'Backend');
 assert.strictEqual(beNpmCleared?.color, undefined, 'Backend NPM debe no tener color tras restablecer');
 
-console.log('   ✓ Colores de fondo blur parseados, actualizados y sincronizados bidireccionalmente de forma segura.');
+// 14. Verificando reorganización autónoma del Canvas (Auto-Layout sin solapamientos)
+console.log('14. Verificando reorganización autónoma del Canvas (sin solapamientos, límites y estricta pertenencia)...');
+const complexNestedMd = `# Paco
+
+## Fronted
+
+### NPM
+- [ ] Tarea Fronted 1
+  id: fe-task-1
+  priority: P1
+
+#### Github
+- [ ] Tarea Github en Fronted
+  id: fe-gh-1
+  priority: P2
+
+---
+
+## Backend
+
+### NPM
+- [ ] Tarea Blocker
+  id: be-blocker
+  priority: P0
+- [ ] Tarea Dependiente
+  id: be-blocked
+  priority: P1
+  blockedBy: be-blocker
+
+#### NPM
+- [ ] Tarea Sub-NPM
+  id: be-sub-npm
+  priority: P1
+
+#### Github
+- [ ] Tarea Github en Backend
+  id: be-gh-1
+  priority: P1
+- [ ] Tarea nivel 4
+  id: be-l4-1
+  priority: P2
+`;
+
+const layoutResult = computeAutoLayout(complexNestedMd);
+assert(layoutResult.tasks.length > 0, 'Debe haber tareas en el layout computado');
+assert(layoutResult.groups.length > 0, 'Debe haber grupos en el layout computado');
+
+const leafCols = layoutResult.groups.filter((g) => !g.isContainer);
+const macroContainers = layoutResult.groups.filter((g) => g.isContainer);
+
+// Invariante 1: Ninguna columna hoja se solapa con otra columna hoja
+for (let i = 0; i < leafCols.length; i++) {
+  for (let j = i + 1; j < leafCols.length; j++) {
+    const colA = leafCols[i];
+    const colB = leafCols[j];
+    const overlaps = isRectOverlapping(colA, colB, 10);
+    assert(!overlaps, `Las columnas '${colA.title}' y '${colB.title}' no deben solaparse geométricamente`);
+  }
+}
+
+// Invariante 2: Ninguna tarea se solapa con otra dentro de la misma columna
+for (const col of leafCols) {
+  const colTasks = layoutResult.tasks.filter(
+    (t) => t.groupTitle === col.title && (t.branchTitle || '') === (col.branchTitle || '')
+  );
+  for (let i = 0; i < colTasks.length; i++) {
+    for (let j = i + 1; j < colTasks.length; j++) {
+      const tA = colTasks[i];
+      const tB = colTasks[j];
+      const taskOverlap = isRectOverlapping(tA, tB, 4);
+      assert(!taskOverlap, `Las tareas '${tA.title}' y '${tB.title}' en columna '${col.title}' no deben solaparse`);
+    }
+  }
+}
+
+// Invariante 3: Todas las tareas están estrictamente dentro de los límites de su columna de sección
+for (const task of layoutResult.tasks) {
+  const col = leafCols.find((c) =>
+    task.groupHeadingId
+      ? (c.headingId === task.groupHeadingId || c.id === task.groupHeadingId)
+      : (c.title === task.groupTitle && (c.branchTitle || '') === (task.branchTitle || ''))
+  );
+  assert(col, `Cada tarea debe tener su columna correspondiente encontrada: ${task.title}`);
+  assert(
+    task.x >= col.x,
+    `Tarea ${task.title} (x=${task.x}) debe estar a la derecha del borde izquierdo de columna (x=${col.x})`
+  );
+  assert(
+    task.x + task.w <= col.x + col.w + 0.1,
+    `Tarea ${task.title} (x+w=${task.x + task.w}) debe estar contenida en el ancho de columna (x+w=${col.x + col.w})`
+  );
+  assert(
+    task.y >= col.y,
+    `Tarea ${task.title} (y=${task.y}) debe estar debajo del borde superior de columna (y=${col.y})`
+  );
+  assert(
+    task.y + task.h <= col.y + col.h + 0.1,
+    `Tarea ${task.title} (y+h=${task.y + task.h}) debe estar dentro de la altura de la columna (y+h=${col.y + col.h})`
+  );
+}
+
+// Invariante 4: Los macro contenedores (## Fronted, ## Backend) contienen estrictamente sus columnas hijas
+const frontedMacro = macroContainers.find((m) => m.title === 'Fronted');
+const backendMacro = macroContainers.find((m) => m.title === 'Backend');
+assert(frontedMacro, 'Debe existir macro contenedor Fronted');
+assert(backendMacro, 'Debe existir macro contenedor Backend');
+
+const frontedLeaves = leafCols.filter((c) => c.branchTitle === 'Fronted');
+for (const leaf of frontedLeaves) {
+  assert(leaf.x >= frontedMacro.x, `Hoja ${leaf.title} debe estar dentro de Fronted en X`);
+  assert(leaf.x + leaf.w <= frontedMacro.x + frontedMacro.w + 0.1, `Hoja ${leaf.title} debe caber en Fronted en ancho`);
+  assert(leaf.y >= frontedMacro.y, `Hoja ${leaf.title} debe estar debajo del top de Fronted`);
+  assert(leaf.y + leaf.h <= frontedMacro.y + frontedMacro.h + 0.1, `Hoja ${leaf.title} debe caber en altura de Fronted`);
+}
+
+const backendLeaves = leafCols.filter((c) => c.branchTitle === 'Backend');
+for (const leaf of backendLeaves) {
+  assert(leaf.x >= backendMacro.x, `Hoja ${leaf.title} debe estar dentro de Backend en X`);
+  assert(leaf.x + leaf.w <= backendMacro.x + backendMacro.w + 0.1, `Hoja ${leaf.title} debe caber en Backend en ancho`);
+  assert(leaf.y >= backendMacro.y, `Hoja ${leaf.title} debe estar debajo del top de Backend`);
+  assert(leaf.y + leaf.h <= backendMacro.y + backendMacro.h + 0.1, `Hoja ${leaf.title} debe caber en altura de Backend`);
+}
+
+// Invariante 5: El macro contenedor # Paco contiene a todos sus hijos
+const pacoMacro = macroContainers.find((m) => m.title === 'Paco');
+assert(pacoMacro, 'Debe existir macro contenedor Paco');
+assert(pacoMacro.x <= frontedMacro.x, 'Paco debe contener a Fronted en X');
+assert(pacoMacro.x + pacoMacro.w >= backendMacro.x + backendMacro.w - 0.1, 'Paco debe contener a Backend en X');
+
+// Invariante 6: Ordenamiento topológico (blocker arriba de blocked)
+const blockerTask = layoutResult.tasks.find((t) => t.taskId === 'be-blocker');
+const blockedTask = layoutResult.tasks.find((t) => t.taskId === 'be-blocked');
+assert(blockerTask && blockedTask, 'Ambas tareas dependientes deben estar en el layout');
+assert(
+  blockerTask.y < blockedTask.y,
+  `La tarea bloqueadora (y=${blockerTask.y}) debe estar físicamente más arriba que la bloqueada (y=${blockedTask.y})`
+);
+
+console.log('   ✓ Auto-layout verificado: 0 solapamientos, límites respetados y estricta pertenencia por sección.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
+
 
 
 
