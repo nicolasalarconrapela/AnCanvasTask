@@ -1,5 +1,5 @@
-import { parseTasksMarkdown, type ParsedGroup, type ParsedMarkdownTask } from '../utils/taskMarkdown';
-export { parseTasksMarkdown, type ParsedGroup, type ParsedMarkdownTask } from '../utils/taskMarkdown';
+import { parseTasksMarkdown, type ParsedGroup, type ParsedMarkdownTask, type SubtaskItem } from '../utils/taskMarkdown';
+export { parseTasksMarkdown, type ParsedGroup, type ParsedMarkdownTask, type SubtaskItem } from '../utils/taskMarkdown';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { i18n, formatTaskCount } from '../i18n';
@@ -118,8 +118,10 @@ export type TaskShapeProps = {
   taskId?: string;
   status?: TaskStatus;
   groupTitle?: string;
+  groupHeadingId?: string;
+  branchTitle?: string;
   tags?: string[];
-  subtasks?: { total: number; completed: number };
+  subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
   isDuplicateId?: boolean;
   hasMissingId?: boolean;
@@ -155,6 +157,42 @@ function TaskCardComponent({
   const [editedTitle, setEditedTitle] = useState(title);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSelected, setIsSelected] = useState(false);
+  const [isSubtasksOpen, setIsSubtasksOpen] = useState(true);
+
+  const handleToggleSubtask = (index: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!subtasks?.items) return;
+    const currentSub = subtasks.items[index];
+    const nextCompleted = !currentSub.completed;
+
+    const nextItems = subtasks.items.map((sub, i) =>
+      i === index ? { ...sub, completed: nextCompleted } : sub
+    );
+    const nextCompletedCount = nextItems.filter((s) => s.completed).length;
+
+    editor.updateShape({
+      id: shape.id,
+      type: 'task',
+      props: {
+        subtasks: {
+          ...subtasks,
+          completed: nextCompletedCount,
+          items: nextItems,
+        },
+      },
+    } as any);
+
+    window.dispatchEvent(
+      new CustomEvent('antask:toggle-subtask', {
+        detail: {
+          taskId: shape.props?.taskId || taskId,
+          subtaskIndex: index,
+          completed: nextCompleted,
+          taskTitle: title,
+        },
+      })
+    );
+  };
 
   useEffect(() => {
     setEditedTitle(title);
@@ -785,8 +823,82 @@ function TaskCardComponent({
           </div>
         )}
 
-        {/* Middle Row: Unboxed Tags & Subtask progress */}
-        {(tags?.length || subtasks) && (
+        {/* Subtasks Section (Option A: Checklist Integrado Compacto) */}
+        {subtasks && subtasks.items && subtasks.items.length > 0 && (
+          <div id={`task-card-subtasks-${shape.id}`} className="my-1 text-xs">
+            {/* Collapsible toggle header */}
+            <button
+              id={`btn-task-card-toggle-subtasks-${shape.id}`}
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsSubtasksOpen((prev) => !prev);
+              }}
+              className="flex items-center gap-1 text-[10px] font-mono font-medium text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors py-0.5 cursor-pointer focus:outline-none"
+              title={isSubtasksOpen ? _(msg`Ocultar subtareas`) : _(msg`Mostrar subtareas`)}
+            >
+              <span className="text-[9px] select-none">{isSubtasksOpen ? '▾' : '▸'}</span>
+              <span>{_(msg`Subtareas`)}</span>
+              <span className="opacity-75">({subtasks.completed}/{subtasks.total})</span>
+            </button>
+
+            {/* Subtask list */}
+            {isSubtasksOpen && (
+              <div className="border-l-2 border-[var(--outline)] pl-2 space-y-1 mt-1 mb-1">
+                {subtasks.items.map((sub, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-start gap-1.5 text-[11px] leading-tight group/subtask"
+                  >
+                    <button
+                      id={`btn-task-card-subtask-${shape.id}-${idx}`}
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => handleToggleSubtask(idx, e)}
+                      aria-label={
+                        sub.completed
+                          ? _(msg`Marcar subtarea como pendiente`)
+                          : _(msg`Marcar subtarea como completada`)
+                      }
+                      className="mt-0.5 flex-shrink-0 flex items-center justify-center cursor-pointer focus:outline-none"
+                    >
+                      <span
+                        className={`w-3 h-3 rounded border flex items-center justify-center transition-all ${
+                          sub.completed
+                            ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)]'
+                            : 'bg-[var(--surface-container-high)] border-[var(--outline)] hover:border-[var(--primary)]'
+                        }`}
+                      >
+                        {sub.completed && (
+                          <svg
+                            className="w-2 h-2 stroke-current stroke-[3]"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                    </button>
+                    <span
+                      className={`flex-1 transition-colors select-none ${
+                        sub.completed
+                          ? 'text-[var(--on-surface-variant)] line-through opacity-75'
+                          : 'text-[var(--on-surface)]'
+                      }`}
+                    >
+                      <HighlightText text={sub.title} query={searchQuery} />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Middle Row: Unboxed Tags & Subtask progress summary if collapsed or no items */}
+        {(tags?.length || (subtasks && (!subtasks.items?.length || !isSubtasksOpen))) && (
           <div id={`task-card-tags-${shape.id}`} className="flex items-center gap-1.5 flex-wrap py-0.5 text-[10px] text-[var(--on-surface-variant)]">
             {tags?.slice(0, 3).map((t) => (
               <span key={t} className="font-mono text-[var(--on-surface-variant)]">
@@ -798,7 +910,7 @@ function TaskCardComponent({
                 +{tags.length - 3}
               </span>
             )}
-            {subtasks && (
+            {subtasks && (!subtasks.items?.length || !isSubtasksOpen) && (
               <span className="font-mono text-[var(--on-surface-variant)] flex items-center gap-0.5">
                 <span>✓</span>
                 <span>{subtasks.completed}/{subtasks.total}</span>
@@ -896,8 +1008,14 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     taskId: T.string.optional(),
     status: T.string.optional(),
     groupTitle: T.string.optional(),
+    groupHeadingId: T.string.optional(),
+    branchTitle: T.string.optional(),
     tags: T.arrayOf(T.string).optional(),
-    subtasks: T.object({ total: T.number, completed: T.number }).optional(),
+    subtasks: T.object({
+      total: T.number,
+      completed: T.number,
+      items: T.arrayOf(T.object({ title: T.string, completed: T.boolean })).optional(),
+    }).optional(),
     blockedBy: T.string.optional(),
     isDuplicateId: T.boolean.optional(),
     hasMissingId: T.boolean.optional(),
@@ -1002,9 +1120,16 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     const cardCenterX = current.x + cardW / 2;
     const cardCenterY = current.y + cardH / 2;
 
-    const groupShapes = this.editor
+    const allGroupShapes = this.editor
       .getCurrentPageShapes()
       .filter((s) => (s as any).type === 'task-group') as any[];
+    const parentTitlesSet = new Set(
+      allGroupShapes.map((g) => ((g.props?.parentTitle || '') as string).trim().toLowerCase()).filter(Boolean)
+    );
+    const groupShapes = allGroupShapes.filter((g) => {
+      const gTitle = ((g.props?.title || '') as string).trim().toLowerCase();
+      return !g.props?.isContainer && g.props?.level !== 1 && !parentTitlesSet.has(gTitle);
+    });
 
     let capturedGroup: any = null;
     const MAGNETIC_MARGIN = 50;
@@ -1045,9 +1170,16 @@ export class TaskShapeUtil extends ShapeUtil<any> {
       this.activeSuctionGroupId = null;
     }
 
-    const groupShapes = this.editor
+    const allGroupShapes = this.editor
       .getCurrentPageShapes()
       .filter((s) => (s as any).type === 'task-group') as any[];
+    const parentTitlesSet = new Set(
+      allGroupShapes.map((g) => ((g.props?.parentTitle || '') as string).trim().toLowerCase()).filter(Boolean)
+    );
+    const groupShapes = allGroupShapes.filter((g) => {
+      const gTitle = ((g.props?.title || '') as string).trim().toLowerCase();
+      return !g.props?.isContainer && g.props?.level !== 1 && !parentTitlesSet.has(gTitle);
+    });
 
     const cardW = current.props?.w || 320;
     const cardH = current.props?.h || 110;
@@ -1141,7 +1273,12 @@ export class TaskShapeUtil extends ShapeUtil<any> {
       if (taskId) {
         window.dispatchEvent(
           new CustomEvent('antask:task-moved-group', {
-            detail: { taskId, targetGroupTitle },
+            detail: {
+              taskId,
+              targetGroupTitle,
+              targetHeadingId: targetGroup.props?.headingId,
+              targetBranchTitle: targetGroup.props?.branchTitle,
+            },
           })
         );
       }
@@ -1154,6 +1291,8 @@ export class TaskShapeUtil extends ShapeUtil<any> {
         props: {
           ...current.props,
           groupTitle: targetGroupTitle,
+          groupHeadingId: targetGroup.props?.headingId,
+          branchTitle: targetGroup.props?.branchTitle,
         },
       };
     } else {
@@ -1199,9 +1338,72 @@ export function updateAllGroupCounts(editor: Editor) {
   const updates: any[] = [];
   for (const g of groupShapes) {
     const gTitle = (g.props?.title || '').trim().toLowerCase();
-    const tasksInGroup = taskShapes.filter(
-      (t) => (t.props?.groupTitle || '').trim().toLowerCase() === gTitle
-    );
+    const gHeadingId = g.props?.headingId;
+    const gBranch = g.props?.branchTitle;
+
+    const childGroups = groupShapes.filter((cg) => {
+      if (cg.id === g.id) return false;
+      if (gHeadingId && cg.props?.parentId === gHeadingId) return true;
+      const ptMatch = (cg.props?.parentTitle || '').trim().toLowerCase() === gTitle;
+      if (!ptMatch) return false;
+      if (gBranch && cg.props?.branchTitle) {
+        return cg.props.branchTitle.toLowerCase() === gBranch.toLowerCase();
+      }
+      return true;
+    });
+
+    let tasksInGroup: any[] = [];
+    if (childGroups.length > 0 || g.props?.isContainer || g.props?.level === 1) {
+      const descendantHeadingIds = new Set<string>();
+      const descendantTitles = new Set<string>([gTitle]);
+      if (gHeadingId) descendantHeadingIds.add(gHeadingId);
+
+      const addDescendants = (pHeadingId?: string, pTitleLower?: string) => {
+        for (const cg of groupShapes) {
+          if (cg.id === g.id) continue;
+          const matchById = pHeadingId && cg.props?.parentId === pHeadingId;
+          const matchByTitle = pTitleLower && (cg.props?.parentTitle || '').trim().toLowerCase() === pTitleLower &&
+            (!gBranch || !cg.props?.branchTitle || cg.props.branchTitle.toLowerCase() === gBranch.toLowerCase());
+
+          if (matchById || matchByTitle) {
+            const cgHeadId = cg.props?.headingId;
+            const cLower = (cg.props?.title || '').trim().toLowerCase();
+            const notYetVisited = (cgHeadId && !descendantHeadingIds.has(cgHeadId)) || (!cgHeadId && !descendantTitles.has(cLower));
+            if (notYetVisited) {
+              if (cgHeadId) descendantHeadingIds.add(cgHeadId);
+              if (cLower) descendantTitles.add(cLower);
+              addDescendants(cgHeadId, cLower);
+            }
+          }
+        }
+      };
+      addDescendants(gHeadingId, gTitle);
+
+      tasksInGroup = taskShapes.filter((t) => {
+        if (t.props?.groupHeadingId && descendantHeadingIds.size > 0) {
+          return descendantHeadingIds.has(t.props.groupHeadingId);
+        }
+        const tTitle = (t.props?.groupTitle || '').trim().toLowerCase();
+        if (!descendantTitles.has(tTitle)) return false;
+        if (gBranch && t.props?.branchTitle) {
+          return t.props.branchTitle.toLowerCase() === gBranch.toLowerCase();
+        }
+        return true;
+      });
+    } else {
+      tasksInGroup = taskShapes.filter((t) => {
+        if (gHeadingId && t.props?.groupHeadingId) {
+          return t.props.groupHeadingId === gHeadingId;
+        }
+        const tTitle = (t.props?.groupTitle || '').trim().toLowerCase();
+        if (tTitle !== gTitle) return false;
+        if (gBranch && t.props?.branchTitle) {
+          return t.props.branchTitle.toLowerCase() === gBranch.toLowerCase();
+        }
+        return true;
+      });
+    }
+
     const count = tasksInGroup.length;
     const completedCount = tasksInGroup.filter((t) => t.props?.completed).length;
 
@@ -1223,11 +1425,143 @@ export function updateAllGroupCounts(editor: Editor) {
   }
 }
 
-function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
-  const { title, count, completedCount, w, h } = shape.props;
+export interface SectionColorOption {
+  id: string;
+  name: string;
+  swatchClass: string;
+  leafBgClass: string;
+  leafBorderClass: string;
+  containerBgClass: string;
+  containerBorderClass: string;
+  headerAccentClass?: string;
+  badgeClass?: string;
+}
+
+export const SECTION_COLOR_OPTIONS: Record<string, SectionColorOption> = {
+  default: {
+    id: 'default',
+    name: 'Por defecto',
+    swatchClass: 'bg-zinc-400 dark:bg-zinc-600',
+    leafBgClass: 'bg-[var(--surface-container)]/35',
+    leafBorderClass: 'border-[var(--outline)]',
+    containerBgClass: 'bg-[var(--surface-container-lowest)]/50',
+    containerBorderClass: 'border-[var(--outline-variant)]',
+  },
+  blue: {
+    id: 'blue',
+    name: 'Azul',
+    swatchClass: 'bg-blue-500',
+    leafBgClass: 'bg-blue-500/10 dark:bg-blue-950/30',
+    leafBorderClass: 'border-blue-500/35 dark:border-blue-400/35',
+    containerBgClass: 'bg-blue-500/8 dark:bg-blue-950/20',
+    containerBorderClass: 'border-blue-500/35 dark:border-blue-400/35',
+    headerAccentClass: 'text-blue-600 dark:text-blue-400',
+    badgeClass: 'bg-blue-500/15 text-blue-600 dark:text-blue-300 border-blue-500/30',
+  },
+  purple: {
+    id: 'purple',
+    name: 'Púrpura',
+    swatchClass: 'bg-purple-500',
+    leafBgClass: 'bg-purple-500/10 dark:bg-purple-950/30',
+    leafBorderClass: 'border-purple-500/35 dark:border-purple-400/35',
+    containerBgClass: 'bg-purple-500/8 dark:bg-purple-950/20',
+    containerBorderClass: 'border-purple-500/35 dark:border-purple-400/35',
+    headerAccentClass: 'text-purple-600 dark:text-purple-400',
+    badgeClass: 'bg-purple-500/15 text-purple-600 dark:text-purple-300 border-purple-500/30',
+  },
+  emerald: {
+    id: 'emerald',
+    name: 'Esmeralda',
+    swatchClass: 'bg-emerald-500',
+    leafBgClass: 'bg-emerald-500/10 dark:bg-emerald-950/30',
+    leafBorderClass: 'border-emerald-500/35 dark:border-emerald-400/35',
+    containerBgClass: 'bg-emerald-500/8 dark:bg-emerald-950/20',
+    containerBorderClass: 'border-emerald-500/35 dark:border-emerald-400/35',
+    headerAccentClass: 'text-emerald-600 dark:text-emerald-400',
+    badgeClass: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border-emerald-500/30',
+  },
+  amber: {
+    id: 'amber',
+    name: 'Ámbar',
+    swatchClass: 'bg-amber-500',
+    leafBgClass: 'bg-amber-500/10 dark:bg-amber-950/30',
+    leafBorderClass: 'border-amber-500/35 dark:border-amber-400/35',
+    containerBgClass: 'bg-amber-500/8 dark:bg-amber-950/20',
+    containerBorderClass: 'border-amber-500/35 dark:border-amber-400/35',
+    headerAccentClass: 'text-amber-600 dark:text-amber-400',
+    badgeClass: 'bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/30',
+  },
+  rose: {
+    id: 'rose',
+    name: 'Rosa',
+    swatchClass: 'bg-rose-500',
+    leafBgClass: 'bg-rose-500/10 dark:bg-rose-950/30',
+    leafBorderClass: 'border-rose-500/35 dark:border-rose-400/35',
+    containerBgClass: 'bg-rose-500/8 dark:bg-rose-950/20',
+    containerBorderClass: 'border-rose-500/35 dark:border-rose-400/35',
+    headerAccentClass: 'text-rose-600 dark:text-rose-400',
+    badgeClass: 'bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/30',
+  },
+  cyan: {
+    id: 'cyan',
+    name: 'Cian',
+    swatchClass: 'bg-cyan-500',
+    leafBgClass: 'bg-cyan-500/10 dark:bg-cyan-950/30',
+    leafBorderClass: 'border-cyan-500/35 dark:border-cyan-400/35',
+    containerBgClass: 'bg-cyan-500/8 dark:bg-cyan-950/20',
+    containerBorderClass: 'border-cyan-500/35 dark:border-cyan-400/35',
+    headerAccentClass: 'text-cyan-600 dark:text-cyan-400',
+    badgeClass: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border-cyan-500/30',
+  },
+  slate: {
+    id: 'slate',
+    name: 'Pizarra',
+    swatchClass: 'bg-slate-500',
+    leafBgClass: 'bg-slate-500/10 dark:bg-slate-900/35',
+    leafBorderClass: 'border-slate-500/35 dark:border-slate-500/35',
+    containerBgClass: 'bg-slate-500/8 dark:bg-slate-900/25',
+    containerBorderClass: 'border-slate-500/35 dark:border-slate-400/35',
+    headerAccentClass: 'text-slate-600 dark:text-slate-300',
+    badgeClass: 'bg-slate-500/15 text-slate-600 dark:text-slate-300 border-slate-500/30',
+  },
+};
+
+function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?: Editor }) {
+  const { title, count, completedCount, w, h, level, color } = shape.props;
+  const isContainer = Boolean(shape.props.isContainer || level === 1);
+  const headingLevel = Math.max(1, Math.min(6, level || (isContainer ? 1 : 2)));
+  const headingPrefix = '#'.repeat(headingLevel);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const activeColorKey = color && SECTION_COLOR_OPTIONS[color] ? color : 'default';
+  const colorConfig = SECTION_COLOR_OPTIONS[activeColorKey] || SECTION_COLOR_OPTIONS.default;
+
+  const handleSelectColor = (selectedColor: string) => {
+    const finalColor = selectedColor && selectedColor !== 'default' ? selectedColor : undefined;
+    if (editor) {
+      editor.updateShape({
+        id: shape.id,
+        type: 'task-group',
+        props: {
+          ...shape.props,
+          color: finalColor,
+        },
+      } as any);
+    }
+    window.dispatchEvent(
+      new CustomEvent('antask:section-color-changed', {
+        detail: {
+          groupTitle: title,
+          color: finalColor || '',
+          headingId: shape.props?.headingId,
+          branchTitle: shape.props?.branchTitle,
+          shapeId: shape.id,
+        },
+      })
+    );
+  };
 
   const globalFilters = useGlobalTaskFilters();
   const isSectionFilteredOut =
@@ -1300,28 +1634,48 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
       <div
         id={`task-group-container-${shape.id}`}
         onContextMenu={handleContextMenu}
-        className="w-full h-full rounded-md bg-[var(--surface-container)]/30 border border-[var(--outline)] p-3 flex flex-col justify-start select-none transition-colors relative"
+        style={{
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+        }}
+        className={
+          isContainer
+            ? `w-full h-full rounded-xl backdrop-blur-md ${colorConfig.containerBgClass} border-2 border-dashed ${colorConfig.containerBorderClass} p-4 flex flex-col justify-start select-none transition-colors relative`
+            : `w-full h-full rounded-md backdrop-blur-md ${colorConfig.leafBgClass} border ${colorConfig.leafBorderClass} p-3 flex flex-col justify-start select-none transition-colors relative`
+        }
       >
         {/* Header */}
         <div
           id={`task-group-header-${shape.id}`}
           onContextMenu={handleContextMenu}
-          className="flex items-center justify-between border-b border-[var(--outline)] pb-2 pointer-events-auto cursor-context-menu"
+          className={
+            isContainer
+              ? `flex items-center justify-between border-b ${colorConfig.containerBorderClass}/60 pb-2.5 pointer-events-auto cursor-context-menu`
+              : `flex items-center justify-between border-b ${colorConfig.leafBorderClass} pb-2 pointer-events-auto cursor-context-menu`
+          }
         >
           <div id={`task-group-title-group-${shape.id}`} className="flex items-center gap-1.5">
-            <span className="text-[var(--on-surface-variant)] font-mono text-xs font-semibold">##</span>
-            <h2 className="text-xs font-semibold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[180px]">
+            <span className={colorConfig.headerAccentClass || (isContainer ? "text-[var(--primary)] font-mono text-sm font-bold" : "text-[var(--on-surface-variant)] font-mono text-xs font-semibold")}>
+              {headingPrefix}
+            </span>
+            <h2 className={isContainer ? "text-sm font-bold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[280px]" : "text-xs font-semibold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[180px]"}>
               {title}
             </h2>
-            <span className="suction-indicator items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-[var(--primary)] bg-[var(--primary)]/10 border border-[var(--primary)]/30">
-              <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)]" />
-              {i18n._(msg`Ventosa`)}
-            </span>
+            {isContainer ? (
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${colorConfig.badgeClass || 'text-[var(--on-surface-variant)] bg-[var(--surface-container-high)] border border-[var(--outline)]'}`}>
+                {headingPrefix}
+              </span>
+            ) : (
+              <span className="suction-indicator items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-[var(--primary)] bg-[var(--primary)]/10 border border-[var(--primary)]/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)]" />
+                {i18n._(msg`Ventosa`)}
+              </span>
+            )}
           </div>
 
           <div id={`task-group-actions-${shape.id}`} className="flex items-center gap-1.5">
             {count > 0 && (
-              <span className="text-[11px] font-mono text-[var(--on-surface-variant)] tabular-nums">
+              <span className={isContainer ? "text-xs font-mono font-medium text-[var(--on-surface-variant)] tabular-nums" : "text-[11px] font-mono text-[var(--on-surface-variant)] tabular-nums"}>
                 {completedCount > 0
                   ? i18n._(msg`${completedCount}/${count} completadas`)
                   : formatTaskCount(count)}
@@ -1338,9 +1692,9 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
                 setIsMenuOpen(!isMenuOpen);
               }}
               className="w-5 h-5 flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] rounded cursor-pointer transition-colors"
-              title={i18n._(msg`Opciones de sección`)}
+              title={isContainer ? i18n._(msg`Opciones de contenedor`) : i18n._(msg`Opciones de sección`)}
             >
-              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+              <svg className={isContainer ? "w-3.5 h-3.5" : "w-3 h-3"} fill="currentColor" viewBox="0 0 24 24">
                 <circle cx="12" cy="5" r="2" />
                 <circle cx="12" cy="12" r="2" />
                 <circle cx="12" cy="19" r="2" />
@@ -1362,28 +1716,75 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
               right: menuPosition ? 'auto' : '8px',
               zIndex: 100,
             }}
-            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1 flex flex-col gap-0.5 min-w-[170px] text-xs font-sans pointer-events-auto"
+            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1.5 flex flex-col gap-1 min-w-[190px] text-xs font-sans pointer-events-auto"
           >
             <div className="px-2 py-1 text-[11px] font-mono text-[var(--on-surface-variant)] border-b border-[var(--outline)] mb-0.5 truncate">
-              ## {title}
+              {`${headingPrefix} ${title}`}
             </div>
-            <button
-              id={`btn-task-group-menu-add-task-${shape.id}`}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsMenuOpen(false);
-                window.dispatchEvent(
-                  new CustomEvent('antask:open-new-task-modal', {
-                    detail: { groupTitle: title },
-                  })
-                );
-              }}
-              className="px-2 py-1 rounded text-left text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer transition-colors"
-            >
-              <span className="material-symbols-outlined text-[14px]">add</span>
-              <span>{i18n._(msg`Añadir tarea`)}</span>
-            </button>
+
+            {/* Selector de color blur */}
+            <div className="px-2 py-1 border-b border-[var(--outline)] pb-1.5">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--on-surface-variant)] mb-1 flex items-center justify-between">
+                <span>{i18n._(msg`Fondo Blur`)}</span>
+                {activeColorKey !== 'default' && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSelectColor('default');
+                    }}
+                    className="text-[9px] hover:underline text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer"
+                  >
+                    {i18n._(msg`Restablecer`)}
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-4 gap-1.5 py-0.5">
+                {Object.entries(SECTION_COLOR_OPTIONS).map(([cKey, opt]) => {
+                  const isSelected = activeColorKey === cKey;
+                  return (
+                    <button
+                      key={cKey}
+                      type="button"
+                      title={opt.name}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectColor(cKey);
+                      }}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center transition-all cursor-pointer ${opt.swatchClass} ${
+                        isSelected
+                          ? 'ring-2 ring-offset-1 ring-offset-[var(--surface-container)] ring-[var(--primary)] scale-110'
+                          : 'opacity-80 hover:opacity-100 hover:scale-105'
+                      }`}
+                    >
+                      {isSelected && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-white dark:bg-zinc-900 shadow-xs" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {!isContainer && (
+              <button
+                id={`btn-task-group-menu-add-task-${shape.id}`}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsMenuOpen(false);
+                  window.dispatchEvent(
+                    new CustomEvent('antask:open-new-task-modal', {
+                      detail: { groupTitle: title },
+                    })
+                  );
+                }}
+                className="px-2 py-1 rounded text-left text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer transition-colors"
+              >
+                <span className="material-symbols-outlined text-[14px]">add</span>
+                <span>{i18n._(msg`Añadir tarea`)}</span>
+              </button>
+            )}
             <button
               id={`btn-task-group-menu-delete-${shape.id}`}
               type="button"
@@ -1392,14 +1793,19 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
                 setIsMenuOpen(false);
                 window.dispatchEvent(
                   new CustomEvent('antask:delete-section', {
-                    detail: { groupTitle: title, shapeId: shape.id },
+                    detail: {
+                      groupTitle: title,
+                      shapeId: shape.id,
+                      headingId: shape.props?.headingId,
+                      branchTitle: shape.props?.branchTitle,
+                    },
                   })
                 );
               }}
               className="px-2 py-1 rounded text-left text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 cursor-pointer transition-colors font-medium"
             >
               <span className="material-symbols-outlined text-[14px]">delete</span>
-              <span>{i18n._(msg`Eliminar sección`)}</span>
+              <span>{isContainer ? i18n._(msg`Eliminar contenedor`) : i18n._(msg`Eliminar sección`)}</span>
             </button>
           </div>
         )}
@@ -1414,6 +1820,14 @@ export type GroupShapeProps = {
   title: string;
   count: number;
   completedCount: number;
+  level?: number;
+  parentTitle?: string;
+  parentId?: string;
+  headingId?: string;
+  branchTitle?: string;
+  path?: string;
+  isContainer?: boolean;
+  color?: string;
 };
 
 export type ITaskGroupShape = TLBaseShape<'task-group', GroupShapeProps>;
@@ -1427,6 +1841,14 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
     title: T.string,
     count: T.number,
     completedCount: T.number,
+    level: T.optional(T.number),
+    parentTitle: T.optional(T.string),
+    parentId: T.optional(T.string),
+    headingId: T.optional(T.string),
+    branchTitle: T.optional(T.string),
+    path: T.optional(T.string),
+    isContainer: T.optional(T.boolean),
+    color: T.optional(T.string),
   };
 
   getDefaultProps(): GroupShapeProps {
@@ -1436,6 +1858,8 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
       title: 'Section',
       count: 0,
       completedCount: 0,
+      level: 2,
+      isContainer: false,
     };
   }
 
@@ -1531,7 +1955,7 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
   }
 
   component(shape: ITaskGroupShape) {
-    return <TaskGroupComponent shape={shape} />;
+    return <TaskGroupComponent shape={shape} editor={this.editor} />;
   }
 }
 
@@ -1666,7 +2090,7 @@ export function populateCanvasWithGroups(
     }
   }
 
-  const savedGroupMap = new Map<string, { x: number; y: number; width: number; height: number; isCollapsed?: boolean }>();
+  const savedGroupMap = new Map<string, { x: number; y: number; width: number; height: number; isCollapsed?: boolean; color?: string }>();
   if (savedVisualState?.groups) {
     for (const g of savedVisualState.groups) {
       if (g.groupTitle) {
@@ -1697,16 +2121,25 @@ export function populateCanvasWithGroups(
   const groupPlacements = new Map<number, PlacedGroup>();
   const placedRects: PlacedGroup[] = [];
 
+  const getTaskCalculatedHeight = (task: ParsedMarkdownTask) => {
+    const subCount = task.subtasks?.items?.length || 0;
+    return subCount > 0 ? cardHeight + 20 + subCount * 22 : cardHeight;
+  };
+
   // Pass 1: Place groups that already have saved positions in savedGroupMap
   groups.forEach((group, index) => {
     const saved = savedGroupMap.get(group.title.toLowerCase());
     if (saved) {
       const taskCount = group.tasks.length;
+      const totalGroupTasksHeight = group.tasks.reduce(
+        (acc, t) => acc + getTaskCalculatedHeight(t),
+        0
+      );
       const defaultCalculatedHeight = Math.max(
         180,
         groupHeaderHeight +
           groupPaddingTop +
-          taskCount * cardHeight +
+          totalGroupTasksHeight +
           Math.max(0, taskCount - 1) * cardGap +
           groupPaddingBottom
       );
@@ -1727,15 +2160,20 @@ export function populateCanvasWithGroups(
   });
 
   // Pass 2: Place new groups (not present in savedGroupMap), avoiding any overlap
+  const MAX_GROUPS_PER_ROW = 5;
   groups.forEach((group, index) => {
     if (groupPlacements.has(index)) return;
 
     const taskCount = group.tasks.length;
+    const totalGroupTasksHeight = group.tasks.reduce(
+      (acc, t) => acc + getTaskCalculatedHeight(t),
+      0
+    );
     const defaultCalculatedHeight = Math.max(
       180,
       groupHeaderHeight +
         groupPaddingTop +
-        taskCount * cardHeight +
+        totalGroupTasksHeight +
         Math.max(0, taskCount - 1) * cardGap +
         groupPaddingBottom
     );
@@ -1745,14 +2183,20 @@ export function populateCanvasWithGroups(
     let x: number;
     let y: number;
 
-    if (placedRects.length > 0) {
-      const maxRight = Math.max(...placedRects.map((p) => p.x + p.w));
-      const minY = Math.min(...placedRects.map((p) => p.y));
-      x = maxRight + 40;
-      y = minY;
-    } else {
+    if (placedRects.length === 0) {
       x = 80;
       y = 80;
+    } else if (placedRects.length % MAX_GROUPS_PER_ROW === 0) {
+      // Wrap to next row to accommodate up to 10 sections in a clean 2-row grid
+      const maxBottom = Math.max(...placedRects.map((p) => p.y + p.h));
+      x = 80;
+      y = maxBottom + 64;
+    } else {
+      const prev = placedRects[placedRects.length - 1];
+      const prevGroup = groups[index - 1];
+      const isNewBranch = prevGroup && group.branchTitle && prevGroup.branchTitle !== group.branchTitle;
+      x = prev.x + prev.w + (isNewBranch ? 100 : 40);
+      y = prev.y;
     }
 
     while (placedRects.some((p) => isRectOverlapping({ x, y, w, h }, p))) {
@@ -1777,6 +2221,11 @@ export function populateCanvasWithGroups(
     const groupW = placed.w;
     const groupH = placed.h;
     const isNewGroup = !savedGroupMap.has(group.title.toLowerCase());
+    const saved = savedGroupMap.get(group.title.toLowerCase());
+
+    // If this group is a parent container with child headings AND has direct tasks:
+    // Its parentId for the leaf column is ITSELF (group.id), so its macro container encloses it!
+    const leafParentId = (group.isParent && group.id) ? group.id : group.parentId;
 
     // Create Group container shape
     groupShapesToCreate.push({
@@ -1790,17 +2239,24 @@ export function populateCanvasWithGroups(
         title: group.title,
         count: taskCount,
         completedCount,
+        level: group.level || 2,
+        parentTitle: group.parentTitle,
+        parentId: leafParentId,
+        headingId: group.id,
+        branchTitle: group.branchTitle,
+        path: group.path,
+        isContainer: false,
+        color: group.color || saved?.color,
       },
     });
 
     // Create Task shapes
+    let currentTaskY = groupY + groupHeaderHeight + groupPaddingTop;
     group.tasks.forEach((task, taskIndex) => {
+      const taskCalculatedH = getTaskCalculatedHeight(task);
       const defaultTaskX = groupX + groupPaddingX;
-      const defaultTaskY =
-        groupY +
-        groupHeaderHeight +
-        groupPaddingTop +
-        taskIndex * (cardHeight + cardGap);
+      const defaultTaskY = currentTaskY;
+      currentTaskY += taskCalculatedH + cardGap;
 
       const shapeId = createShapeId();
       const resolvedTaskId = task.taskId || task.temporaryId || `temp-task-${groupIndex + 1}-${taskIndex + 1}`;
@@ -1829,7 +2285,7 @@ export function populateCanvasWithGroups(
       const taskX = savedTask && belongsToCurrentGroup ? savedTask.x : defaultTaskX;
       const taskY = savedTask && belongsToCurrentGroup ? savedTask.y : defaultTaskY;
       const taskW = savedTask && savedTask.width ? savedTask.width : cardWidth;
-      const taskH = savedTask && savedTask.height ? savedTask.height : cardHeight;
+      const taskH = savedTask && savedTask.height ? Math.max(savedTask.height, taskCalculatedH) : taskCalculatedH;
 
       taskShapesToCreate.push({
         id: shapeId,
@@ -1845,6 +2301,8 @@ export function populateCanvasWithGroups(
           taskId: resolvedTaskId,
           status: task.status,
           groupTitle: group.title,
+          groupHeadingId: group.id,
+          branchTitle: group.branchTitle,
           tags: task.tags,
           subtasks: task.subtasks,
           blockedBy: task.blockedBy,
@@ -1937,6 +2395,77 @@ export function populateCanvasWithGroups(
     });
   });
 
+  // Pass 3: Create parent macro-group shapes enclosing their child sections
+  const { parentHeadings } = rawMarkdown ? scanTaskBlocks(rawMarkdown) : { parentHeadings: [] };
+
+  const MACRO_PAD_X = 28;
+  const MACRO_HEADER_PAD_Y = 56;
+  const MACRO_BOTTOM_PAD_Y = 28;
+  const macroGroupShapesToCreate: any[] = [];
+
+  // Sort parent headings by level descending so deeper parents (e.g. level 4, then level 3) are bounded first,
+  // then enclosing higher-level parents (e.g. level 2 or level 1) can enclose them.
+  const sortedParents = [...parentHeadings].sort((a, b) => (b.level || 1) - (a.level || 1));
+
+  sortedParents.forEach((ph) => {
+    // Direct children: match by parentId === ph.id first, with fallback to parentTitle + branchTitle
+    const directChildren = [...groupShapesToCreate, ...macroGroupShapesToCreate].filter((s) => {
+      if (s.props?.parentId && ph.id) {
+        return s.props.parentId === ph.id;
+      }
+      const ptMatches = (s.props?.parentTitle || '').trim().toLowerCase() === ph.title.trim().toLowerCase();
+      if (!ptMatches) return false;
+      if (s.props?.branchTitle && ph.branchTitle) {
+        return s.props.branchTitle.toLowerCase() === ph.branchTitle.toLowerCase();
+      }
+      return true;
+    });
+
+    if (directChildren.length === 0) return;
+
+    const minX = Math.min(...directChildren.map((s) => s.x));
+    const minY = Math.min(...directChildren.map((s) => s.y));
+    const maxRight = Math.max(...directChildren.map((s) => s.x + s.props.w));
+    const maxBottom = Math.max(...directChildren.map((s) => s.y + s.props.h));
+
+    const totalTasks = directChildren.reduce((sum, s) => sum + (s.props?.count || 0), 0);
+    const completedTasks = directChildren.reduce((sum, s) => sum + (s.props?.completedCount || 0), 0);
+
+    const pSaved = savedGroupMap.get(ph.title.toLowerCase());
+    const calcX = minX - MACRO_PAD_X;
+    const calcY = minY - MACRO_HEADER_PAD_Y;
+    const calcW = (maxRight - minX) + MACRO_PAD_X * 2;
+    const calcH = (maxBottom - minY) + MACRO_HEADER_PAD_Y + MACRO_BOTTOM_PAD_Y;
+
+    macroGroupShapesToCreate.push({
+      id: createShapeId(),
+      type: 'task-group' as const,
+      x: pSaved ? Math.min(pSaved.x, calcX) : calcX,
+      y: pSaved ? Math.min(pSaved.y, calcY) : calcY,
+      props: {
+        w: pSaved ? Math.max(pSaved.width, (maxRight - Math.min(pSaved.x, calcX)) + MACRO_PAD_X) : calcW,
+        h: pSaved ? Math.max(pSaved.height, (maxBottom - Math.min(pSaved.y, calcY)) + MACRO_BOTTOM_PAD_Y) : calcH,
+        title: ph.title,
+        count: totalTasks,
+        completedCount: completedTasks,
+        level: ph.level || 1,
+        parentTitle: ph.parentTitle,
+        parentId: ph.parentId,
+        headingId: ph.id,
+        branchTitle: ph.branchTitle,
+        path: ph.path,
+        isContainer: true,
+        color: ph.color || pSaved?.color,
+      },
+    });
+  });
+
+  // Sort macro group shapes by level ASC so outermost containers (lower level numbers) are created first in editor (placed behind)
+  macroGroupShapesToCreate.sort((a, b) => (a.props.level || 1) - (b.props.level || 1));
+
+  if (macroGroupShapesToCreate.length > 0) {
+    (editor.createShapes as any)(macroGroupShapesToCreate);
+  }
   if (groupShapesToCreate.length > 0) {
     (editor.createShapes as any)(groupShapesToCreate);
   }

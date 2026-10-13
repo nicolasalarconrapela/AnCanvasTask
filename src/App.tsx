@@ -136,6 +136,8 @@ import {
   scanNotesFromMarkdown,
   scanTaskBlocks,
   syncNotesToMarkdown,
+  toggleSubtaskInMarkdown,
+  updateSectionColorInMarkdown,
   updateTaskInMarkdown,
   validateMarkdownDocument,
 } from './utils/markdownSync';
@@ -632,10 +634,10 @@ export default function App() {
   // Handle task card moved to another group or separated to Out
   useEffect(() => {
     const handleTaskMovedGroup = (e: any) => {
-      const { taskId, targetGroupTitle } = e.detail || {};
+      const { taskId, targetGroupTitle, targetHeadingId, targetBranchTitle } = e.detail || {};
       if (taskId && targetGroupTitle) {
         setMarkdownInput((curr) => {
-          return moveTaskToGroupInMarkdown(curr, taskId, targetGroupTitle);
+          return moveTaskToGroupInMarkdown(curr, taskId, targetGroupTitle, undefined, targetHeadingId, targetBranchTitle);
         });
         if (editor) {
           updateAllGroupCounts(editor);
@@ -718,14 +720,17 @@ export default function App() {
       handleResolveSingleDuplicateId(lineIndex ?? taskId, taskTitle);
     };
     const handleDeleteSectionEvent = (e: any) => {
-      const { groupTitle, shapeId } = e.detail || {};
+      const { groupTitle, shapeId, headingId, branchTitle } = e.detail || {};
       if (groupTitle) {
         const normGroup = groupTitle.trim().toLowerCase().replace(/^#+\s*/, '');
-        setMarkdownInput((currentMd) => deleteSectionFromMarkdown(currentMd, groupTitle));
+        setMarkdownInput((currentMd) => deleteSectionFromMarkdown(currentMd, groupTitle, headingId, branchTitle));
 
         const ed = editorRef.current;
         if (ed) {
           const allShapes = ed.getCurrentPageShapes();
+          const targetShape = shapeId ? allShapes.find((s) => s.id === shapeId) as any : null;
+          const targetHeadingId = headingId || targetShape?.props?.headingId;
+          const targetBranch = branchTitle || targetShape?.props?.branchTitle;
           const shapesToDelete = new Set<string>();
 
           if (shapeId) {
@@ -735,14 +740,22 @@ export default function App() {
           for (const s of allShapes) {
             const anyS = s as any;
             if (anyS.type === 'task-group') {
-              const title = (anyS.props?.title || '').trim().toLowerCase().replace(/^#+\s*/, '');
-              if (title === normGroup) {
+              if (targetHeadingId && anyS.props?.headingId === targetHeadingId) {
                 shapesToDelete.add(s.id);
+              } else {
+                const title = (anyS.props?.title || '').trim().toLowerCase().replace(/^#+\s*/, '');
+                if (title === normGroup && (!targetBranch || !anyS.props?.branchTitle || anyS.props.branchTitle.toLowerCase() === targetBranch.toLowerCase())) {
+                  shapesToDelete.add(s.id);
+                }
               }
             } else if (anyS.type === 'task') {
-              const taskGroup = (anyS.props?.groupTitle || '').trim().toLowerCase().replace(/^#+\s*/, '');
-              if (taskGroup === normGroup) {
+              if (targetHeadingId && anyS.props?.groupHeadingId === targetHeadingId) {
                 shapesToDelete.add(s.id);
+              } else {
+                const taskGroup = (anyS.props?.groupTitle || '').trim().toLowerCase().replace(/^#+\s*/, '');
+                if (taskGroup === normGroup && (!targetBranch || !anyS.props?.branchTitle || anyS.props.branchTitle.toLowerCase() === targetBranch.toLowerCase())) {
+                  shapesToDelete.add(s.id);
+                }
               }
             }
           }
@@ -765,11 +778,41 @@ export default function App() {
       }
     };
 
+    const handleToggleSubtaskEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        taskId?: string;
+        subtaskIndex: number;
+        completed?: boolean;
+        taskTitle?: string;
+      }>;
+      const { taskId, subtaskIndex, completed, taskTitle } = customEvent.detail || {};
+      if (taskId !== undefined && subtaskIndex !== undefined) {
+        setMarkdownInput((curr) =>
+          toggleSubtaskInMarkdown(curr, taskId, subtaskIndex, completed, taskTitle)
+        );
+      }
+    };
+
+    const handleSectionColorChangedEvent = (e: any) => {
+      const { groupTitle, color, headingId, branchTitle } = e.detail || {};
+      if (groupTitle) {
+        setMarkdownInput((currentMd) =>
+          updateSectionColorInMarkdown(currentMd, groupTitle, color, headingId, branchTitle)
+        );
+        const ed = editorRef.current;
+        if (ed) {
+          triggerDebouncedVisualSave(ed);
+        }
+      }
+    };
+
     window.addEventListener('antask:assign-task-id', handleAssignEvent);
     window.addEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
     window.addEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
     window.addEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
     window.addEventListener('antask:delete-section', handleDeleteSectionEvent);
+    window.addEventListener('antask:section-color-changed', handleSectionColorChangedEvent);
+    window.addEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
 
     return () => {
       window.removeEventListener('antask:assign-task-id', handleAssignEvent);
@@ -777,6 +820,8 @@ export default function App() {
       window.removeEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
       window.removeEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
       window.removeEventListener('antask:delete-section', handleDeleteSectionEvent);
+      window.removeEventListener('antask:section-color-changed', handleSectionColorChangedEvent);
+      window.removeEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
     };
   }, [handleAssignSingleTaskId, handleAutoAssignAllTaskIds, handleResolveDuplicateIds, handleResolveSingleDuplicateId]);
 
@@ -3033,6 +3078,7 @@ export default function App() {
                   const isStatusChanged = toProps.status !== fromProps.status;
                   const isTagsChanged = JSON.stringify(toProps.tags) !== JSON.stringify(fromProps.tags);
                   const isBlockedByChanged = toProps.blockedBy !== fromProps.blockedBy;
+                  const isSubtasksChanged = JSON.stringify(toProps.subtasks) !== JSON.stringify(fromProps.subtasks);
 
                   if (
                     isTitleChanged ||
@@ -3040,7 +3086,8 @@ export default function App() {
                     isPriorityChanged ||
                     isStatusChanged ||
                     isTagsChanged ||
-                    isBlockedByChanged
+                    isBlockedByChanged ||
+                    isSubtasksChanged
                   ) {
                     const taskId = toProps.taskId || fromProps.taskId || to.id;
                     const taskTitle = toProps.title || fromProps.title;
@@ -3056,6 +3103,7 @@ export default function App() {
                             status: toProps.status,
                             tags: toProps.tags,
                             blockedBy: toProps.blockedBy,
+                            subtasks: toProps.subtasks,
                           },
                           taskTitle
                         )
@@ -3114,17 +3162,73 @@ export default function App() {
                   if (!isResizing && (dx !== 0 || dy !== 0)) {
                     const selectedIds = new Set(editorInstance.getSelectedShapeIds());
                     const groupTitle = (to.props?.title || '').trim().toLowerCase();
+                    const groupHeadingId = to.props?.headingId;
+                    const groupBranch = to.props?.branchTitle;
 
-                    const tasksInGroup = (editorInstance
-                      .getCurrentPageShapes()
-                      .filter((s) => {
-                        if ((s as any).type !== 'task') return false;
-                        const taskGroup = ((s as any).props?.groupTitle || '').trim().toLowerCase();
-                        return taskGroup === groupTitle;
-                      }) as any[]);
+                    // Collect all descendant group shapes (recursively for any level of nesting)
+                    const allPageShapes = editorInstance.getCurrentPageShapes();
+                    const allGroups = (allPageShapes.filter((s) => (s as any).type === 'task-group') as any[]);
+
+                    const descendantGroupShapes: any[] = [];
+                    const relevantGroupHeadingIds = new Set<string>();
+                    const relevantGroupTitles = new Set<string>();
+                    if (groupHeadingId) relevantGroupHeadingIds.add(groupHeadingId);
+                    relevantGroupTitles.add(groupTitle);
+
+                    const queue: Array<{ headingId?: string; title: string }> = [{ headingId: groupHeadingId, title: groupTitle }];
+                    const visitedGroupIds = new Set<string>();
+                    visitedGroupIds.add(to.id);
+
+                    while (queue.length > 0) {
+                      const currentParent = queue.shift()!;
+                      for (const g of allGroups) {
+                        if (!visitedGroupIds.has(g.id)) {
+                          const matchById = currentParent.headingId && g.props?.parentId === currentParent.headingId;
+                          const pt = ((g.props?.parentTitle || '') as string).trim().toLowerCase();
+                          const matchByTitle = pt === currentParent.title.toLowerCase() &&
+                            (!groupBranch || !g.props?.branchTitle || g.props.branchTitle.toLowerCase() === groupBranch.toLowerCase());
+
+                          if (matchById || matchByTitle) {
+                            visitedGroupIds.add(g.id);
+                            descendantGroupShapes.push(g);
+                            const childHeadingId = g.props?.headingId;
+                            const childTitle = ((g.props?.title || '') as string).trim();
+                            if (childHeadingId) relevantGroupHeadingIds.add(childHeadingId);
+                            if (childTitle) {
+                              relevantGroupTitles.add(childTitle.toLowerCase());
+                              queue.push({ headingId: childHeadingId, title: childTitle });
+                            }
+                          }
+                        }
+                      }
+                    }
+
+                    const tasksToMove = (allPageShapes.filter((s) => {
+                      if ((s as any).type !== 'task') return false;
+                      const taskHeadId = (s as any).props?.groupHeadingId;
+                      if (taskHeadId && relevantGroupHeadingIds.size > 0) {
+                        return relevantGroupHeadingIds.has(taskHeadId);
+                      }
+                      const tg = (((s as any).props?.groupTitle || '') as string).trim().toLowerCase();
+                      if (!relevantGroupTitles.has(tg)) return false;
+                      if (groupBranch && (s as any).props?.branchTitle) {
+                        return (s as any).props.branchTitle.toLowerCase() === groupBranch.toLowerCase();
+                      }
+                      return true;
+                    }) as any[]);
 
                     const updates: any[] = [];
-                    for (const t of tasksInGroup) {
+                    for (const cg of descendantGroupShapes) {
+                      if (!selectedIds.has(cg.id)) {
+                        updates.push({
+                          id: cg.id,
+                          type: 'task-group',
+                          x: cg.x + dx,
+                          y: cg.y + dy,
+                        });
+                      }
+                    }
+                    for (const t of tasksToMove) {
                       if (!selectedIds.has(t.id)) {
                         updates.push({
                           id: t.id,
@@ -3603,11 +3707,25 @@ export default function App() {
         const existingGroupShapes = allShapes.filter((s) => (s as any).type === 'task-group') as any[];
         let newGroupX = 80;
         let newGroupY = 80;
+        const MAX_GROUPS_PER_ROW = 5;
         if (existingGroupShapes.length > 0) {
-          const maxRight = Math.max(...existingGroupShapes.map((g) => (g.x ?? 0) + (g.props?.w ?? 360)));
-          const refY = Math.min(...existingGroupShapes.map((g) => g.y ?? 80));
-          newGroupX = maxRight + 40;
-          newGroupY = refY;
+          if (existingGroupShapes.length % MAX_GROUPS_PER_ROW === 0) {
+            // Wrap to next row to accommodate up to 10 sections in a clean 2-row grid
+            const maxBottom = Math.max(...existingGroupShapes.map((g) => (g.y ?? 80) + (g.props?.h ?? 240)));
+            newGroupX = 80;
+            newGroupY = maxBottom + 64;
+          } else {
+            const maxBottom = Math.max(...existingGroupShapes.map((g) => (g.y ?? 80) + (g.props?.h ?? 240)));
+            const currentRowShapes = existingGroupShapes.filter(
+              (g) => (g.y ?? 80) >= maxBottom - 350
+            );
+            const maxRightInRow = Math.max(
+              ...currentRowShapes.map((g) => (g.x ?? 80) + (g.props?.w ?? 360))
+            );
+            const rowY = currentRowShapes[0]?.y ?? 80;
+            newGroupX = maxRightInRow + 40;
+            newGroupY = rowY;
+          }
         }
 
         editor.createShape({
@@ -5146,8 +5264,8 @@ export default function App() {
                     const isSectionActive = taskFilters.section.toLowerCase() === grp.title.toLowerCase();
                     return (
                       <button
-                        id={`btn-filter-section-${grp.title.toLowerCase().replace(/\s+/g, '-')}`}
-                        key={grp.title}
+                        id={`btn-filter-section-${(grp.id || grp.title).toLowerCase().replace(/\s+/g, '-')}`}
+                        key={grp.id || `${grp.branchTitle || ''}-${grp.title}`}
                         type="button"
                         onClick={() => {
                           setTaskFilters((prev) => ({
@@ -5164,7 +5282,12 @@ export default function App() {
                             : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-high)]'
                         }`}
                       >
-                        <span className="truncate max-w-[140px]">## {grp.title}</span>
+                        <span
+                          className="truncate max-w-[140px]"
+                          title={grp.path ? grp.path : (grp.parentTitle ? `${grp.parentTitle} > ${grp.title}` : grp.title)}
+                        >
+                          {'#'.repeat(grp.level || 2)} {grp.title}
+                        </span>
                         <span className="text-[10px] font-mono opacity-80">
                           {doneInGrp}/{grp.tasks.length}
                         </span>
@@ -5637,6 +5760,11 @@ export default function App() {
                         setIsTaskDetailsOpen(true);
                       }}
                       selectedTaskId={selectedTaskShapeId}
+                      onToggleSubtask={(taskId, subtaskIndex) => {
+                        setMarkdownInput((curr) =>
+                          toggleSubtaskInMarkdown(curr, taskId, subtaskIndex)
+                        );
+                      }}
                       onOpenNewTaskModalWithGroup={(groupOrStatus) => {
                         handleOpenNewTaskModal(groupOrStatus);
                       }}

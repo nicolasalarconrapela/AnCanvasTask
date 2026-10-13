@@ -20,6 +20,7 @@ export interface GroupVisualState {
   width: number;
   height: number;
   isCollapsed?: boolean;
+  color?: string;
 }
 
 export interface CanvasVisualDocument {
@@ -1141,6 +1142,7 @@ export function extractVisualStateFromEditor(editor: Editor): {
           y: s.y,
           width: s.props?.w || 360,
           height: s.props?.h || 200,
+          color: s.props?.color,
         });
       }
     }

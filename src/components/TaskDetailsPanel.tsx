@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLingui } from '@lingui/react';
 import { msg, plural } from '@lingui/core/macro';
-import { TaskPriority, TaskStatus } from '../shapes/TaskShapeUtil';
+import { TaskPriority, TaskStatus, SubtaskItem } from '../shapes/TaskShapeUtil';
 
 export interface TaskDetailsData {
   taskId: string;
@@ -11,7 +11,7 @@ export interface TaskDetailsData {
   priority: TaskPriority;
   status: TaskStatus;
   tags?: string[];
-  subtasks?: { total: number; completed: number };
+  subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
   groupTitle?: string;
   hasMissingId?: boolean;
@@ -841,6 +841,54 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
                 }}
               />
             </div>
+
+            {task.subtasks.items && task.subtasks.items.length > 0 && (
+              <div className="border-l-2 border-[var(--outline)] pl-2 space-y-1 mt-1.5">
+                {task.subtasks.items.map((sub, idx) => (
+                  <div key={idx} className="flex items-start gap-1.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.dispatchEvent(
+                          new CustomEvent('antask:toggle-subtask', {
+                            detail: {
+                              taskId: task.taskId,
+                              subtaskIndex: idx,
+                              completed: !sub.completed,
+                              taskTitle: task.title,
+                            },
+                          })
+                        );
+                      }}
+                      className="mt-0.5 flex-shrink-0 flex items-center justify-center cursor-pointer focus:outline-none"
+                    >
+                      <span
+                        className={`w-3 h-3 rounded border flex items-center justify-center transition-all ${
+                          sub.completed
+                            ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)]'
+                            : 'bg-[var(--surface-container-high)] border-[var(--outline)] hover:border-[var(--primary)]'
+                        }`}
+                      >
+                        {sub.completed && (
+                          <svg className="w-2 h-2 stroke-current stroke-[3]" fill="none" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                    </button>
+                    <span
+                      className={`flex-1 ${
+                        sub.completed
+                          ? 'text-[var(--on-surface-variant)] line-through opacity-75'
+                          : 'text-[var(--on-surface)]'
+                      }`}
+                    >
+                      {sub.title}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

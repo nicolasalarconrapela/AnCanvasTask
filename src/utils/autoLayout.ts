@@ -1,5 +1,5 @@
 import dagre from 'dagre';
-import { Editor } from 'tldraw';
+import { Editor, createShapeId } from 'tldraw';
 import { scanTaskBlocks } from './markdownSync';
 
 export interface AutoLayoutResult {
@@ -12,7 +12,7 @@ export interface AutoLayoutResult {
  * placing blockers above blocked tasks, preventing overlaps, and sizing groups appropriately.
  */
 export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutResult {
-  const { taskBlocks, groupHeadings } = scanTaskBlocks(markdown);
+  const { taskBlocks, groupHeadings, parentHeadings } = scanTaskBlocks(markdown);
   const shapes = editor.getCurrentPageShapes();
 
   // Find all task shapes and task-group shapes
@@ -43,8 +43,12 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
 
   // Organize tasks by group
   const tasksByGroup = new Map<string, typeof taskBlocks>();
+  const headingParentMap = new Map<string, string | undefined>();
+  const headingLevelMap = new Map<string, number>();
   groupHeadings.forEach((gh) => {
     tasksByGroup.set(gh.title, []);
+    headingParentMap.set(gh.title.toLowerCase(), gh.parentTitle);
+    headingLevelMap.set(gh.title.toLowerCase(), gh.level || 2);
   });
 
   taskBlocks.forEach((tb) => {
@@ -60,30 +64,42 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
   const GROUP_PADDING_X = 24;
   const GROUP_PADDING_TOP = 64; // Space for header (## Section)
   const GROUP_PADDING_BOTTOM = 24;
-  const GROUP_GAP_X = 48;
-
-  const updates: any[] = [];
-  let currentGroupX = 80;
+  const GROUP_START_X = 80;
   const GROUP_START_Y = 80;
+  const GROUP_GAP_X = 48;
+  const GROUP_GAP_Y = 64;
+  const MAX_COLS_PER_ROW = 5;
 
-  // Process each group using Dagre for DAG dependency hierarchical ordering
+  interface GroupLayoutInfo {
+    groupTitle: string;
+    tasks: typeof taskBlocks;
+    groupShape: any | undefined;
+    width: number;
+    height: number;
+    minX: number;
+    minY: number;
+    parentTitle?: string;
+    g?: dagre.graphlib.Graph;
+  }
+
+  const groupLayouts: GroupLayoutInfo[] = [];
+
+  // Pass 1: Compute DAG layout and dimensions for each group independently
   for (const [groupTitle, tasks] of tasksByGroup.entries()) {
+    const groupShape = groupTitleToShapeMap.get(groupTitle.toLowerCase());
+    const parentTitle = headingParentMap.get(groupTitle.toLowerCase());
+
     if (tasks.length === 0) {
-      const groupShape = groupTitleToShapeMap.get(groupTitle.toLowerCase());
-      if (groupShape) {
-        updates.push({
-          id: groupShape.id,
-          type: 'task-group',
-          x: currentGroupX,
-          y: GROUP_START_Y,
-          props: {
-            ...groupShape.props,
-            w: 360,
-            h: 200,
-          },
-        });
-      }
-      currentGroupX += 360 + GROUP_GAP_X;
+      groupLayouts.push({
+        groupTitle,
+        tasks,
+        groupShape,
+        width: 360,
+        height: 200,
+        minX: 0,
+        minY: 0,
+        parentTitle,
+      });
       continue;
     }
 
@@ -167,55 +183,241 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
       contentHeight + GROUP_PADDING_TOP + GROUP_PADDING_BOTTOM
     );
 
-    const groupX = currentGroupX;
-    const groupY = GROUP_START_Y;
+    groupLayouts.push({
+      groupTitle,
+      tasks,
+      groupShape,
+      width: groupWidth,
+      height: groupHeight,
+      minX,
+      minY,
+      parentTitle,
+      g,
+    });
+  }
 
-    // Position group shape
-    const groupShape = groupTitleToShapeMap.get(groupTitle.toLowerCase());
-    if (groupShape) {
-      updates.push({
-        id: groupShape.id,
-        type: 'task-group',
-        x: groupX,
-        y: groupY,
-        props: {
-          ...groupShape.props,
-          w: groupWidth,
-          h: groupHeight,
-          count: tasks.length,
-        },
+  // Pass 2: Distribute groups into layout
+  const updates: any[] = [];
+
+  if (parentHeadings && parentHeadings.length > 0) {
+    // Hierarchical layout: Group ## sections under their # parent macro container
+    let currentParentY = GROUP_START_Y;
+    const parentStartX = GROUP_START_X;
+
+    for (const parent of parentHeadings) {
+      const childLayouts = groupLayouts.filter((gl) => {
+        if (gl.parentTitle) {
+          return gl.parentTitle.toLowerCase() === parent.title.toLowerCase();
+        }
+        return parentHeadings.length === 1;
       });
-    }
 
-    // Position task shapes inside the group
-    tasks.forEach((t) => {
-      const taskId = (t.detectedId || `task-${t.taskLineIndex}`).toLowerCase();
-      const node = g.node(taskId);
-      const shape = taskIdToShapeMap.get(taskId);
+      if (childLayouts.length === 0) continue;
 
-      if (shape && node) {
-        const nodeLeft = node.x - node.width / 2;
-        const nodeTop = node.y - node.height / 2;
+      const childRows: GroupLayoutInfo[][] = [];
+      for (let i = 0; i < childLayouts.length; i += MAX_COLS_PER_ROW) {
+        childRows.push(childLayouts.slice(i, i + MAX_COLS_PER_ROW));
+      }
 
-        const taskX = groupX + GROUP_PADDING_X + (nodeLeft - minX);
-        const taskY = groupY + GROUP_PADDING_TOP + (nodeTop - minY);
+      let currentChildRowY = currentParentY + 64; // Header space for '# Parent'
+      let maxParentRight = parentStartX + 360;
+      let maxParentBottom = currentChildRowY;
+      let totalTasksInParent = 0;
+      let completedTasksInParent = 0;
 
+      for (const row of childRows) {
+        let currentGroupX = parentStartX + 32;
+        let rowMaxHeight = 0;
+
+        for (const info of row) {
+          if (info.height > rowMaxHeight) {
+            rowMaxHeight = info.height;
+          }
+
+          const groupX = currentGroupX;
+          const groupY = currentChildRowY;
+
+          if (groupX + info.width > maxParentRight) {
+            maxParentRight = groupX + info.width;
+          }
+          if (groupY + info.height > maxParentBottom) {
+            maxParentBottom = groupY + info.height;
+          }
+
+          totalTasksInParent += info.tasks.length;
+          completedTasksInParent += info.tasks.filter((t) => t.rawTaskLine.includes('[x]') || t.rawTaskLine.includes('[X]')).length;
+
+          // Position child '##' group shape
+          if (info.groupShape) {
+            updates.push({
+              id: info.groupShape.id,
+              type: 'task-group',
+              x: groupX,
+              y: groupY,
+              props: {
+                ...info.groupShape.props,
+                w: info.width,
+                h: info.height,
+                count: info.tasks.length,
+                level: headingLevelMap.get(info.groupTitle.toLowerCase()) || 2,
+                parentTitle: parent.title,
+                isContainer: false,
+              },
+            });
+          }
+
+          // Position task shapes inside this '##' group
+          if (info.g && info.tasks.length > 0) {
+            info.tasks.forEach((t) => {
+              const taskId = (t.detectedId || `task-${t.taskLineIndex}`).toLowerCase();
+              const node = info.g!.node(taskId);
+              const shape = taskIdToShapeMap.get(taskId);
+
+              if (shape && node) {
+                const nodeLeft = node.x - node.width / 2;
+                const nodeTop = node.y - node.height / 2;
+
+                const taskX = groupX + GROUP_PADDING_X + (nodeLeft - info.minX);
+                const taskY = groupY + GROUP_PADDING_TOP + (nodeTop - info.minY);
+
+                updates.push({
+                  id: shape.id,
+                  type: 'task',
+                  x: taskX,
+                  y: taskY,
+                  props: {
+                    ...shape.props,
+                    groupTitle: info.groupTitle,
+                    w: CARD_WIDTH,
+                    h: CARD_HEIGHT,
+                  },
+                });
+              }
+            });
+          }
+
+          currentGroupX += info.width + GROUP_GAP_X;
+        }
+
+        currentChildRowY += rowMaxHeight + GROUP_GAP_Y;
+      }
+
+      const parentW = (maxParentRight - parentStartX) + 32;
+      const parentH = (maxParentBottom - currentParentY) + 32;
+
+      // Update or create parent '#' macro-group shape
+      const parentShape = groupTitleToShapeMap.get(parent.title.toLowerCase());
+      if (parentShape) {
         updates.push({
-          id: shape.id,
-          type: 'task',
-          x: taskX,
-          y: taskY,
+          id: parentShape.id,
+          type: 'task-group',
+          x: parentStartX,
+          y: currentParentY,
           props: {
-            ...shape.props,
-            groupTitle: groupTitle,
-            w: CARD_WIDTH,
-            h: CARD_HEIGHT,
+            ...parentShape.props,
+            w: parentW,
+            h: parentH,
+            level: parent.level || 1,
+            parentTitle: parent.parentTitle,
+            isContainer: true,
+            count: totalTasksInParent,
+            completedCount: completedTasksInParent,
           },
         });
+      } else {
+        editor.createShape({
+          id: createShapeId(),
+          type: 'task-group' as const,
+          x: parentStartX,
+          y: currentParentY,
+          props: {
+            w: parentW,
+            h: parentH,
+            title: parent.title,
+            count: totalTasksInParent,
+            completedCount: completedTasksInParent,
+            level: parent.level || 1,
+            parentTitle: parent.parentTitle,
+            isContainer: true,
+          },
+        } as any);
       }
-    });
 
-    currentGroupX += groupWidth + GROUP_GAP_X;
+      currentParentY += parentH + 64;
+    }
+  } else {
+    // Flat 5-column grid layout when no '#' parent headings exist
+    const rows: GroupLayoutInfo[][] = [];
+    for (let i = 0; i < groupLayouts.length; i += MAX_COLS_PER_ROW) {
+      rows.push(groupLayouts.slice(i, i + MAX_COLS_PER_ROW));
+    }
+
+    let currentRowY = GROUP_START_Y;
+    for (const row of rows) {
+      let currentGroupX = GROUP_START_X;
+      let rowMaxHeight = 0;
+
+      for (const info of row) {
+        if (info.height > rowMaxHeight) {
+          rowMaxHeight = info.height;
+        }
+
+        const groupX = currentGroupX;
+        const groupY = currentRowY;
+
+        // Position group shape
+        if (info.groupShape) {
+          updates.push({
+            id: info.groupShape.id,
+            type: 'task-group',
+            x: groupX,
+            y: groupY,
+            props: {
+              ...info.groupShape.props,
+              w: info.width,
+              h: info.height,
+              count: info.tasks.length,
+              level: headingLevelMap.get(info.groupTitle.toLowerCase()) || 2,
+              isContainer: false,
+            },
+          });
+        }
+
+        // Position task shapes inside the group
+        if (info.g && info.tasks.length > 0) {
+          info.tasks.forEach((t) => {
+            const taskId = (t.detectedId || `task-${t.taskLineIndex}`).toLowerCase();
+            const node = info.g!.node(taskId);
+            const shape = taskIdToShapeMap.get(taskId);
+
+            if (shape && node) {
+              const nodeLeft = node.x - node.width / 2;
+              const nodeTop = node.y - node.height / 2;
+
+              const taskX = groupX + GROUP_PADDING_X + (nodeLeft - info.minX);
+              const taskY = groupY + GROUP_PADDING_TOP + (nodeTop - info.minY);
+
+              updates.push({
+                id: shape.id,
+                type: 'task',
+                x: taskX,
+                y: taskY,
+                props: {
+                  ...shape.props,
+                  groupTitle: info.groupTitle,
+                  w: CARD_WIDTH,
+                  h: CARD_HEIGHT,
+                },
+              });
+            }
+          });
+        }
+
+        currentGroupX += info.width + GROUP_GAP_X;
+      }
+
+      currentRowY += rowMaxHeight + GROUP_GAP_Y;
+    }
   }
 
   // Apply all shape position updates to editor in one atomic batch

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
-import { TaskPriority, TaskStatus } from '../shapes/TaskShapeUtil';
+import { TaskPriority, TaskStatus, SubtaskItem, SECTION_COLOR_OPTIONS } from '../shapes/TaskShapeUtil';
 import { scanTaskBlocks, TaskBlockInfo } from '../utils/markdownSync';
 import { TaskFilterState } from './FilterBar';
 import { SkeletonKanbanColumn } from './Skeletons';
@@ -17,7 +17,7 @@ export interface KanbanTask {
   status: TaskStatus;
   groupTitle: string;
   tags?: string[];
-  subtasks?: { total: number; completed: number };
+  subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
   isDuplicateId?: boolean;
   hasMissingId?: boolean;
@@ -56,6 +56,7 @@ export interface KanbanBoardProps {
   filters?: TaskFilterState;
   onResetFilters?: () => void;
   isLoading?: boolean;
+  onToggleSubtask?: (taskId: string, subtaskIndex: number) => void;
 }
 
 type GroupByMode = 'status' | 'section';
@@ -99,6 +100,7 @@ export function KanbanBoard({
   filters,
   onResetFilters,
   isLoading = false,
+  onToggleSubtask,
 }: KanbanBoardProps) {
   const { i18n } = useLingui();
   const [groupBy, setGroupBy] = useState<GroupByMode>('status');
@@ -110,12 +112,46 @@ export function KanbanBoard({
   const [editingTitleText, setEditingTitleText] = useState<string>('');
   const [activeMenuTaskId, setActiveMenuTaskId] = useState<string | null>(null);
   const [activeMenuSectionId, setActiveMenuSectionId] = useState<string | null>(null);
+  const [collapsedSubtaskTaskIds, setCollapsedSubtaskTaskIds] = useState<Set<string>>(new Set());
+
+  const toggleSubtasksCollapse = (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCollapsedSubtaskTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSubtaskInKanban = (taskId: string, subtaskIndex: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onToggleSubtask) {
+      onToggleSubtask(taskId, subtaskIndex);
+    } else {
+      window.dispatchEvent(
+        new CustomEvent('antask:toggle-subtask', {
+          detail: { taskId, subtaskIndex },
+        })
+      );
+    }
+  };
 
   // Parse tasks from markdown
-  const { allTasks, sections } = useMemo(() => {
+  const { allTasks, sections, sectionColorMap } = useMemo(() => {
     const { taskBlocks, groupHeadings } = scanTaskBlocks(markdown);
     const secList = groupHeadings.map((g) => g.title);
     if (secList.length === 0) secList.push('General');
+
+    const colorMap = new Map<string, string>();
+    groupHeadings.forEach((g) => {
+      if (g.color) {
+        colorMap.set(g.title.toLowerCase(), g.color);
+      }
+    });
 
     const tasks: KanbanTask[] = taskBlocks.map((b) => {
       const isCompleted = b.rawTaskLine.includes('[x]') || b.rawTaskLine.includes('[X]');
@@ -150,7 +186,7 @@ export function KanbanBoard({
       };
     });
 
-    return { allTasks: tasks, sections: secList };
+    return { allTasks: tasks, sections: secList, sectionColorMap: colorMap };
   }, [markdown]);
 
   // Filter & Sort tasks according to search, filters & sort state
@@ -823,8 +859,75 @@ export function KanbanBoard({
                               </div>
                             )}
 
-                            {/* Middle Row: Unboxed Tags & Subtasks */}
-                            {(task.tags?.length || task.subtasks) && (
+                            {/* Subtasks Section (Option A: Checklist Integrado Compacto) */}
+                            {task.subtasks && task.subtasks.items && task.subtasks.items.length > 0 && (
+                              <div id={`kanban-card-subtasks-${task.taskId}`} className="my-1 text-xs">
+                                <button
+                                  type="button"
+                                  onClick={(e) => toggleSubtasksCollapse(task.taskId, e)}
+                                  className="flex items-center gap-1 text-[10px] font-mono font-medium text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors py-0.5 cursor-pointer focus:outline-none"
+                                  title={collapsedSubtaskTaskIds.has(task.taskId) ? i18n._(msg`Mostrar subtareas`) : i18n._(msg`Ocultar subtareas`)}
+                                >
+                                  <span className="text-[9px] select-none">
+                                    {collapsedSubtaskTaskIds.has(task.taskId) ? '▸' : '▾'}
+                                  </span>
+                                  <span>{i18n._(msg`Subtareas`)}</span>
+                                  <span className="opacity-75">({task.subtasks.completed}/{task.subtasks.total})</span>
+                                </button>
+
+                                {!collapsedSubtaskTaskIds.has(task.taskId) && (
+                                  <div className="border-l-2 border-[var(--outline)] pl-2 space-y-1 mt-1 mb-1">
+                                    {task.subtasks.items.map((sub, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="flex items-start gap-1.5 text-[11px] leading-tight group/subtask"
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={(e) => handleToggleSubtaskInKanban(task.taskId, idx, e)}
+                                          aria-label={
+                                            sub.completed
+                                              ? i18n._(msg`Marcar subtarea como pendiente`)
+                                              : i18n._(msg`Marcar subtarea como completada`)
+                                          }
+                                          className="mt-0.5 flex-shrink-0 flex items-center justify-center cursor-pointer focus:outline-none"
+                                        >
+                                          <span
+                                            className={`w-3 h-3 rounded border flex items-center justify-center transition-all ${
+                                              sub.completed
+                                                ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)]'
+                                                : 'bg-[var(--surface-container-high)] border-[var(--outline)] hover:border-[var(--primary)]'
+                                            }`}
+                                          >
+                                            {sub.completed && (
+                                              <svg
+                                                className="w-2 h-2 stroke-current stroke-[3]"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                              >
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                              </svg>
+                                            )}
+                                          </span>
+                                        </button>
+                                        <span
+                                          className={`flex-1 transition-colors select-none ${
+                                            sub.completed
+                                              ? 'text-[var(--on-surface-variant)] line-through opacity-75'
+                                              : 'text-[var(--on-surface)]'
+                                          }`}
+                                        >
+                                          <HighlightText text={sub.title} query={searchQuery} />
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Middle Row: Unboxed Tags & Subtasks counter if collapsed or no items */}
+                            {(task.tags?.length || (task.subtasks && (!task.subtasks.items?.length || collapsedSubtaskTaskIds.has(task.taskId)))) && (
                               <div id="div-kanbanboard-20" className="flex items-center gap-1.5 flex-wrap text-[10px] text-[var(--on-surface-variant)]">
                                 {task.tags?.slice(0, 3).map((t) => (
                                   <span key={t} className="font-mono text-[var(--on-surface-variant)]">
@@ -836,7 +939,7 @@ export function KanbanBoard({
                                     +{task.tags.length - 3}
                                   </span>
                                 )}
-                                {task.subtasks && (
+                                {task.subtasks && (!task.subtasks.items?.length || collapsedSubtaskTaskIds.has(task.taskId)) && (
                                   <span className="font-mono text-[var(--on-surface-variant)] flex items-center gap-0.5">
                                     <span>✓</span>
                                     <span>{task.subtasks.completed}/{task.subtasks.total}</span>
@@ -901,6 +1004,8 @@ export function KanbanBoard({
               const isDropTarget = dragOverColumn === sec;
 
               const secId = sec.toLowerCase().replace(/[^a-z0-9]/g, '-');
+              const secColorKey = sectionColorMap.get(sec.toLowerCase()) || 'default';
+              const colorOpt = SECTION_COLOR_OPTIONS[secColorKey] || SECTION_COLOR_OPTIONS.default;
 
               return (
                 <div
@@ -909,10 +1014,14 @@ export function KanbanBoard({
                   onDragOver={(e) => handleDragOver(e, sec)}
                   onDragLeave={handleDragLeave}
                   onDrop={(e) => handleDrop(e, sec)}
-                  className={`w-[85vw] sm:w-80 shrink-0 snap-center sm:snap-align-none flex flex-col rounded-md bg-[var(--surface-container)] border transition-all duration-120 ${
+                  style={{
+                    backdropFilter: 'blur(12px)',
+                    WebkitBackdropFilter: 'blur(12px)',
+                  }}
+                  className={`w-[85vw] sm:w-80 shrink-0 snap-center sm:snap-align-none flex flex-col rounded-md backdrop-blur-md ${colorOpt.leafBgClass} border transition-all duration-120 ${
                     isDropTarget
                       ? 'border-[var(--primary)] bg-[var(--primary)]/5'
-                      : 'border-[var(--outline)]'
+                      : colorOpt.leafBorderClass
                   }`}
                 >
                   {/* Column Header */}
@@ -958,8 +1067,56 @@ export function KanbanBoard({
                       {activeMenuSectionId === secId && (
                         <div
                           id={`kanban-section-menu-dropdown-${secId}`}
-                          className="absolute top-8 right-0 z-50 bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1 flex flex-col gap-0.5 min-w-[160px] text-xs font-sans"
+                          className="absolute top-8 right-0 z-50 bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1.5 flex flex-col gap-1 min-w-[170px] text-xs font-sans"
                         >
+                          {/* Selector de color blur */}
+                          <div className="px-1.5 py-1 border-b border-[var(--outline)] pb-1.5">
+                            <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--on-surface-variant)] mb-1 flex items-center justify-between">
+                              <span>{i18n._(msg`Fondo Blur`)}</span>
+                              {secColorKey !== 'default' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveMenuSectionId(null);
+                                    window.dispatchEvent(
+                                      new CustomEvent('antask:section-color-changed', {
+                                        detail: { groupTitle: sec, color: '' },
+                                      })
+                                    );
+                                  }}
+                                  className="text-[9px] hover:underline text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer"
+                                >
+                                  {i18n._(msg`Restablecer`)}
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-4 gap-1.5 py-0.5">
+                              {Object.entries(SECTION_COLOR_OPTIONS).map(([cKey, opt]) => (
+                                <button
+                                  key={cKey}
+                                  id={`btn-kanban-menu-color-${cKey}-${secId}`}
+                                  type="button"
+                                  title={opt.name}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveMenuSectionId(null);
+                                    window.dispatchEvent(
+                                      new CustomEvent('antask:section-color-changed', {
+                                        detail: { groupTitle: sec, color: cKey === 'default' ? '' : cKey },
+                                      })
+                                    );
+                                  }}
+                                  className={`w-5 h-5 rounded-full flex items-center justify-center transition-all cursor-pointer ${opt.swatchClass} ${
+                                    secColorKey === cKey
+                                      ? 'ring-2 ring-offset-1 ring-offset-[var(--surface-container)] ring-[var(--primary)] scale-110'
+                                      : 'opacity-80 hover:opacity-100 hover:scale-105'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                          </div>
+
                           <button
                             id={`btn-kanban-menu-add-task-sec-${secId}`}
                             type="button"
