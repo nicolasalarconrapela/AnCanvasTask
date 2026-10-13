@@ -17,6 +17,7 @@ export interface ParsedMarkdownTask {
 export interface ParsedGroup {
   title: string;
   tasks: ParsedMarkdownTask[];
+  level?: number;
   parentTitle?: string;
 }
 
@@ -24,6 +25,7 @@ export function parseTasksMarkdown(markdown: string): ParsedGroup[] {
   const { taskBlocks, groupHeadings } = scanTaskBlocks(markdown);
   const groupsMap = new Map<string, ParsedMarkdownTask[]>();
   const parentMap = new Map<string, string | undefined>();
+  const levelMap = new Map<string, number>();
 
   // Ensure headings are preserved in order, excluding "Notas" / "Notes" sections
   groupHeadings.forEach((gh) => {
@@ -31,6 +33,7 @@ export function parseTasksMarkdown(markdown: string): ParsedGroup[] {
     if (lower !== 'notas' && lower !== 'notes') {
       groupsMap.set(gh.title, []);
       parentMap.set(gh.title, gh.parentTitle);
+      levelMap.set(gh.title, gh.level || 2);
     }
   });
 
@@ -58,6 +61,7 @@ export function parseTasksMarkdown(markdown: string): ParsedGroup[] {
     parsedGroups.push({
       title,
       tasks,
+      level: levelMap.get(title) || 2,
       parentTitle: parentMap.get(title),
     });
   });

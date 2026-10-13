@@ -1116,9 +1116,16 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     const cardCenterX = current.x + cardW / 2;
     const cardCenterY = current.y + cardH / 2;
 
-    const groupShapes = this.editor
+    const allGroupShapes = this.editor
       .getCurrentPageShapes()
-      .filter((s) => (s as any).type === 'task-group' && (s as any).props?.level !== 1) as any[];
+      .filter((s) => (s as any).type === 'task-group') as any[];
+    const parentTitlesSet = new Set(
+      allGroupShapes.map((g) => ((g.props?.parentTitle || '') as string).trim().toLowerCase()).filter(Boolean)
+    );
+    const groupShapes = allGroupShapes.filter((g) => {
+      const gTitle = ((g.props?.title || '') as string).trim().toLowerCase();
+      return !g.props?.isContainer && g.props?.level !== 1 && !parentTitlesSet.has(gTitle);
+    });
 
     let capturedGroup: any = null;
     const MAGNETIC_MARGIN = 50;
@@ -1159,9 +1166,16 @@ export class TaskShapeUtil extends ShapeUtil<any> {
       this.activeSuctionGroupId = null;
     }
 
-    const groupShapes = this.editor
+    const allGroupShapes = this.editor
       .getCurrentPageShapes()
-      .filter((s) => (s as any).type === 'task-group' && (s as any).props?.level !== 1) as any[];
+      .filter((s) => (s as any).type === 'task-group') as any[];
+    const parentTitlesSet = new Set(
+      allGroupShapes.map((g) => ((g.props?.parentTitle || '') as string).trim().toLowerCase()).filter(Boolean)
+    );
+    const groupShapes = allGroupShapes.filter((g) => {
+      const gTitle = ((g.props?.title || '') as string).trim().toLowerCase();
+      return !g.props?.isContainer && g.props?.level !== 1 && !parentTitlesSet.has(gTitle);
+    });
 
     const cardW = current.props?.w || 320;
     const cardH = current.props?.h || 110;
@@ -1313,14 +1327,27 @@ export function updateAllGroupCounts(editor: Editor) {
   const updates: any[] = [];
   for (const g of groupShapes) {
     const gTitle = (g.props?.title || '').trim().toLowerCase();
+    const childGroups = groupShapes.filter(
+      (cg) => cg.id !== g.id && (cg.props?.parentTitle || '').trim().toLowerCase() === gTitle
+    );
     let tasksInGroup: any[] = [];
-
-    if (g.props?.level === 1) {
-      const childGroups = groupShapes.filter(
-        (cg) => cg.props?.level !== 1 && (cg.props?.parentTitle || '').trim().toLowerCase() === gTitle
+    if (childGroups.length > 0 || g.props?.isContainer || g.props?.level === 1) {
+      const descendantTitles = new Set<string>([gTitle]);
+      const addDescendants = (pLower: string) => {
+        for (const cg of groupShapes) {
+          if (cg.id !== g.id && (cg.props?.parentTitle || '').trim().toLowerCase() === pLower) {
+            const cLower = (cg.props?.title || '').trim().toLowerCase();
+            if (!descendantTitles.has(cLower)) {
+              descendantTitles.add(cLower);
+              addDescendants(cLower);
+            }
+          }
+        }
+      };
+      addDescendants(gTitle);
+      tasksInGroup = taskShapes.filter((t) =>
+        descendantTitles.has((t.props?.groupTitle || '').trim().toLowerCase())
       );
-      const childGroupTitles = new Set(childGroups.map((cg) => (cg.props?.title || '').trim().toLowerCase()));
-      tasksInGroup = taskShapes.filter((t) => childGroupTitles.has((t.props?.groupTitle || '').trim().toLowerCase()));
     } else {
       tasksInGroup = taskShapes.filter(
         (t) => (t.props?.groupTitle || '').trim().toLowerCase() === gTitle
@@ -1350,7 +1377,9 @@ export function updateAllGroupCounts(editor: Editor) {
 
 function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
   const { title, count, completedCount, w, h, level } = shape.props;
-  const isLevel1 = level === 1;
+  const isContainer = Boolean(shape.props.isContainer || level === 1);
+  const headingLevel = Math.max(1, Math.min(6, level || (isContainer ? 1 : 2)));
+  const headingPrefix = '#'.repeat(headingLevel);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -1427,7 +1456,7 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
         id={`task-group-container-${shape.id}`}
         onContextMenu={handleContextMenu}
         className={
-          isLevel1
+          isContainer
             ? "w-full h-full rounded-xl bg-[var(--surface-container-lowest)]/50 border-2 border-dashed border-[var(--outline-variant)] p-4 flex flex-col justify-start select-none transition-colors relative"
             : "w-full h-full rounded-md bg-[var(--surface-container)]/30 border border-[var(--outline)] p-3 flex flex-col justify-start select-none transition-colors relative"
         }
@@ -1437,21 +1466,21 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
           id={`task-group-header-${shape.id}`}
           onContextMenu={handleContextMenu}
           className={
-            isLevel1
+            isContainer
               ? "flex items-center justify-between border-b border-[var(--outline-variant)]/60 pb-2.5 pointer-events-auto cursor-context-menu"
               : "flex items-center justify-between border-b border-[var(--outline)] pb-2 pointer-events-auto cursor-context-menu"
           }
         >
           <div id={`task-group-title-group-${shape.id}`} className="flex items-center gap-1.5">
-            <span className={isLevel1 ? "text-[var(--primary)] font-mono text-sm font-bold" : "text-[var(--on-surface-variant)] font-mono text-xs font-semibold"}>
-              {isLevel1 ? '#' : '##'}
+            <span className={isContainer ? "text-[var(--primary)] font-mono text-sm font-bold" : "text-[var(--on-surface-variant)] font-mono text-xs font-semibold"}>
+              {headingPrefix}
             </span>
-            <h2 className={isLevel1 ? "text-sm font-bold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[280px]" : "text-xs font-semibold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[180px]"}>
+            <h2 className={isContainer ? "text-sm font-bold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[280px]" : "text-xs font-semibold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[180px]"}>
               {title}
             </h2>
-            {isLevel1 ? (
+            {isContainer ? (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-[var(--on-surface-variant)] bg-[var(--surface-container-high)] border border-[var(--outline)]">
-                {i18n._(msg`Módulo #`)}
+                {headingPrefix}
               </span>
             ) : (
               <span className="suction-indicator items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-[var(--primary)] bg-[var(--primary)]/10 border border-[var(--primary)]/30">
@@ -1463,7 +1492,7 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
 
           <div id={`task-group-actions-${shape.id}`} className="flex items-center gap-1.5">
             {count > 0 && (
-              <span className={isLevel1 ? "text-xs font-mono font-medium text-[var(--on-surface-variant)] tabular-nums" : "text-[11px] font-mono text-[var(--on-surface-variant)] tabular-nums"}>
+              <span className={isContainer ? "text-xs font-mono font-medium text-[var(--on-surface-variant)] tabular-nums" : "text-[11px] font-mono text-[var(--on-surface-variant)] tabular-nums"}>
                 {completedCount > 0
                   ? i18n._(msg`${completedCount}/${count} completadas`)
                   : formatTaskCount(count)}
@@ -1480,9 +1509,9 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
                 setIsMenuOpen(!isMenuOpen);
               }}
               className="w-5 h-5 flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] rounded cursor-pointer transition-colors"
-              title={isLevel1 ? i18n._(msg`Opciones de módulo`) : i18n._(msg`Opciones de sección`)}
+              title={isContainer ? i18n._(msg`Opciones de contenedor`) : i18n._(msg`Opciones de sección`)}
             >
-              <svg className={isLevel1 ? "w-3.5 h-3.5" : "w-3 h-3"} fill="currentColor" viewBox="0 0 24 24">
+              <svg className={isContainer ? "w-3.5 h-3.5" : "w-3 h-3"} fill="currentColor" viewBox="0 0 24 24">
                 <circle cx="12" cy="5" r="2" />
                 <circle cx="12" cy="12" r="2" />
                 <circle cx="12" cy="19" r="2" />
@@ -1507,9 +1536,9 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
             className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1 flex flex-col gap-0.5 min-w-[170px] text-xs font-sans pointer-events-auto"
           >
             <div className="px-2 py-1 text-[11px] font-mono text-[var(--on-surface-variant)] border-b border-[var(--outline)] mb-0.5 truncate">
-              {isLevel1 ? `# ${title}` : `## ${title}`}
+              {`${headingPrefix} ${title}`}
             </div>
-            {!isLevel1 && (
+            {!isContainer && (
               <button
                 id={`btn-task-group-menu-add-task-${shape.id}`}
                 type="button"
@@ -1543,7 +1572,7 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
               className="px-2 py-1 rounded text-left text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 cursor-pointer transition-colors font-medium"
             >
               <span className="material-symbols-outlined text-[14px]">delete</span>
-              <span>{isLevel1 ? i18n._(msg`Eliminar módulo`) : i18n._(msg`Eliminar sección`)}</span>
+              <span>{isContainer ? i18n._(msg`Eliminar contenedor`) : i18n._(msg`Eliminar sección`)}</span>
             </button>
           </div>
         )}
@@ -1560,6 +1589,7 @@ export type GroupShapeProps = {
   completedCount: number;
   level?: number;
   parentTitle?: string;
+  isContainer?: boolean;
 };
 
 export type ITaskGroupShape = TLBaseShape<'task-group', GroupShapeProps>;
@@ -1575,6 +1605,7 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
     completedCount: T.number,
     level: T.optional(T.number),
     parentTitle: T.optional(T.string),
+    isContainer: T.optional(T.boolean),
   };
 
   getDefaultProps(): GroupShapeProps {
@@ -1585,6 +1616,7 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
       count: 0,
       completedCount: 0,
       level: 2,
+      isContainer: false,
     };
   }
 
@@ -1957,8 +1989,9 @@ export function populateCanvasWithGroups(
         title: group.title,
         count: taskCount,
         completedCount,
-        level: 2,
+        level: group.level || 2,
         parentTitle: group.parentTitle,
+        isContainer: false,
       },
     });
 
@@ -2105,27 +2138,22 @@ export function populateCanvasWithGroups(
     });
   });
 
-  // Pass 3: Create parent '#' macro-group shapes enclosing their child '##' sections
-  const parentGroupsMap = new Map<string, {
-    childShapes: typeof groupShapesToCreate;
-    totalTasks: number;
-    completedTasks: number;
-  }>();
+  // Pass 3: Create parent macro-group shapes enclosing their child sections
+  const { parentHeadings } = rawMarkdown ? scanTaskBlocks(rawMarkdown) : { parentHeadings: [] };
 
+  const parentHeadingInfoMap = new Map<string, { level: number; parentTitle?: string }>();
+  parentHeadings.forEach((ph) => {
+    parentHeadingInfoMap.set(ph.title.toLowerCase(), {
+      level: ph.level || 1,
+      parentTitle: ph.parentTitle,
+    });
+  });
+
+  // Also include any parentTitle found on child group shapes if not already present
   groupShapesToCreate.forEach((gs) => {
-    const pTitle = gs.props.parentTitle;
-    if (pTitle) {
-      if (!parentGroupsMap.has(pTitle)) {
-        parentGroupsMap.set(pTitle, {
-          childShapes: [],
-          totalTasks: 0,
-          completedTasks: 0,
-        });
-      }
-      const entry = parentGroupsMap.get(pTitle)!;
-      entry.childShapes.push(gs);
-      entry.totalTasks += gs.props.count;
-      entry.completedTasks += gs.props.completedCount;
+    const pt = gs.props.parentTitle;
+    if (pt && !parentHeadingInfoMap.has(pt.toLowerCase())) {
+      parentHeadingInfoMap.set(pt.toLowerCase(), { level: 1, parentTitle: undefined });
     }
   });
 
@@ -2134,28 +2162,57 @@ export function populateCanvasWithGroups(
   const MACRO_BOTTOM_PAD_Y = 28;
   const macroGroupShapesToCreate: any[] = [];
 
-  parentGroupsMap.forEach((entry, pTitle) => {
-    if (entry.childShapes.length === 0) return;
-    const minX = Math.min(...entry.childShapes.map((s) => s.x));
-    const minY = Math.min(...entry.childShapes.map((s) => s.y));
-    const maxRight = Math.max(...entry.childShapes.map((s) => s.x + s.props.w));
-    const maxBottom = Math.max(...entry.childShapes.map((s) => s.y + s.props.h));
+  // Sort parent headings by level descending so deeper parents (e.g. level 3) are bounded first,
+  // then enclosing higher-level parents (e.g. level 2 or level 1) can enclose them.
+  const sortedParents = Array.from(parentHeadingInfoMap.entries()).sort(
+    (a, b) => b[1].level - a[1].level
+  );
+
+  sortedParents.forEach(([pTitleLower, pInfo]) => {
+    const originalParentHeading = parentHeadings.find((ph) => ph.title.toLowerCase() === pTitleLower);
+    const childShapeWithParent = groupShapesToCreate.find((gs) => (gs.props.parentTitle || '').toLowerCase() === pTitleLower);
+    const pTitle = originalParentHeading?.title || childShapeWithParent?.props.parentTitle || pTitleLower;
+
+    const directChildren = [...groupShapesToCreate, ...macroGroupShapesToCreate].filter(
+      (s) => (s.props?.parentTitle || '').trim().toLowerCase() === pTitleLower
+    );
+
+    if (directChildren.length === 0) return;
+
+    const minX = Math.min(...directChildren.map((s) => s.x));
+    const minY = Math.min(...directChildren.map((s) => s.y));
+    const maxRight = Math.max(...directChildren.map((s) => s.x + s.props.w));
+    const maxBottom = Math.max(...directChildren.map((s) => s.y + s.props.h));
+
+    const totalTasks = directChildren.reduce((sum, s) => sum + (s.props?.count || 0), 0);
+    const completedTasks = directChildren.reduce((sum, s) => sum + (s.props?.completedCount || 0), 0);
+
+    const pSaved = savedGroupMap.get(pTitleLower);
+    const calcX = minX - MACRO_PAD_X;
+    const calcY = minY - MACRO_HEADER_PAD_Y;
+    const calcW = (maxRight - minX) + MACRO_PAD_X * 2;
+    const calcH = (maxBottom - minY) + MACRO_HEADER_PAD_Y + MACRO_BOTTOM_PAD_Y;
 
     macroGroupShapesToCreate.push({
       id: createShapeId(),
       type: 'task-group' as const,
-      x: minX - MACRO_PAD_X,
-      y: minY - MACRO_HEADER_PAD_Y,
+      x: pSaved ? Math.min(pSaved.x, calcX) : calcX,
+      y: pSaved ? Math.min(pSaved.y, calcY) : calcY,
       props: {
-        w: (maxRight - minX) + MACRO_PAD_X * 2,
-        h: (maxBottom - minY) + MACRO_HEADER_PAD_Y + MACRO_BOTTOM_PAD_Y,
+        w: pSaved ? Math.max(pSaved.width, (maxRight - Math.min(pSaved.x, calcX)) + MACRO_PAD_X) : calcW,
+        h: pSaved ? Math.max(pSaved.height, (maxBottom - Math.min(pSaved.y, calcY)) + MACRO_BOTTOM_PAD_Y) : calcH,
         title: pTitle,
-        count: entry.totalTasks,
-        completedCount: entry.completedTasks,
-        level: 1,
+        count: totalTasks,
+        completedCount: completedTasks,
+        level: pInfo.level,
+        parentTitle: pInfo.parentTitle,
+        isContainer: true,
       },
     });
   });
+
+  // Sort macro group shapes by level ASC so outermost containers (lower level numbers) are created first in editor (placed behind)
+  macroGroupShapesToCreate.sort((a, b) => (a.props.level || 1) - (b.props.level || 1));
 
   if (macroGroupShapesToCreate.length > 0) {
     (editor.createShapes as any)(macroGroupShapesToCreate);

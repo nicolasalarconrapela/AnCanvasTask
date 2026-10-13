@@ -44,9 +44,11 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
   // Organize tasks by group
   const tasksByGroup = new Map<string, typeof taskBlocks>();
   const headingParentMap = new Map<string, string | undefined>();
+  const headingLevelMap = new Map<string, number>();
   groupHeadings.forEach((gh) => {
     tasksByGroup.set(gh.title, []);
     headingParentMap.set(gh.title.toLowerCase(), gh.parentTitle);
+    headingLevelMap.set(gh.title.toLowerCase(), gh.level || 2);
   });
 
   taskBlocks.forEach((tb) => {
@@ -257,8 +259,9 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
                 w: info.width,
                 h: info.height,
                 count: info.tasks.length,
-                level: 2,
+                level: headingLevelMap.get(info.groupTitle.toLowerCase()) || 2,
                 parentTitle: parent.title,
+                isContainer: false,
               },
             });
           }
@@ -314,7 +317,9 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
             ...parentShape.props,
             w: parentW,
             h: parentH,
-            level: 1,
+            level: parent.level || 1,
+            parentTitle: parent.parentTitle,
+            isContainer: true,
             count: totalTasksInParent,
             completedCount: completedTasksInParent,
           },
@@ -331,7 +336,9 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
             title: parent.title,
             count: totalTasksInParent,
             completedCount: completedTasksInParent,
-            level: 1,
+            level: parent.level || 1,
+            parentTitle: parent.parentTitle,
+            isContainer: true,
           },
         } as any);
       }
@@ -370,7 +377,8 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
               w: info.width,
               h: info.height,
               count: info.tasks.length,
-              level: 2,
+              level: headingLevelMap.get(info.groupTitle.toLowerCase()) || 2,
+              isContainer: false,
             },
           });
         }

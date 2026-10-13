@@ -10,6 +10,7 @@ import {
   MarkdownIssue,
   MarkdownValidationReport,
   validateMarkdownDocument,
+  scanTaskBlocks,
 } from '../utils/markdownSync';
 import { SafeMarkdownNormalizerModal } from './SafeMarkdownNormalizerModal';
 
@@ -77,14 +78,14 @@ export function MarkdownSplitEditor({
     const lines = value.split(/\r?\n/);
     const taskLines = lines.filter((l) => l.trim().match(/^[-*]\s*\[[ xX]\]/));
     const completedLines = lines.filter((l) => l.trim().match(/^[-*]\s*\[[xX]\]/));
-    const sectionLines = lines.filter((l) => l.trim().startsWith('## '));
+    const { groupHeadings } = scanTaskBlocks(value);
     const p0Lines = lines.filter((l) => l.toLowerCase().includes('priority: p0'));
 
     return {
       totalTasks: taskLines.length,
       completedTasks: completedLines.length,
       pendingTasks: taskLines.length - completedLines.length,
-      sections: sectionLines.length,
+      sections: groupHeadings.length,
       criticalCount: p0Lines.length,
       linesCount: lines.length,
     };

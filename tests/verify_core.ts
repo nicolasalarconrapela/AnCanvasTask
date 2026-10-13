@@ -316,6 +316,34 @@ assert(frontendGrp && frontendGrp.parentTitle === 'Módulo Alfa', 'Frontend debe
 assert(devopsGrp && devopsGrp.parentTitle === 'Módulo Beta', 'DevOps debe pertenecer a Módulo Beta');
 console.log('   ✓ Anidamiento y asignación jerárquica de subsecciones ## dentro de # verificado.');
 
+// 11. Jerarquía de niveles arbitrarios (### Nivel 3 conteniendo #### Nivel 4)
+console.log('11. Verificando anidamiento de sección Nivel 4 dentro de sección Nivel 3 (### y ####)...');
+const level3And4Md = `### Módulo Nivel 3
+#### Subsección Nivel 4
+- [ ] Tarea en Nivel 4
+  id: task_l4
+  priority: P1
+`;
+
+const scanL3L4 = scanTaskBlocks(level3And4Md);
+assert.strictEqual(scanL3L4.parentHeadings.length, 1, 'Debe haber 1 encabezado contenedor');
+assert.strictEqual(scanL3L4.parentHeadings[0].title, 'Módulo Nivel 3');
+assert.strictEqual(scanL3L4.parentHeadings[0].level, 3, 'El contenedor debe ser nivel 3');
+
+assert.strictEqual(scanL3L4.groupHeadings.length, 1, 'Debe haber 1 subsección');
+assert.strictEqual(scanL3L4.groupHeadings[0].title, 'Subsección Nivel 4');
+assert.strictEqual(scanL3L4.groupHeadings[0].level, 4, 'La subsección debe ser nivel 4');
+assert.strictEqual(scanL3L4.groupHeadings[0].parentTitle, 'Módulo Nivel 3', 'Debe estar anidada bajo Módulo Nivel 3');
+
+const parsedL3L4 = parseTasksMarkdown(level3And4Md);
+assert.strictEqual(parsedL3L4.length, 1);
+assert.strictEqual(parsedL3L4[0].title, 'Subsección Nivel 4');
+assert.strictEqual(parsedL3L4[0].level, 4);
+assert.strictEqual(parsedL3L4[0].parentTitle, 'Módulo Nivel 3');
+assert.strictEqual(parsedL3L4[0].tasks.length, 1);
+assert.strictEqual(parsedL3L4[0].tasks[0].taskId, 'task_l4');
+console.log('   ✓ Sección nivel 4 dentro de nivel 3 correctamente anidada y parseada.');
+
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 
 

@@ -88,6 +88,8 @@ export interface GroupHeadingInfo {
 export interface ParentHeadingInfo {
   title: string;
   lineIndex: number;
+  level?: number;
+  parentTitle?: string;
 }
 
 /**
@@ -104,7 +106,14 @@ export function scanTaskBlocks(markdown: string): {
   const groupHeadings: GroupHeadingInfo[] = [];
   const parentHeadings: ParentHeadingInfo[] = [];
 
-  let currentParentTitle = '';
+  const rawHeadings: Array<{
+    title: string;
+    lineIndex: number;
+    level: number;
+    parentTitle?: string;
+  }> = [];
+
+  const headingStack: Array<{ title: string; level: number }> = [];
   let currentGroup = '';
   let currentBlock: TaskBlockInfo | null = null;
   let taskCounter = 0;
@@ -113,35 +122,31 @@ export function scanTaskBlocks(markdown: string): {
     const line = lines[i];
     const trimmed = line.trim();
 
-    // Check for "# Heading" (Level 1 macro group)
-    const h1Match = trimmed.match(/^#\s+(.+)$/);
-    if (h1Match) {
-      if (currentBlock) {
-        currentBlock.endLineIndex = i - 1;
-        taskBlocks.push(currentBlock);
-        currentBlock = null;
-      }
-      currentParentTitle = h1Match[1].trim();
-      parentHeadings.push({ title: currentParentTitle, lineIndex: i });
-      currentGroup = '';
-      continue;
-    }
-
-    // Check for "## Heading" (Level 2 subsection)
-    const headingMatch = trimmed.match(/^##\s+(.+)$/);
+    // Check for Markdown headings: "# Heading" (Level 1) up to "###### Heading" (Level 6)
+    const headingMatch = trimmed.match(/^([#]{1,6})\s+(.+)$/);
     if (headingMatch) {
       if (currentBlock) {
         currentBlock.endLineIndex = i - 1;
         taskBlocks.push(currentBlock);
         currentBlock = null;
       }
-      currentGroup = headingMatch[1].trim();
-      groupHeadings.push({
-        title: currentGroup,
+      const level = headingMatch[1].length;
+      const title = headingMatch[2].trim();
+
+      while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= level) {
+        headingStack.pop();
+      }
+      const parentTitle = headingStack.length > 0 ? headingStack[headingStack.length - 1].title : undefined;
+      headingStack.push({ title, level });
+
+      rawHeadings.push({
+        title,
         lineIndex: i,
-        level: 2,
-        parentTitle: currentParentTitle || undefined,
+        level,
+        parentTitle,
       });
+
+      currentGroup = title;
       continue;
     }
 
@@ -277,6 +282,38 @@ export function scanTaskBlocks(markdown: string): {
     taskBlocks.push(currentBlock);
   }
 
+  // Classify headings:
+  // Headings that have child headings act as parent containers.
+  // Headings that do NOT have child headings (or have direct tasks) act as group headings.
+  const parentTitlesSet = new Set(
+    rawHeadings.map((h) => h.parentTitle?.toLowerCase()).filter(Boolean)
+  );
+
+  for (const h of rawHeadings) {
+    const isParent = parentTitlesSet.has(h.title.toLowerCase());
+    const hasDirectTasks = taskBlocks.some(
+      (b) => b.groupTitle.toLowerCase() === h.title.toLowerCase()
+    );
+
+    if (isParent) {
+      parentHeadings.push({
+        title: h.title,
+        lineIndex: h.lineIndex,
+        level: h.level,
+        parentTitle: h.parentTitle,
+      });
+    }
+
+    if (!isParent || hasDirectTasks) {
+      groupHeadings.push({
+        title: h.title,
+        lineIndex: h.lineIndex,
+        level: h.level,
+        parentTitle: h.parentTitle,
+      });
+    }
+  }
+
   return { taskBlocks, groupHeadings, parentHeadings };
 }
 
@@ -291,7 +328,7 @@ export function scanTaskBlocks(markdown: string): {
  * - Empty headings
  */
 export function validateMarkdownDocument(markdown: string): MarkdownValidationReport {
-  const { taskBlocks, groupHeadings } = scanTaskBlocks(markdown);
+  const { taskBlocks, groupHeadings, parentHeadings } = scanTaskBlocks(markdown);
   const issues: MarkdownIssue[] = [];
 
   const duplicateIds = new Set<string>();
@@ -441,12 +478,13 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
     const tasksInHeading = taskBlocks.filter(
       (b) => b.groupTitle.toLowerCase() === gh.title.toLowerCase()
     );
-    if (tasksInHeading.length === 0) {
+    const isParent = parentHeadings.some((ph) => ph.title.toLowerCase() === gh.title.toLowerCase());
+    if (tasksInHeading.length === 0 && !isParent) {
       issues.push({
         id: `empty-heading-${idx}`,
         type: 'empty_heading',
         severity: 'info',
-        message: `Sección vacía: "## ${gh.title}"`,
+        message: `Sección vacía: "${'#'.repeat(gh.level || 2)} ${gh.title}"`,
         groupTitle: gh.title,
         lineIndex: gh.lineIndex,
         details: 'Esta sección no contiene tareas actualmente.',
@@ -732,7 +770,7 @@ export function addTaskToMarkdown(
   if (existingGroupHeading) {
     let insertLineIndex = lines.length;
     for (let i = existingGroupHeading.lineIndex + 1; i < lines.length; i++) {
-      if (lines[i].trim().startsWith('## ')) {
+      if (/^#{1,6}\s+/.test(lines[i].trim())) {
         insertLineIndex = i;
         break;
       }
@@ -822,7 +860,7 @@ export function deleteSectionFromMarkdown(
   let endLine = lines.length;
   for (let i = startLine + 1; i < lines.length; i++) {
     const trimmed = lines[i].trim();
-    if (trimmed.startsWith('## ') || trimmed.startsWith('# ') || trimmed.startsWith('### ')) {
+    if (/^#{1,6}\s+/.test(trimmed)) {
       endLine = i;
       break;
     }
@@ -873,7 +911,7 @@ export function moveTaskToGroupInMarkdown(
   if (targetHeading) {
     let insertLine = lines.length;
     for (let i = targetHeading.lineIndex + 1; i < lines.length; i++) {
-      if (lines[i].trim().startsWith('## ')) {
+      if (/^#{1,6}\s+/.test(lines[i].trim())) {
         insertLine = i;
         break;
       }

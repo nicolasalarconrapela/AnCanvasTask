@@ -3136,75 +3136,65 @@ export default function App() {
                     const selectedIds = new Set(editorInstance.getSelectedShapeIds());
                     const groupTitle = (to.props?.title || '').trim().toLowerCase();
 
-                    if (to.props?.level === 1) {
-                      // Level 1 macro container (#): Move all child task-groups and their tasks!
-                      const childGroups = (editorInstance
-                        .getCurrentPageShapes()
-                        .filter((s) => {
-                          if ((s as any).type !== 'task-group' || (s as any).props?.level === 1) return false;
-                          const pt = ((s as any).props?.parentTitle || '').trim().toLowerCase();
-                          return pt === groupTitle;
-                        }) as any[]);
+                    // Collect all descendant group shapes (recursively for any level of nesting)
+                    const allPageShapes = editorInstance.getCurrentPageShapes();
+                    const allGroups = (allPageShapes.filter((s) => (s as any).type === 'task-group') as any[]);
 
-                      const childTitles = new Set(
-                        childGroups.map((cg) => (cg.props?.title || '').trim().toLowerCase())
-                      );
+                    const descendantGroupShapes: any[] = [];
+                    const relevantGroupTitles = new Set<string>();
+                    relevantGroupTitles.add(groupTitle);
 
-                      const tasksInChildGroups = (editorInstance
-                        .getCurrentPageShapes()
-                        .filter((s) => {
-                          if ((s as any).type !== 'task') return false;
-                          const tg = ((s as any).props?.groupTitle || '').trim().toLowerCase();
-                          return childTitles.has(tg);
-                        }) as any[]);
+                    const queue = [groupTitle];
+                    const visitedGroupIds = new Set<string>();
+                    visitedGroupIds.add(to.id);
 
-                      const updates: any[] = [];
-                      for (const cg of childGroups) {
-                        if (!selectedIds.has(cg.id)) {
-                          updates.push({
-                            id: cg.id,
-                            type: 'task-group',
-                            x: cg.x + dx,
-                            y: cg.y + dy,
-                          });
+                    while (queue.length > 0) {
+                      const currentParentTitle = queue.shift()!;
+                      for (const g of allGroups) {
+                        if (!visitedGroupIds.has(g.id)) {
+                          const pt = ((g.props?.parentTitle || '') as string).trim().toLowerCase();
+                          if (pt === currentParentTitle) {
+                            visitedGroupIds.add(g.id);
+                            descendantGroupShapes.push(g);
+                            const childTitle = ((g.props?.title || '') as string).trim().toLowerCase();
+                            if (childTitle) {
+                              relevantGroupTitles.add(childTitle);
+                              queue.push(childTitle);
+                            }
+                          }
                         }
                       }
-                      for (const t of tasksInChildGroups) {
-                        if (!selectedIds.has(t.id)) {
-                          updates.push({
-                            id: t.id,
-                            type: 'task',
-                            x: t.x + dx,
-                            y: t.y + dy,
-                          });
-                        }
-                      }
-                      if (updates.length > 0) {
-                        editorInstance.updateShapes(updates);
-                      }
-                    } else {
-                      const tasksInGroup = (editorInstance
-                        .getCurrentPageShapes()
-                        .filter((s) => {
-                          if ((s as any).type !== 'task') return false;
-                          const taskGroup = ((s as any).props?.groupTitle || '').trim().toLowerCase();
-                          return taskGroup === groupTitle;
-                        }) as any[]);
+                    }
 
-                      const updates: any[] = [];
-                      for (const t of tasksInGroup) {
-                        if (!selectedIds.has(t.id)) {
-                          updates.push({
-                            id: t.id,
-                            type: 'task',
-                            x: t.x + dx,
-                            y: t.y + dy,
-                          });
-                        }
+                    const tasksToMove = (allPageShapes.filter((s) => {
+                      if ((s as any).type !== 'task') return false;
+                      const tg = (((s as any).props?.groupTitle || '') as string).trim().toLowerCase();
+                      return relevantGroupTitles.has(tg);
+                    }) as any[]);
+
+                    const updates: any[] = [];
+                    for (const cg of descendantGroupShapes) {
+                      if (!selectedIds.has(cg.id)) {
+                        updates.push({
+                          id: cg.id,
+                          type: 'task-group',
+                          x: cg.x + dx,
+                          y: cg.y + dy,
+                        });
                       }
-                      if (updates.length > 0) {
-                        editorInstance.updateShapes(updates);
+                    }
+                    for (const t of tasksToMove) {
+                      if (!selectedIds.has(t.id)) {
+                        updates.push({
+                          id: t.id,
+                          type: 'task',
+                          x: t.x + dx,
+                          y: t.y + dy,
+                        });
                       }
+                    }
+                    if (updates.length > 0) {
+                      editorInstance.updateShapes(updates);
                     }
                   }
                 }
@@ -5247,7 +5237,12 @@ export default function App() {
                             : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-high)]'
                         }`}
                       >
-                        <span className="truncate max-w-[140px]">## {grp.title}</span>
+                        <span
+                          className="truncate max-w-[140px]"
+                          title={grp.parentTitle ? `${grp.parentTitle} > ${grp.title}` : grp.title}
+                        >
+                          {'#'.repeat(grp.level || 2)} {grp.title}
+                        </span>
                         <span className="text-[10px] font-mono opacity-80">
                           {doneInGrp}/{grp.tasks.length}
                         </span>
