@@ -260,13 +260,16 @@ const tenSectionsMd = [
 const parsedTenGroups = parseTasksMarkdown(tenSectionsMd);
 assert.strictEqual(parsedTenGroups.length, 10, 'Debe parsear exactamente 10 grupos/secciones');
 
-const { groupHeadings: scannedHeadings, taskBlocks: scannedBlocks } = scanTaskBlocks(tenSectionsMd);
+const { groupHeadings: scannedHeadings, taskBlocks: scannedBlocks, parentHeadings } = scanTaskBlocks(tenSectionsMd);
+assert.strictEqual(parentHeadings.length, 1, 'Debe detectar 1 encabezado macro #');
+assert.strictEqual(parentHeadings[0].title, 'Tablero de Proyecto Complejo');
 assert.strictEqual(scannedHeadings.length, 10, 'scanTaskBlocks debe detectar exactamente 10 encabezados');
 assert.strictEqual(scannedBlocks.length, 20, 'Debe detectar 20 tareas en total a lo largo de las 10 secciones');
 
 for (let i = 1; i <= 10; i++) {
   const grp = parsedTenGroups.find((g) => g.title === `Sección ${i}`);
   assert(grp, `Debe existir la sección ${i}`);
+  assert.strictEqual(grp.parentTitle, 'Tablero de Proyecto Complejo', `La sección ${i} debe tener el padre # correcto`);
   assert.strictEqual(grp.tasks.length, 2, `La sección ${i} debe contener 2 tareas`);
   const depTask = grp.tasks.find((t) => t.taskId === `t_${i}_b`);
   assert(depTask, `Debe existir la tarea dependiente en sección ${i}`);
@@ -284,6 +287,34 @@ const sec10 = reParsedTen.find((g) => g.title === 'Sección 10');
 assert(sec10, 'Debe existir la Sección 10 tras adición');
 assert.strictEqual(sec10.tasks.length, 3, 'La Sección 10 debe tener 3 tareas tras añadir una nueva');
 console.log('   ✓ Agrupación, parsing y sincronización de hasta 10 secciones verificado.');
+
+// 10. Jerarquía multi-módulo (# contiene a sus respectivas ##)
+console.log('10. Verificando jerarquía multi-módulo (# Padre conteniendo ## Subsecciones)...');
+const multiMacroMd = `# Módulo Alfa
+## Backend
+- [ ] Tarea Backend
+## Frontend
+- [ ] Tarea Frontend
+
+# Módulo Beta
+## DevOps
+- [ ] Tarea CI/CD
+`;
+
+const multiScan = scanTaskBlocks(multiMacroMd);
+assert.strictEqual(multiScan.parentHeadings.length, 2, 'Debe haber 2 encabezados macro #');
+assert.strictEqual(multiScan.parentHeadings[0].title, 'Módulo Alfa');
+assert.strictEqual(multiScan.parentHeadings[1].title, 'Módulo Beta');
+
+const multiParsed = parseTasksMarkdown(multiMacroMd);
+const backendGrp = multiParsed.find((g) => g.title === 'Backend');
+const frontendGrp = multiParsed.find((g) => g.title === 'Frontend');
+const devopsGrp = multiParsed.find((g) => g.title === 'DevOps');
+
+assert(backendGrp && backendGrp.parentTitle === 'Módulo Alfa', 'Backend debe pertenecer a Módulo Alfa');
+assert(frontendGrp && frontendGrp.parentTitle === 'Módulo Alfa', 'Frontend debe pertenecer a Módulo Alfa');
+assert(devopsGrp && devopsGrp.parentTitle === 'Módulo Beta', 'DevOps debe pertenecer a Módulo Beta');
+console.log('   ✓ Anidamiento y asignación jerárquica de subsecciones ## dentro de # verificado.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 

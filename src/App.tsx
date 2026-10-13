@@ -3136,27 +3136,75 @@ export default function App() {
                     const selectedIds = new Set(editorInstance.getSelectedShapeIds());
                     const groupTitle = (to.props?.title || '').trim().toLowerCase();
 
-                    const tasksInGroup = (editorInstance
-                      .getCurrentPageShapes()
-                      .filter((s) => {
-                        if ((s as any).type !== 'task') return false;
-                        const taskGroup = ((s as any).props?.groupTitle || '').trim().toLowerCase();
-                        return taskGroup === groupTitle;
-                      }) as any[]);
+                    if (to.props?.level === 1) {
+                      // Level 1 macro container (#): Move all child task-groups and their tasks!
+                      const childGroups = (editorInstance
+                        .getCurrentPageShapes()
+                        .filter((s) => {
+                          if ((s as any).type !== 'task-group' || (s as any).props?.level === 1) return false;
+                          const pt = ((s as any).props?.parentTitle || '').trim().toLowerCase();
+                          return pt === groupTitle;
+                        }) as any[]);
 
-                    const updates: any[] = [];
-                    for (const t of tasksInGroup) {
-                      if (!selectedIds.has(t.id)) {
-                        updates.push({
-                          id: t.id,
-                          type: 'task',
-                          x: t.x + dx,
-                          y: t.y + dy,
-                        });
+                      const childTitles = new Set(
+                        childGroups.map((cg) => (cg.props?.title || '').trim().toLowerCase())
+                      );
+
+                      const tasksInChildGroups = (editorInstance
+                        .getCurrentPageShapes()
+                        .filter((s) => {
+                          if ((s as any).type !== 'task') return false;
+                          const tg = ((s as any).props?.groupTitle || '').trim().toLowerCase();
+                          return childTitles.has(tg);
+                        }) as any[]);
+
+                      const updates: any[] = [];
+                      for (const cg of childGroups) {
+                        if (!selectedIds.has(cg.id)) {
+                          updates.push({
+                            id: cg.id,
+                            type: 'task-group',
+                            x: cg.x + dx,
+                            y: cg.y + dy,
+                          });
+                        }
                       }
-                    }
-                    if (updates.length > 0) {
-                      editorInstance.updateShapes(updates);
+                      for (const t of tasksInChildGroups) {
+                        if (!selectedIds.has(t.id)) {
+                          updates.push({
+                            id: t.id,
+                            type: 'task',
+                            x: t.x + dx,
+                            y: t.y + dy,
+                          });
+                        }
+                      }
+                      if (updates.length > 0) {
+                        editorInstance.updateShapes(updates);
+                      }
+                    } else {
+                      const tasksInGroup = (editorInstance
+                        .getCurrentPageShapes()
+                        .filter((s) => {
+                          if ((s as any).type !== 'task') return false;
+                          const taskGroup = ((s as any).props?.groupTitle || '').trim().toLowerCase();
+                          return taskGroup === groupTitle;
+                        }) as any[]);
+
+                      const updates: any[] = [];
+                      for (const t of tasksInGroup) {
+                        if (!selectedIds.has(t.id)) {
+                          updates.push({
+                            id: t.id,
+                            type: 'task',
+                            x: t.x + dx,
+                            y: t.y + dy,
+                          });
+                        }
+                      }
+                      if (updates.length > 0) {
+                        editorInstance.updateShapes(updates);
+                      }
                     }
                   }
                 }

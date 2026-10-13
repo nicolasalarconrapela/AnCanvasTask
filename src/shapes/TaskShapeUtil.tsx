@@ -1118,7 +1118,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
 
     const groupShapes = this.editor
       .getCurrentPageShapes()
-      .filter((s) => (s as any).type === 'task-group') as any[];
+      .filter((s) => (s as any).type === 'task-group' && (s as any).props?.level !== 1) as any[];
 
     let capturedGroup: any = null;
     const MAGNETIC_MARGIN = 50;
@@ -1161,7 +1161,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
 
     const groupShapes = this.editor
       .getCurrentPageShapes()
-      .filter((s) => (s as any).type === 'task-group') as any[];
+      .filter((s) => (s as any).type === 'task-group' && (s as any).props?.level !== 1) as any[];
 
     const cardW = current.props?.w || 320;
     const cardH = current.props?.h || 110;
@@ -1313,9 +1313,20 @@ export function updateAllGroupCounts(editor: Editor) {
   const updates: any[] = [];
   for (const g of groupShapes) {
     const gTitle = (g.props?.title || '').trim().toLowerCase();
-    const tasksInGroup = taskShapes.filter(
-      (t) => (t.props?.groupTitle || '').trim().toLowerCase() === gTitle
-    );
+    let tasksInGroup: any[] = [];
+
+    if (g.props?.level === 1) {
+      const childGroups = groupShapes.filter(
+        (cg) => cg.props?.level !== 1 && (cg.props?.parentTitle || '').trim().toLowerCase() === gTitle
+      );
+      const childGroupTitles = new Set(childGroups.map((cg) => (cg.props?.title || '').trim().toLowerCase()));
+      tasksInGroup = taskShapes.filter((t) => childGroupTitles.has((t.props?.groupTitle || '').trim().toLowerCase()));
+    } else {
+      tasksInGroup = taskShapes.filter(
+        (t) => (t.props?.groupTitle || '').trim().toLowerCase() === gTitle
+      );
+    }
+
     const count = tasksInGroup.length;
     const completedCount = tasksInGroup.filter((t) => t.props?.completed).length;
 
@@ -1338,7 +1349,8 @@ export function updateAllGroupCounts(editor: Editor) {
 }
 
 function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
-  const { title, count, completedCount, w, h } = shape.props;
+  const { title, count, completedCount, w, h, level } = shape.props;
+  const isLevel1 = level === 1;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -1414,28 +1426,44 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
       <div
         id={`task-group-container-${shape.id}`}
         onContextMenu={handleContextMenu}
-        className="w-full h-full rounded-md bg-[var(--surface-container)]/30 border border-[var(--outline)] p-3 flex flex-col justify-start select-none transition-colors relative"
+        className={
+          isLevel1
+            ? "w-full h-full rounded-xl bg-[var(--surface-container-lowest)]/50 border-2 border-dashed border-[var(--outline-variant)] p-4 flex flex-col justify-start select-none transition-colors relative"
+            : "w-full h-full rounded-md bg-[var(--surface-container)]/30 border border-[var(--outline)] p-3 flex flex-col justify-start select-none transition-colors relative"
+        }
       >
         {/* Header */}
         <div
           id={`task-group-header-${shape.id}`}
           onContextMenu={handleContextMenu}
-          className="flex items-center justify-between border-b border-[var(--outline)] pb-2 pointer-events-auto cursor-context-menu"
+          className={
+            isLevel1
+              ? "flex items-center justify-between border-b border-[var(--outline-variant)]/60 pb-2.5 pointer-events-auto cursor-context-menu"
+              : "flex items-center justify-between border-b border-[var(--outline)] pb-2 pointer-events-auto cursor-context-menu"
+          }
         >
           <div id={`task-group-title-group-${shape.id}`} className="flex items-center gap-1.5">
-            <span className="text-[var(--on-surface-variant)] font-mono text-xs font-semibold">##</span>
-            <h2 className="text-xs font-semibold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[180px]">
+            <span className={isLevel1 ? "text-[var(--primary)] font-mono text-sm font-bold" : "text-[var(--on-surface-variant)] font-mono text-xs font-semibold"}>
+              {isLevel1 ? '#' : '##'}
+            </span>
+            <h2 className={isLevel1 ? "text-sm font-bold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[280px]" : "text-xs font-semibold text-[var(--on-surface)] font-sans tracking-tight truncate max-w-[180px]"}>
               {title}
             </h2>
-            <span className="suction-indicator items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-[var(--primary)] bg-[var(--primary)]/10 border border-[var(--primary)]/30">
-              <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)]" />
-              {i18n._(msg`Ventosa`)}
-            </span>
+            {isLevel1 ? (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-[var(--on-surface-variant)] bg-[var(--surface-container-high)] border border-[var(--outline)]">
+                {i18n._(msg`Módulo #`)}
+              </span>
+            ) : (
+              <span className="suction-indicator items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-[var(--primary)] bg-[var(--primary)]/10 border border-[var(--primary)]/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)]" />
+                {i18n._(msg`Ventosa`)}
+              </span>
+            )}
           </div>
 
           <div id={`task-group-actions-${shape.id}`} className="flex items-center gap-1.5">
             {count > 0 && (
-              <span className="text-[11px] font-mono text-[var(--on-surface-variant)] tabular-nums">
+              <span className={isLevel1 ? "text-xs font-mono font-medium text-[var(--on-surface-variant)] tabular-nums" : "text-[11px] font-mono text-[var(--on-surface-variant)] tabular-nums"}>
                 {completedCount > 0
                   ? i18n._(msg`${completedCount}/${count} completadas`)
                   : formatTaskCount(count)}
@@ -1452,9 +1480,9 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
                 setIsMenuOpen(!isMenuOpen);
               }}
               className="w-5 h-5 flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] rounded cursor-pointer transition-colors"
-              title={i18n._(msg`Opciones de sección`)}
+              title={isLevel1 ? i18n._(msg`Opciones de módulo`) : i18n._(msg`Opciones de sección`)}
             >
-              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+              <svg className={isLevel1 ? "w-3.5 h-3.5" : "w-3 h-3"} fill="currentColor" viewBox="0 0 24 24">
                 <circle cx="12" cy="5" r="2" />
                 <circle cx="12" cy="12" r="2" />
                 <circle cx="12" cy="19" r="2" />
@@ -1479,25 +1507,27 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
             className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1 flex flex-col gap-0.5 min-w-[170px] text-xs font-sans pointer-events-auto"
           >
             <div className="px-2 py-1 text-[11px] font-mono text-[var(--on-surface-variant)] border-b border-[var(--outline)] mb-0.5 truncate">
-              ## {title}
+              {isLevel1 ? `# ${title}` : `## ${title}`}
             </div>
-            <button
-              id={`btn-task-group-menu-add-task-${shape.id}`}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsMenuOpen(false);
-                window.dispatchEvent(
-                  new CustomEvent('antask:open-new-task-modal', {
-                    detail: { groupTitle: title },
-                  })
-                );
-              }}
-              className="px-2 py-1 rounded text-left text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer transition-colors"
-            >
-              <span className="material-symbols-outlined text-[14px]">add</span>
-              <span>{i18n._(msg`Añadir tarea`)}</span>
-            </button>
+            {!isLevel1 && (
+              <button
+                id={`btn-task-group-menu-add-task-${shape.id}`}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsMenuOpen(false);
+                  window.dispatchEvent(
+                    new CustomEvent('antask:open-new-task-modal', {
+                      detail: { groupTitle: title },
+                    })
+                  );
+                }}
+                className="px-2 py-1 rounded text-left text-[var(--on-surface)] hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer transition-colors"
+              >
+                <span className="material-symbols-outlined text-[14px]">add</span>
+                <span>{i18n._(msg`Añadir tarea`)}</span>
+              </button>
+            )}
             <button
               id={`btn-task-group-menu-delete-${shape.id}`}
               type="button"
@@ -1513,7 +1543,7 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
               className="px-2 py-1 rounded text-left text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 cursor-pointer transition-colors font-medium"
             >
               <span className="material-symbols-outlined text-[14px]">delete</span>
-              <span>{i18n._(msg`Eliminar sección`)}</span>
+              <span>{isLevel1 ? i18n._(msg`Eliminar módulo`) : i18n._(msg`Eliminar sección`)}</span>
             </button>
           </div>
         )}
@@ -1528,6 +1558,8 @@ export type GroupShapeProps = {
   title: string;
   count: number;
   completedCount: number;
+  level?: number;
+  parentTitle?: string;
 };
 
 export type ITaskGroupShape = TLBaseShape<'task-group', GroupShapeProps>;
@@ -1541,6 +1573,8 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
     title: T.string,
     count: T.number,
     completedCount: T.number,
+    level: T.optional(T.number),
+    parentTitle: T.optional(T.string),
   };
 
   getDefaultProps(): GroupShapeProps {
@@ -1550,6 +1584,7 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
       title: 'Section',
       count: 0,
       completedCount: 0,
+      level: 2,
     };
   }
 
@@ -1922,6 +1957,8 @@ export function populateCanvasWithGroups(
         title: group.title,
         count: taskCount,
         completedCount,
+        level: 2,
+        parentTitle: group.parentTitle,
       },
     });
 
@@ -2068,6 +2105,61 @@ export function populateCanvasWithGroups(
     });
   });
 
+  // Pass 3: Create parent '#' macro-group shapes enclosing their child '##' sections
+  const parentGroupsMap = new Map<string, {
+    childShapes: typeof groupShapesToCreate;
+    totalTasks: number;
+    completedTasks: number;
+  }>();
+
+  groupShapesToCreate.forEach((gs) => {
+    const pTitle = gs.props.parentTitle;
+    if (pTitle) {
+      if (!parentGroupsMap.has(pTitle)) {
+        parentGroupsMap.set(pTitle, {
+          childShapes: [],
+          totalTasks: 0,
+          completedTasks: 0,
+        });
+      }
+      const entry = parentGroupsMap.get(pTitle)!;
+      entry.childShapes.push(gs);
+      entry.totalTasks += gs.props.count;
+      entry.completedTasks += gs.props.completedCount;
+    }
+  });
+
+  const MACRO_PAD_X = 28;
+  const MACRO_HEADER_PAD_Y = 56;
+  const MACRO_BOTTOM_PAD_Y = 28;
+  const macroGroupShapesToCreate: any[] = [];
+
+  parentGroupsMap.forEach((entry, pTitle) => {
+    if (entry.childShapes.length === 0) return;
+    const minX = Math.min(...entry.childShapes.map((s) => s.x));
+    const minY = Math.min(...entry.childShapes.map((s) => s.y));
+    const maxRight = Math.max(...entry.childShapes.map((s) => s.x + s.props.w));
+    const maxBottom = Math.max(...entry.childShapes.map((s) => s.y + s.props.h));
+
+    macroGroupShapesToCreate.push({
+      id: createShapeId(),
+      type: 'task-group' as const,
+      x: minX - MACRO_PAD_X,
+      y: minY - MACRO_HEADER_PAD_Y,
+      props: {
+        w: (maxRight - minX) + MACRO_PAD_X * 2,
+        h: (maxBottom - minY) + MACRO_HEADER_PAD_Y + MACRO_BOTTOM_PAD_Y,
+        title: pTitle,
+        count: entry.totalTasks,
+        completedCount: entry.completedTasks,
+        level: 1,
+      },
+    });
+  });
+
+  if (macroGroupShapesToCreate.length > 0) {
+    (editor.createShapes as any)(macroGroupShapesToCreate);
+  }
   if (groupShapesToCreate.length > 0) {
     (editor.createShapes as any)(groupShapesToCreate);
   }

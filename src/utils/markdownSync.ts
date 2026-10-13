@@ -78,18 +78,33 @@ export interface MarkdownValidationReport {
   unresolvedBlockerMap: Map<string, string[]>; // taskId -> missing blocker IDs
 }
 
+export interface GroupHeadingInfo {
+  title: string;
+  lineIndex: number;
+  level?: number;
+  parentTitle?: string;
+}
+
+export interface ParentHeadingInfo {
+  title: string;
+  lineIndex: number;
+}
+
 /**
  * Parses all task blocks and their associated groups from a Markdown string,
  * detecting unknown metadata, headings, and lines without modifying the document.
  */
 export function scanTaskBlocks(markdown: string): {
   taskBlocks: TaskBlockInfo[];
-  groupHeadings: Array<{ title: string; lineIndex: number }>;
+  groupHeadings: GroupHeadingInfo[];
+  parentHeadings: ParentHeadingInfo[];
 } {
   const lines = markdown.split(/\r?\n/);
   const taskBlocks: TaskBlockInfo[] = [];
-  const groupHeadings: Array<{ title: string; lineIndex: number }> = [];
+  const groupHeadings: GroupHeadingInfo[] = [];
+  const parentHeadings: ParentHeadingInfo[] = [];
 
+  let currentParentTitle = '';
   let currentGroup = '';
   let currentBlock: TaskBlockInfo | null = null;
   let taskCounter = 0;
@@ -98,7 +113,21 @@ export function scanTaskBlocks(markdown: string): {
     const line = lines[i];
     const trimmed = line.trim();
 
-    // Check for "## Heading"
+    // Check for "# Heading" (Level 1 macro group)
+    const h1Match = trimmed.match(/^#\s+(.+)$/);
+    if (h1Match) {
+      if (currentBlock) {
+        currentBlock.endLineIndex = i - 1;
+        taskBlocks.push(currentBlock);
+        currentBlock = null;
+      }
+      currentParentTitle = h1Match[1].trim();
+      parentHeadings.push({ title: currentParentTitle, lineIndex: i });
+      currentGroup = '';
+      continue;
+    }
+
+    // Check for "## Heading" (Level 2 subsection)
     const headingMatch = trimmed.match(/^##\s+(.+)$/);
     if (headingMatch) {
       if (currentBlock) {
@@ -107,7 +136,12 @@ export function scanTaskBlocks(markdown: string): {
         currentBlock = null;
       }
       currentGroup = headingMatch[1].trim();
-      groupHeadings.push({ title: currentGroup, lineIndex: i });
+      groupHeadings.push({
+        title: currentGroup,
+        lineIndex: i,
+        level: 2,
+        parentTitle: currentParentTitle || undefined,
+      });
       continue;
     }
 
@@ -243,7 +277,7 @@ export function scanTaskBlocks(markdown: string): {
     taskBlocks.push(currentBlock);
   }
 
-  return { taskBlocks, groupHeadings };
+  return { taskBlocks, groupHeadings, parentHeadings };
 }
 
 /**
