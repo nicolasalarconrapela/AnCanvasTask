@@ -1,6 +1,7 @@
 import { Editor, createShapeId, TLShapeId } from 'tldraw';
 import { scanTaskBlocks } from './markdownSync';
 import { parseTasksMarkdown, ParsedGroup, ParsedMarkdownTask } from './taskMarkdown';
+import { setCanvasPopulatingFromMarkdown } from '../shapes/TaskShapeUtil';
 
 export interface AutoLayoutResult {
   taskCount: number;
@@ -183,129 +184,45 @@ export function computeAutoLayout(markdown: string): ComputedAutoLayout {
 
   const hasMultipleBranches = branchMap.size > 1 || (branchMap.size === 1 && !branchMap.has(''));
 
-  if (hasMultipleBranches) {
-    // Hierarchical branch-based placement (e.g. root, ## Fronted, ## Backend)
-    let currentBranchX = START_X;
-    let currentBranchY = START_Y;
-    let rowMaxBottom = currentBranchY;
+  const MAX_ROW_WIDTH = 1400; // Comfortable canvas row width threshold
+  let currentBranchX = START_X;
+  let currentBranchY = START_Y;
+  let rowMaxBottom = currentBranchY;
 
-    // Order: unbranched/root groups first, then named branches in order of appearance
-    const branchEntries = Array.from(branchMap.entries()).sort(([a], [b]) => {
-      if (a === '' && b !== '') return -1;
-      if (a !== '' && b === '') return 1;
-      return 0;
-    });
+  // Order: unbranched/root groups first, then named branches in order of appearance
+  const branchEntries = Array.from(branchMap.entries()).sort(([a], [b]) => {
+    if (a === '' && b !== '') return -1;
+    if (a !== '' && b === '') return 1;
+    return 0;
+  });
 
-    branchEntries.forEach(([branchName, branchGroups]) => {
-      if (branchGroups.length === 0) return;
+  branchEntries.forEach(([branchName, branchGroups]) => {
+    if (branchGroups.length === 0) return;
 
-      let colX = currentBranchX + MACRO_PAD_X;
-      let colY = currentBranchY + MACRO_HEADER_PAD_Y;
-      let branchMaxColBottom = colY;
-      const MAX_COLS_PER_BRANCH_ROW = 4;
+    const numCols = branchGroups.length;
+    const branchColsWidth = numCols * GROUP_WIDTH + Math.max(0, numCols - 1) * COL_GAP_X;
+    const isNamedBranch = Boolean(branchName);
+    const branchBlockWidth = isNamedBranch ? branchColsWidth + MACRO_PAD_X * 2 : branchColsWidth;
 
-      branchGroups.forEach((group, idx) => {
-        if (idx > 0 && idx % MAX_COLS_PER_BRANCH_ROW === 0) {
-          // Wrap to next row inside branch
-          colX = currentBranchX + MACRO_PAD_X;
-          colY = branchMaxColBottom + ROW_GAP_Y;
-        }
+    // Wrap branch block if exceeding comfortable row width
+    if (currentBranchX > START_X && currentBranchX + branchBlockWidth > MAX_ROW_WIDTH + START_X) {
+      currentBranchX = START_X;
+      currentBranchY = rowMaxBottom + ROW_GAP_Y;
+      rowMaxBottom = currentBranchY;
+    }
 
-        const taskCount = group.tasks.length;
-        const completedCount = group.tasks.filter((t) => t.completed).length;
+    const branchStartX = currentBranchX;
+    const branchStartY = currentBranchY;
+    let colX = isNamedBranch ? branchStartX + MACRO_PAD_X : branchStartX;
+    const colY = isNamedBranch ? branchStartY + MACRO_HEADER_PAD_Y : branchStartY;
+    let branchMaxColBottom = colY;
 
-        // Position tasks inside this section column
-        let currentTaskY = colY + GROUP_HEADER_HEIGHT + GROUP_PADDING_TOP;
-        const orderedTasks = orderTasksTopologically(group.tasks);
-
-        orderedTasks.forEach((task, tIdx) => {
-          const taskH = getTaskCalculatedHeight(task);
-          const tId = task.taskId || task.temporaryId || `task-${group.id || group.title}-${tIdx + 1}`;
-
-          computedTasks.push({
-            taskId: tId,
-            temporaryId: task.temporaryId,
-            title: task.title,
-            x: colX + GROUP_PADDING_X,
-            y: currentTaskY,
-            w: CARD_WIDTH,
-            h: taskH,
-            groupTitle: group.title,
-            branchTitle: group.branchTitle,
-            groupHeadingId: group.id,
-          });
-
-          currentTaskY += taskH + CARD_GAP;
-        });
-
-        const calculatedGroupH = Math.max(
-          180,
-          currentTaskY - colY - CARD_GAP + GROUP_PADDING_BOTTOM
-        );
-
-        const leafParentId = (group.isParent && group.id) ? group.id : group.parentId;
-
-        const leafG: ComputedGroupLayout = {
-          id: group.id,
-          title: group.title,
-          x: colX,
-          y: colY,
-          w: GROUP_WIDTH,
-          h: calculatedGroupH,
-          count: taskCount,
-          completedCount,
-          level: group.level || 2,
-          parentTitle: group.parentTitle,
-          parentId: leafParentId,
-          headingId: group.id,
-          branchTitle: group.branchTitle,
-          path: group.path,
-          isContainer: false,
-          color: group.color,
-        };
-
-        leafGroups.push(leafG);
-
-        if (colY + calculatedGroupH > branchMaxColBottom) {
-          branchMaxColBottom = colY + calculatedGroupH;
-        }
-
-        colX += GROUP_WIDTH + COL_GAP_X;
-      });
-
-      const branchWidth = (colX - currentBranchX) + MACRO_PAD_X;
-      const branchHeight = (branchMaxColBottom - currentBranchY) + MACRO_BOTTOM_PAD_Y;
-
-      if (currentBranchY + branchHeight > rowMaxBottom) {
-        rowMaxBottom = currentBranchY + branchHeight;
-      }
-
-      currentBranchX += branchWidth + BRANCH_GAP_X;
-
-      if (currentBranchX > 3200) {
-        currentBranchX = START_X;
-        currentBranchY = rowMaxBottom + ROW_GAP_Y + 32;
-        rowMaxBottom = currentBranchY;
-      }
-    });
-  } else {
-    // Flat sections (no distinct branches)
-    const MAX_COLS_PER_ROW = 5;
-    let currentColX = START_X;
-    let currentRowY = START_Y;
-    let rowMaxH = 0;
-
-    parsedGroups.forEach((group, index) => {
-      if (index > 0 && index % MAX_COLS_PER_ROW === 0) {
-        currentColX = START_X;
-        currentRowY += rowMaxH + ROW_GAP_Y;
-        rowMaxH = 0;
-      }
-
+    branchGroups.forEach((group) => {
       const taskCount = group.tasks.length;
       const completedCount = group.tasks.filter((t) => t.completed).length;
 
-      let currentTaskY = currentRowY + GROUP_HEADER_HEIGHT + GROUP_PADDING_TOP;
+      // Position tasks inside this section column
+      let currentTaskY = colY + GROUP_HEADER_HEIGHT + GROUP_PADDING_TOP;
       const orderedTasks = orderTasksTopologically(group.tasks);
 
       orderedTasks.forEach((task, tIdx) => {
@@ -316,7 +233,7 @@ export function computeAutoLayout(markdown: string): ComputedAutoLayout {
           taskId: tId,
           temporaryId: task.temporaryId,
           title: task.title,
-          x: currentColX + GROUP_PADDING_X,
+          x: colX + GROUP_PADDING_X,
           y: currentTaskY,
           w: CARD_WIDTH,
           h: taskH,
@@ -330,14 +247,14 @@ export function computeAutoLayout(markdown: string): ComputedAutoLayout {
 
       const calculatedGroupH = Math.max(
         180,
-        currentTaskY - currentRowY - CARD_GAP + GROUP_PADDING_BOTTOM
+        currentTaskY - colY - CARD_GAP + GROUP_PADDING_BOTTOM
       );
 
       const leafG: ComputedGroupLayout = {
         id: group.id,
         title: group.title,
-        x: currentColX,
-        y: currentRowY,
+        x: colX,
+        y: colY,
         w: GROUP_WIDTH,
         h: calculatedGroupH,
         count: taskCount,
@@ -354,36 +271,43 @@ export function computeAutoLayout(markdown: string): ComputedAutoLayout {
 
       leafGroups.push(leafG);
 
-      if (calculatedGroupH > rowMaxH) {
-        rowMaxH = calculatedGroupH;
+      if (colY + calculatedGroupH > branchMaxColBottom) {
+        branchMaxColBottom = colY + calculatedGroupH;
       }
 
-      currentColX += GROUP_WIDTH + COL_GAP_X;
+      colX += GROUP_WIDTH + COL_GAP_X;
     });
-  }
+
+    const branchHeight = (branchMaxColBottom - currentBranchY) + MACRO_BOTTOM_PAD_Y;
+    if (currentBranchY + branchHeight > rowMaxBottom) {
+      rowMaxBottom = currentBranchY + branchHeight;
+    }
+
+    currentBranchX += branchBlockWidth + COL_GAP_X;
+  });
 
   // Create parent macro-group shapes enclosing their child sections
   const macroGroups: ComputedGroupLayout[] = [];
 
   if (parentHeadings && parentHeadings.length > 0) {
-    // Sort parent headings by level descending so deeper parents are bounded first
-    const sortedParents = [...parentHeadings].sort((a, b) => (b.level || 1) - (a.level || 1));
+    // Only pure macro parents (modules that don't have direct tasks as leaf columns themselves)
+    const pureParents = parentHeadings.filter(
+      (ph) => !parsedGroups.some((g) => g.id === ph.id)
+    );
+
+    const sortedParents = [...pureParents].sort((a, b) => (b.level || 1) - (a.level || 1));
 
     sortedParents.forEach((ph) => {
       const directChildren = [...leafGroups, ...macroGroups].filter((s) => {
+        if (ph.level === 2 && s.branchTitle && s.branchTitle.toLowerCase() === ph.title.toLowerCase()) {
+          return true;
+        }
         if (s.parentId && ph.id && s.parentId === ph.id) {
           return true;
         }
-        // Include leaf column for ph itself if ph has direct tasks
-        if (!s.isContainer && ph.id && s.headingId === ph.id) {
-          return true;
-        }
         const ptMatches = (s.parentTitle || '').trim().toLowerCase() === ph.title.trim().toLowerCase();
-        if (!ptMatches) return false;
-        if (s.branchTitle && ph.branchTitle) {
-          return s.branchTitle.toLowerCase() === ph.branchTitle.toLowerCase();
-        }
-        return true;
+        if (ptMatches) return true;
+        return false;
       });
 
       if (directChildren.length === 0) return;
@@ -438,11 +362,13 @@ export function computeAutoLayout(markdown: string): ComputedAutoLayout {
  * - Strictly maintains each task within its exact section group.
  */
 export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutResult {
-  const computed = computeAutoLayout(markdown);
+  setCanvasPopulatingFromMarkdown(true);
+  try {
+    const computed = computeAutoLayout(markdown);
 
-  if (computed.tasks.length === 0 && computed.groups.length === 0) {
-    return { taskCount: 0, groupCount: 0 };
-  }
+    if (computed.tasks.length === 0 && computed.groups.length === 0) {
+      return { taskCount: 0, groupCount: 0 };
+    }
 
   const existingShapes = editor.getCurrentPageShapes();
   const existingTaskShapes = existingShapes.filter((s) => (s as any).type === 'task') as any[];
@@ -636,8 +562,13 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
     editor.zoomToFit({ animation: { duration: 300 } });
   }, 50);
 
-  return {
-    taskCount: computed.tasks.length,
-    groupCount: computed.groups.length,
-  };
+    return {
+      taskCount: computed.tasks.length,
+      groupCount: computed.groups.length,
+    };
+  } finally {
+    setTimeout(() => {
+      setCanvasPopulatingFromMarkdown(false);
+    }, 150);
+  }
 }

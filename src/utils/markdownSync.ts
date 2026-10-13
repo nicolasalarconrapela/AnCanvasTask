@@ -206,8 +206,11 @@ export function scanTaskBlocks(markdown: string): {
     // Check for task item: "- [ ] Title" or "- [x] Title"
     // Indented checkbox lines under an active task block are subtasks, not root tasks
     const isIndented = line.startsWith(' ') || line.startsWith('\t');
+    const isMetadataLine =
+      Boolean(currentBlock) &&
+      /^(?:\s*[-*]\s*(?:\[[ xX]\]\s*)?)?(?:ID|Priority|Status|Tags?|Blocked\s*(?:by|-by)?)\s*:/i.test(trimmed);
     const taskMatch = line.match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/);
-    if (taskMatch && (!currentBlock || !isIndented)) {
+    if (taskMatch && (!currentBlock || !isIndented) && !isMetadataLine) {
       if (currentBlock) {
         currentBlock.endLineIndex = i - 1;
         taskBlocks.push(currentBlock);
@@ -238,17 +241,18 @@ export function scanTaskBlocks(markdown: string): {
         line.startsWith(' ') ||
         line.startsWith('\t') ||
         trimmed.startsWith('-') ||
-        trimmed.startsWith('*');
+        trimmed.startsWith('*') ||
+        isMetadataLine;
 
       if (isSubLine && trimmed.length > 0) {
-        const idMatch = trimmed.match(/^(?:[-*]\s*)?ID\s*:\s*(.+)$/i);
+        const idMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?ID\s*:\s*(.+)$/i);
         if (idMatch) {
           currentBlock.detectedId = idMatch[1].trim();
           currentBlock.endLineIndex = i;
           continue;
         }
 
-        const priorityMatch = trimmed.match(/^(?:[-*]\s*)?Priority\s*:\s*(.+)$/i);
+        const priorityMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?Priority\s*:\s*(.+)$/i);
         if (priorityMatch) {
           const rawP = priorityMatch[1].trim();
           currentBlock.rawPriority = rawP;
@@ -260,21 +264,21 @@ export function scanTaskBlocks(markdown: string): {
           continue;
         }
 
-        const blockedByMatch = trimmed.match(/^(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:\s*(.+)$/i);
+        const blockedByMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?Blocked\s*(?:by|-by)?\s*:\s*(.+)$/i);
         if (blockedByMatch) {
           currentBlock.detectedBlockedBy = blockedByMatch[1].trim();
           currentBlock.endLineIndex = i;
           continue;
         }
 
-        const statusMatch = trimmed.match(/^(?:[-*]\s*)?Status\s*:\s*(.+)$/i);
+        const statusMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?Status\s*:\s*(.+)$/i);
         if (statusMatch) {
-          currentBlock.detectedStatus = statusMatch[1].trim().toLowerCase().replace(/\s+/g, '_');
+          currentBlock.detectedStatus = statusMatch[1].trim();
           currentBlock.endLineIndex = i;
           continue;
         }
 
-        const tagsMatch = trimmed.match(/^(?:[-*]\s*)?(?:Tags|Labels)\s*:\s*(.+)$/i);
+        const tagsMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?(?:Tags?|Labels)\s*:\s*(.+)$/i);
         if (tagsMatch) {
           currentBlock.detectedTags = tagsMatch[1]
             .split(',')

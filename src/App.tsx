@@ -3110,49 +3110,9 @@ export default function App() {
                       );
                     }
                   }
-
-                  // 2. Detect moving task into another group bounding box (for non-interactive programmatic moves)
-                  const isPositionChanged = to.x !== from.x || to.y !== from.y;
-                  if (isPositionChanged && !editorInstance.isIn('select.translating')) {
-                    const taskId = toProps.taskId || fromProps.taskId;
-                    const taskTitle = toProps.title || fromProps.title;
-                    if (taskId || taskTitle) {
-                      const taskCenterX = to.x + (toProps.w || 320) / 2;
-                      const taskCenterY = to.y + 40;
-
-                      // Find all task-group shapes on canvas
-                      const groupShapes = editorInstance
-                        .getCurrentPageShapes()
-                        .filter((s) => (s as any).type === 'task-group');
-
-                      let foundGroupTitle: string | null = null;
-                      for (const gShape of groupShapes) {
-                        const g = gShape as any;
-                        const gW = g.props?.w || 360;
-                        const gH = g.props?.h || 240;
-
-                        if (
-                          taskCenterX >= g.x &&
-                          taskCenterX <= g.x + gW &&
-                          taskCenterY >= g.y &&
-                          taskCenterY <= g.y + gH
-                        ) {
-                          foundGroupTitle = g.props?.title || null;
-                          break;
-                        }
-                      }
-
-                      const targetGroupTitle = foundGroupTitle || 'Out';
-                      const currentGroup = toProps.groupTitle || fromProps.groupTitle;
-                      if (currentGroup?.trim().toLowerCase() !== targetGroupTitle.trim().toLowerCase()) {
-                        setMarkdownInput((curr) =>
-                          moveTaskToGroupInMarkdown(curr, taskId, targetGroupTitle, taskTitle)
-                        );
-                        updateAllGroupCounts(editorInstance);
-                      }
-                    }
-                  }
                 }
+
+
 
                 // 3. Detect moving task-group shape -> move associated tasks together as a group
                 if (to?.type === 'task-group' && from?.type === 'task-group') {

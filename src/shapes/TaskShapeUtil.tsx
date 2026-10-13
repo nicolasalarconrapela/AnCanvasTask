@@ -1123,12 +1123,8 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     const allGroupShapes = this.editor
       .getCurrentPageShapes()
       .filter((s) => (s as any).type === 'task-group') as any[];
-    const parentTitlesSet = new Set(
-      allGroupShapes.map((g) => ((g.props?.parentTitle || '') as string).trim().toLowerCase()).filter(Boolean)
-    );
     const groupShapes = allGroupShapes.filter((g) => {
-      const gTitle = ((g.props?.title || '') as string).trim().toLowerCase();
-      return !g.props?.isContainer && g.props?.level !== 1 && !parentTitlesSet.has(gTitle);
+      return !g.props?.isContainer && g.props?.level !== 1;
     });
 
     let capturedGroup: any = null;
@@ -1173,12 +1169,8 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     const allGroupShapes = this.editor
       .getCurrentPageShapes()
       .filter((s) => (s as any).type === 'task-group') as any[];
-    const parentTitlesSet = new Set(
-      allGroupShapes.map((g) => ((g.props?.parentTitle || '') as string).trim().toLowerCase()).filter(Boolean)
-    );
     const groupShapes = allGroupShapes.filter((g) => {
-      const gTitle = ((g.props?.title || '') as string).trim().toLowerCase();
-      return !g.props?.isContainer && g.props?.level !== 1 && !parentTitlesSet.has(gTitle);
+      return !g.props?.isContainer && g.props?.level !== 1;
     });
 
     const cardW = current.props?.w || 320;
@@ -1296,22 +1288,12 @@ export class TaskShapeUtil extends ShapeUtil<any> {
         },
       };
     } else {
-      // Separated from its section into open canvas!
-      // In Markdown, it must be assigned to ## Out
-      if (taskId) {
-        window.dispatchEvent(
-          new CustomEvent('antask:task-moved-group', {
-            detail: { taskId, targetGroupTitle: 'Out' },
-          })
-        );
-      }
-
+      // Retain current group association without forcing synthetic Out section
       return {
         id: current.id,
         type: 'task' as const,
         props: {
           ...current.props,
-          groupTitle: 'Out',
         },
       };
     }
@@ -2195,8 +2177,15 @@ export function populateCanvasWithGroups(
       const prev = placedRects[placedRects.length - 1];
       const prevGroup = groups[index - 1];
       const isNewBranch = prevGroup && group.branchTitle && prevGroup.branchTitle !== group.branchTitle;
-      x = prev.x + prev.w + (isNewBranch ? 100 : 40);
-      y = prev.y;
+      const tentativeX = prev.x + prev.w + (isNewBranch ? 64 : 40);
+      if (isNewBranch || tentativeX + w > 1400 + 80) {
+        const maxBottom = Math.max(...placedRects.map((p) => p.y + p.h));
+        x = 80;
+        y = maxBottom + 64;
+      } else {
+        x = tentativeX;
+        y = prev.y;
+      }
     }
 
     while (placedRects.some((p) => isRectOverlapping({ x, y, w, h }, p))) {
@@ -2408,8 +2397,11 @@ export function populateCanvasWithGroups(
   const sortedParents = [...parentHeadings].sort((a, b) => (b.level || 1) - (a.level || 1));
 
   sortedParents.forEach((ph) => {
-    // Direct children: match by parentId === ph.id first, with fallback to parentTitle + branchTitle
+    // Direct children: match by branchTitle for level 2, or parentId === ph.id first, with fallback to parentTitle
     const directChildren = [...groupShapesToCreate, ...macroGroupShapesToCreate].filter((s) => {
+      if (ph.level === 2 && s.props?.branchTitle && s.props.branchTitle.toLowerCase() === ph.title.toLowerCase()) {
+        return true;
+      }
       if (s.props?.parentId && ph.id) {
         return s.props.parentId === ph.id;
       }
