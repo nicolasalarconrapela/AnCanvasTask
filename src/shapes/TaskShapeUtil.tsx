@@ -118,6 +118,8 @@ export type TaskShapeProps = {
   taskId?: string;
   status?: TaskStatus;
   groupTitle?: string;
+  groupHeadingId?: string;
+  branchTitle?: string;
   tags?: string[];
   subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
@@ -1006,6 +1008,8 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     taskId: T.string.optional(),
     status: T.string.optional(),
     groupTitle: T.string.optional(),
+    groupHeadingId: T.string.optional(),
+    branchTitle: T.string.optional(),
     tags: T.arrayOf(T.string).optional(),
     subtasks: T.object({
       total: T.number,
@@ -1269,7 +1273,12 @@ export class TaskShapeUtil extends ShapeUtil<any> {
       if (taskId) {
         window.dispatchEvent(
           new CustomEvent('antask:task-moved-group', {
-            detail: { taskId, targetGroupTitle },
+            detail: {
+              taskId,
+              targetGroupTitle,
+              targetHeadingId: targetGroup.props?.headingId,
+              targetBranchTitle: targetGroup.props?.branchTitle,
+            },
           })
         );
       }
@@ -1282,6 +1291,8 @@ export class TaskShapeUtil extends ShapeUtil<any> {
         props: {
           ...current.props,
           groupTitle: targetGroupTitle,
+          groupHeadingId: targetGroup.props?.headingId,
+          branchTitle: targetGroup.props?.branchTitle,
         },
       };
     } else {
@@ -1327,31 +1338,70 @@ export function updateAllGroupCounts(editor: Editor) {
   const updates: any[] = [];
   for (const g of groupShapes) {
     const gTitle = (g.props?.title || '').trim().toLowerCase();
-    const childGroups = groupShapes.filter(
-      (cg) => cg.id !== g.id && (cg.props?.parentTitle || '').trim().toLowerCase() === gTitle
-    );
+    const gHeadingId = g.props?.headingId;
+    const gBranch = g.props?.branchTitle;
+
+    const childGroups = groupShapes.filter((cg) => {
+      if (cg.id === g.id) return false;
+      if (gHeadingId && cg.props?.parentId === gHeadingId) return true;
+      const ptMatch = (cg.props?.parentTitle || '').trim().toLowerCase() === gTitle;
+      if (!ptMatch) return false;
+      if (gBranch && cg.props?.branchTitle) {
+        return cg.props.branchTitle.toLowerCase() === gBranch.toLowerCase();
+      }
+      return true;
+    });
+
     let tasksInGroup: any[] = [];
     if (childGroups.length > 0 || g.props?.isContainer || g.props?.level === 1) {
+      const descendantHeadingIds = new Set<string>();
       const descendantTitles = new Set<string>([gTitle]);
-      const addDescendants = (pLower: string) => {
+      if (gHeadingId) descendantHeadingIds.add(gHeadingId);
+
+      const addDescendants = (pHeadingId?: string, pTitleLower?: string) => {
         for (const cg of groupShapes) {
-          if (cg.id !== g.id && (cg.props?.parentTitle || '').trim().toLowerCase() === pLower) {
+          if (cg.id === g.id) continue;
+          const matchById = pHeadingId && cg.props?.parentId === pHeadingId;
+          const matchByTitle = pTitleLower && (cg.props?.parentTitle || '').trim().toLowerCase() === pTitleLower &&
+            (!gBranch || !cg.props?.branchTitle || cg.props.branchTitle.toLowerCase() === gBranch.toLowerCase());
+
+          if (matchById || matchByTitle) {
+            const cgHeadId = cg.props?.headingId;
             const cLower = (cg.props?.title || '').trim().toLowerCase();
-            if (!descendantTitles.has(cLower)) {
-              descendantTitles.add(cLower);
-              addDescendants(cLower);
+            const notYetVisited = (cgHeadId && !descendantHeadingIds.has(cgHeadId)) || (!cgHeadId && !descendantTitles.has(cLower));
+            if (notYetVisited) {
+              if (cgHeadId) descendantHeadingIds.add(cgHeadId);
+              if (cLower) descendantTitles.add(cLower);
+              addDescendants(cgHeadId, cLower);
             }
           }
         }
       };
-      addDescendants(gTitle);
-      tasksInGroup = taskShapes.filter((t) =>
-        descendantTitles.has((t.props?.groupTitle || '').trim().toLowerCase())
-      );
+      addDescendants(gHeadingId, gTitle);
+
+      tasksInGroup = taskShapes.filter((t) => {
+        if (t.props?.groupHeadingId && descendantHeadingIds.size > 0) {
+          return descendantHeadingIds.has(t.props.groupHeadingId);
+        }
+        const tTitle = (t.props?.groupTitle || '').trim().toLowerCase();
+        if (!descendantTitles.has(tTitle)) return false;
+        if (gBranch && t.props?.branchTitle) {
+          return t.props.branchTitle.toLowerCase() === gBranch.toLowerCase();
+        }
+        return true;
+      });
     } else {
-      tasksInGroup = taskShapes.filter(
-        (t) => (t.props?.groupTitle || '').trim().toLowerCase() === gTitle
-      );
+      tasksInGroup = taskShapes.filter((t) => {
+        if (gHeadingId && t.props?.groupHeadingId) {
+          return t.props.groupHeadingId === gHeadingId;
+        }
+        const tTitle = (t.props?.groupTitle || '').trim().toLowerCase();
+        if (tTitle !== gTitle) return false;
+        if (gBranch && t.props?.branchTitle) {
+          return t.props.branchTitle.toLowerCase() === gBranch.toLowerCase();
+        }
+        return true;
+      });
     }
 
     const count = tasksInGroup.length;
@@ -1565,7 +1615,12 @@ function TaskGroupComponent({ shape }: { shape: ITaskGroupShape }) {
                 setIsMenuOpen(false);
                 window.dispatchEvent(
                   new CustomEvent('antask:delete-section', {
-                    detail: { groupTitle: title, shapeId: shape.id },
+                    detail: {
+                      groupTitle: title,
+                      shapeId: shape.id,
+                      headingId: shape.props?.headingId,
+                      branchTitle: shape.props?.branchTitle,
+                    },
                   })
                 );
               }}
@@ -1589,6 +1644,10 @@ export type GroupShapeProps = {
   completedCount: number;
   level?: number;
   parentTitle?: string;
+  parentId?: string;
+  headingId?: string;
+  branchTitle?: string;
+  path?: string;
   isContainer?: boolean;
 };
 
@@ -1605,6 +1664,10 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
     completedCount: T.number,
     level: T.optional(T.number),
     parentTitle: T.optional(T.string),
+    parentId: T.optional(T.string),
+    headingId: T.optional(T.string),
+    branchTitle: T.optional(T.string),
+    path: T.optional(T.string),
     isContainer: T.optional(T.boolean),
   };
 
@@ -1950,7 +2013,9 @@ export function populateCanvasWithGroups(
       y = maxBottom + 64;
     } else {
       const prev = placedRects[placedRects.length - 1];
-      x = prev.x + prev.w + 40;
+      const prevGroup = groups[index - 1];
+      const isNewBranch = prevGroup && group.branchTitle && prevGroup.branchTitle !== group.branchTitle;
+      x = prev.x + prev.w + (isNewBranch ? 100 : 40);
       y = prev.y;
     }
 
@@ -1977,6 +2042,10 @@ export function populateCanvasWithGroups(
     const groupH = placed.h;
     const isNewGroup = !savedGroupMap.has(group.title.toLowerCase());
 
+    // If this group is a parent container with child headings AND has direct tasks:
+    // Its parentId for the leaf column is ITSELF (group.id), so its macro container encloses it!
+    const leafParentId = (group.isParent && group.id) ? group.id : group.parentId;
+
     // Create Group container shape
     groupShapesToCreate.push({
       id: createShapeId(),
@@ -1991,6 +2060,10 @@ export function populateCanvasWithGroups(
         completedCount,
         level: group.level || 2,
         parentTitle: group.parentTitle,
+        parentId: leafParentId,
+        headingId: group.id,
+        branchTitle: group.branchTitle,
+        path: group.path,
         isContainer: false,
       },
     });
@@ -2046,6 +2119,8 @@ export function populateCanvasWithGroups(
           taskId: resolvedTaskId,
           status: task.status,
           groupTitle: group.title,
+          groupHeadingId: group.id,
+          branchTitle: group.branchTitle,
           tags: task.tags,
           subtasks: task.subtasks,
           blockedBy: task.blockedBy,
@@ -2141,41 +2216,28 @@ export function populateCanvasWithGroups(
   // Pass 3: Create parent macro-group shapes enclosing their child sections
   const { parentHeadings } = rawMarkdown ? scanTaskBlocks(rawMarkdown) : { parentHeadings: [] };
 
-  const parentHeadingInfoMap = new Map<string, { level: number; parentTitle?: string }>();
-  parentHeadings.forEach((ph) => {
-    parentHeadingInfoMap.set(ph.title.toLowerCase(), {
-      level: ph.level || 1,
-      parentTitle: ph.parentTitle,
-    });
-  });
-
-  // Also include any parentTitle found on child group shapes if not already present
-  groupShapesToCreate.forEach((gs) => {
-    const pt = gs.props.parentTitle;
-    if (pt && !parentHeadingInfoMap.has(pt.toLowerCase())) {
-      parentHeadingInfoMap.set(pt.toLowerCase(), { level: 1, parentTitle: undefined });
-    }
-  });
-
   const MACRO_PAD_X = 28;
   const MACRO_HEADER_PAD_Y = 56;
   const MACRO_BOTTOM_PAD_Y = 28;
   const macroGroupShapesToCreate: any[] = [];
 
-  // Sort parent headings by level descending so deeper parents (e.g. level 3) are bounded first,
+  // Sort parent headings by level descending so deeper parents (e.g. level 4, then level 3) are bounded first,
   // then enclosing higher-level parents (e.g. level 2 or level 1) can enclose them.
-  const sortedParents = Array.from(parentHeadingInfoMap.entries()).sort(
-    (a, b) => b[1].level - a[1].level
-  );
+  const sortedParents = [...parentHeadings].sort((a, b) => (b.level || 1) - (a.level || 1));
 
-  sortedParents.forEach(([pTitleLower, pInfo]) => {
-    const originalParentHeading = parentHeadings.find((ph) => ph.title.toLowerCase() === pTitleLower);
-    const childShapeWithParent = groupShapesToCreate.find((gs) => (gs.props.parentTitle || '').toLowerCase() === pTitleLower);
-    const pTitle = originalParentHeading?.title || childShapeWithParent?.props.parentTitle || pTitleLower;
-
-    const directChildren = [...groupShapesToCreate, ...macroGroupShapesToCreate].filter(
-      (s) => (s.props?.parentTitle || '').trim().toLowerCase() === pTitleLower
-    );
+  sortedParents.forEach((ph) => {
+    // Direct children: match by parentId === ph.id first, with fallback to parentTitle + branchTitle
+    const directChildren = [...groupShapesToCreate, ...macroGroupShapesToCreate].filter((s) => {
+      if (s.props?.parentId && ph.id) {
+        return s.props.parentId === ph.id;
+      }
+      const ptMatches = (s.props?.parentTitle || '').trim().toLowerCase() === ph.title.trim().toLowerCase();
+      if (!ptMatches) return false;
+      if (s.props?.branchTitle && ph.branchTitle) {
+        return s.props.branchTitle.toLowerCase() === ph.branchTitle.toLowerCase();
+      }
+      return true;
+    });
 
     if (directChildren.length === 0) return;
 
@@ -2187,7 +2249,7 @@ export function populateCanvasWithGroups(
     const totalTasks = directChildren.reduce((sum, s) => sum + (s.props?.count || 0), 0);
     const completedTasks = directChildren.reduce((sum, s) => sum + (s.props?.completedCount || 0), 0);
 
-    const pSaved = savedGroupMap.get(pTitleLower);
+    const pSaved = savedGroupMap.get(ph.title.toLowerCase());
     const calcX = minX - MACRO_PAD_X;
     const calcY = minY - MACRO_HEADER_PAD_Y;
     const calcW = (maxRight - minX) + MACRO_PAD_X * 2;
@@ -2201,11 +2263,15 @@ export function populateCanvasWithGroups(
       props: {
         w: pSaved ? Math.max(pSaved.width, (maxRight - Math.min(pSaved.x, calcX)) + MACRO_PAD_X) : calcW,
         h: pSaved ? Math.max(pSaved.height, (maxBottom - Math.min(pSaved.y, calcY)) + MACRO_BOTTOM_PAD_Y) : calcH,
-        title: pTitle,
+        title: ph.title,
         count: totalTasks,
         completedCount: completedTasks,
-        level: pInfo.level,
-        parentTitle: pInfo.parentTitle,
+        level: ph.level || 1,
+        parentTitle: ph.parentTitle,
+        parentId: ph.parentId,
+        headingId: ph.id,
+        branchTitle: ph.branchTitle,
+        path: ph.path,
         isContainer: true,
       },
     });

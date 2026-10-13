@@ -15,35 +15,60 @@ export interface ParsedMarkdownTask {
 }
 
 export interface ParsedGroup {
+  id?: string;
   title: string;
   tasks: ParsedMarkdownTask[];
   level?: number;
   parentTitle?: string;
+  parentId?: string;
+  branchTitle?: string;
+  path?: string;
+  lineIndex?: number;
+  isParent?: boolean;
 }
 
 export function parseTasksMarkdown(markdown: string): ParsedGroup[] {
   const { taskBlocks, groupHeadings } = scanTaskBlocks(markdown);
-  const groupsMap = new Map<string, ParsedMarkdownTask[]>();
-  const parentMap = new Map<string, string | undefined>();
-  const levelMap = new Map<string, number>();
+  const parsedGroups: ParsedGroup[] = [];
+  const groupById = new Map<string, ParsedGroup>();
 
   // Ensure headings are preserved in order, excluding "Notas" / "Notes" sections
   groupHeadings.forEach((gh) => {
     const lower = gh.title.trim().toLowerCase();
     if (lower !== 'notas' && lower !== 'notes') {
-      groupsMap.set(gh.title, []);
-      parentMap.set(gh.title, gh.parentTitle);
-      levelMap.set(gh.title, gh.level || 2);
+      const gItem: ParsedGroup = {
+        id: gh.id || `h_${gh.lineIndex}`,
+        title: gh.title,
+        tasks: [],
+        level: gh.level || 2,
+        parentTitle: gh.parentTitle,
+        parentId: gh.parentId,
+        branchTitle: gh.branchTitle,
+        path: gh.path,
+        lineIndex: gh.lineIndex,
+        isParent: gh.isParent,
+      };
+      parsedGroups.push(gItem);
+      groupById.set(gItem.id!, gItem);
     }
   });
 
   taskBlocks.forEach((block) => {
-    const grp = block.groupTitle || 'General';
-    if (!groupsMap.has(grp)) {
-      groupsMap.set(grp, []);
+    let target = block.headingId ? groupById.get(block.headingId) : null;
+    if (!target) {
+      target =
+        parsedGroups.find(
+          (g) =>
+            g.title.toLowerCase() === (block.groupTitle || '').toLowerCase() &&
+            (!block.branchTitle || g.branchTitle === block.branchTitle)
+        ) ||
+        parsedGroups.find(
+          (g) => g.title.toLowerCase() === (block.groupTitle || '').toLowerCase()
+        );
     }
+
     const isCompleted = block.rawTaskLine.includes('[x]') || block.rawTaskLine.includes('[X]');
-    groupsMap.get(grp)!.push({
+    const parsedTask: ParsedMarkdownTask = {
       title: block.detectedTitle,
       completed: isCompleted,
       taskId: block.detectedId,
@@ -53,17 +78,20 @@ export function parseTasksMarkdown(markdown: string): ParsedGroup[] {
       tags: block.detectedTags,
       subtasks: block.detectedSubtasks,
       blockedBy: block.detectedBlockedBy,
-    });
-  });
+    };
 
-  const parsedGroups: ParsedGroup[] = [];
-  groupsMap.forEach((tasks, title) => {
-    parsedGroups.push({
-      title,
-      tasks,
-      level: levelMap.get(title) || 2,
-      parentTitle: parentMap.get(title),
-    });
+    if (target) {
+      target.tasks.push(parsedTask);
+    } else {
+      const fallback: ParsedGroup = {
+        id: `fallback-${block.groupTitle || 'General'}`,
+        title: block.groupTitle || 'General',
+        tasks: [parsedTask],
+        level: 2,
+      };
+      parsedGroups.push(fallback);
+      groupById.set(fallback.id!, fallback);
+    }
   });
 
   return parsedGroups;

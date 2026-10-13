@@ -39,6 +39,10 @@ export interface TaskBlockInfo {
   };
   unknownMetadata: Array<{ key: string; rawLine: string }>;
   groupTitle: string;
+  headingId?: string;
+  headingLineIndex?: number;
+  branchTitle?: string;
+  groupPath?: string;
   isOutsideHeading: boolean;
   indentation: string;
 }
@@ -79,17 +83,28 @@ export interface MarkdownValidationReport {
 }
 
 export interface GroupHeadingInfo {
+  id?: string;
   title: string;
   lineIndex: number;
   level?: number;
   parentTitle?: string;
+  parentId?: string;
+  branchTitle?: string;
+  path?: string;
+  isParent?: boolean;
+  hasDirectTasks?: boolean;
 }
 
 export interface ParentHeadingInfo {
+  id?: string;
   title: string;
   lineIndex: number;
   level?: number;
   parentTitle?: string;
+  parentId?: string;
+  branchTitle?: string;
+  path?: string;
+  hasDirectTasks?: boolean;
 }
 
 /**
@@ -106,14 +121,20 @@ export function scanTaskBlocks(markdown: string): {
   const groupHeadings: GroupHeadingInfo[] = [];
   const parentHeadings: ParentHeadingInfo[] = [];
 
-  const rawHeadings: Array<{
+  interface ExtendedRawHeading {
+    id: string;
     title: string;
     lineIndex: number;
     level: number;
     parentTitle?: string;
-  }> = [];
+    parentId?: string;
+    branchTitle?: string;
+    path: string;
+  }
 
-  const headingStack: Array<{ title: string; level: number }> = [];
+  const rawHeadings: ExtendedRawHeading[] = [];
+  const headingStack: ExtendedRawHeading[] = [];
+  let currentHeading: ExtendedRawHeading | null = null;
   let currentGroup = '';
   let currentBlock: TaskBlockInfo | null = null;
   let taskCounter = 0;
@@ -136,16 +157,36 @@ export function scanTaskBlocks(markdown: string): {
       while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= level) {
         headingStack.pop();
       }
-      const parentTitle = headingStack.length > 0 ? headingStack[headingStack.length - 1].title : undefined;
-      headingStack.push({ title, level });
+      const parent = headingStack.length > 0 ? headingStack[headingStack.length - 1] : undefined;
+      const parentTitle = parent ? parent.title : undefined;
+      const parentId = parent ? parent.id : undefined;
 
-      rawHeadings.push({
+      // branchTitle: ancestor at level 2 (##) or if none, level 1 or self
+      let branchTitle = title;
+      if (level > 2) {
+        const l2 = headingStack.find((h) => h.level === 2);
+        if (l2) branchTitle = l2.title;
+        else if (parent) branchTitle = parent.branchTitle || parent.title;
+      }
+
+      const pathParts = headingStack.map((h) => h.title);
+      pathParts.push(title);
+      const path = pathParts.join(' > ');
+
+      const newHeading: ExtendedRawHeading = {
+        id: `h_${i}`,
         title,
         lineIndex: i,
         level,
         parentTitle,
-      });
+        parentId,
+        branchTitle,
+        path,
+      };
 
+      headingStack.push(newHeading);
+      rawHeadings.push(newHeading);
+      currentHeading = newHeading;
       currentGroup = title;
       continue;
     }
@@ -167,7 +208,11 @@ export function scanTaskBlocks(markdown: string): {
         temporaryId: `temp-task-${taskCounter}`,
         detectedTitle: taskMatch[4].trim(),
         unknownMetadata: [],
+        headingId: currentHeading ? currentHeading.id : undefined,
+        headingLineIndex: currentHeading ? currentHeading.lineIndex : undefined,
         groupTitle: currentGroup || 'General',
+        groupPath: currentHeading ? currentHeading.path : 'General',
+        branchTitle: currentHeading ? currentHeading.branchTitle : 'General',
         isOutsideHeading: !currentGroup,
         indentation: taskMatch[1].match(/^\s*/)?.[0] || '',
       };
@@ -283,33 +328,41 @@ export function scanTaskBlocks(markdown: string): {
   }
 
   // Classify headings:
-  // Headings that have child headings act as parent containers.
-  // Headings that do NOT have child headings (or have direct tasks) act as group headings.
-  const parentTitlesSet = new Set(
-    rawHeadings.map((h) => h.parentTitle?.toLowerCase()).filter(Boolean)
-  );
+  // Heading A is a parent if any heading B has parentId === A.id
+  const parentIdsSet = new Set(rawHeadings.map((h) => h.parentId).filter(Boolean));
 
   for (const h of rawHeadings) {
-    const isParent = parentTitlesSet.has(h.title.toLowerCase());
-    const hasDirectTasks = taskBlocks.some(
-      (b) => b.groupTitle.toLowerCase() === h.title.toLowerCase()
+    const isParent = parentIdsSet.has(h.id);
+    const hasDirectTasks = taskBlocks.some((b) =>
+      b.headingId ? b.headingId === h.id : b.groupTitle.toLowerCase() === h.title.toLowerCase()
     );
 
     if (isParent) {
       parentHeadings.push({
+        id: h.id,
         title: h.title,
         lineIndex: h.lineIndex,
         level: h.level,
         parentTitle: h.parentTitle,
+        parentId: h.parentId,
+        branchTitle: h.branchTitle,
+        path: h.path,
+        hasDirectTasks,
       });
     }
 
     if (!isParent || hasDirectTasks) {
       groupHeadings.push({
+        id: h.id,
         title: h.title,
         lineIndex: h.lineIndex,
         level: h.level,
         parentTitle: h.parentTitle,
+        parentId: h.parentId,
+        branchTitle: h.branchTitle,
+        path: h.path,
+        isParent,
+        hasDirectTasks,
       });
     }
   }
@@ -475,10 +528,10 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
 
   // 7. Check for Empty Headings
   groupHeadings.forEach((gh, idx) => {
-    const tasksInHeading = taskBlocks.filter(
-      (b) => b.groupTitle.toLowerCase() === gh.title.toLowerCase()
+    const tasksInHeading = taskBlocks.filter((b) =>
+      b.headingId ? b.headingId === gh.id : b.groupTitle.toLowerCase() === gh.title.toLowerCase()
     );
-    const isParent = parentHeadings.some((ph) => ph.title.toLowerCase() === gh.title.toLowerCase());
+    const isParent = Boolean(gh.isParent || parentHeadings.some((ph) => ph.id ? ph.id === gh.id : ph.title.toLowerCase() === gh.title.toLowerCase()));
     if (tasksInHeading.length === 0 && !isParent) {
       issues.push({
         id: `empty-heading-${idx}`,
@@ -730,6 +783,8 @@ export function addTaskToMarkdown(
     blockedBy?: string;
     tags?: string[];
     subtasks?: Array<{ title: string; completed?: boolean }>;
+    groupHeadingId?: string;
+    branchTitle?: string;
   }
 ): { updatedMarkdown: string; taskId: string } {
   const cleanTitle = payload.title.trim();
@@ -738,7 +793,7 @@ export function addTaskToMarkdown(
   const finalId = payload.customId?.trim() || generateUniqueTaskId(cleanTitle, markdown);
 
   const lines = markdown.split(/\r?\n/);
-  const { groupHeadings } = scanTaskBlocks(markdown);
+  const { groupHeadings, parentHeadings } = scanTaskBlocks(markdown);
 
   const taskLines: string[] = [
     `- [ ] ${cleanTitle}`,
@@ -763,9 +818,15 @@ export function addTaskToMarkdown(
   const taskBlockText = taskLines.join('\n');
 
   // Check if target group heading exists
-  const existingGroupHeading = groupHeadings.find(
-    (g) => g.title.toLowerCase() === cleanGroup.toLowerCase()
-  );
+  const allPossibleHeadings = [...groupHeadings, ...parentHeadings];
+  const existingGroupHeading = allPossibleHeadings.find((g) => {
+    if (payload.groupHeadingId && g.id === payload.groupHeadingId) return true;
+    if (g.title.toLowerCase() !== cleanGroup.toLowerCase()) return false;
+    if (payload.branchTitle && g.branchTitle) {
+      return g.branchTitle.toLowerCase() === payload.branchTitle.toLowerCase();
+    }
+    return true;
+  });
 
   if (existingGroupHeading) {
     let insertLineIndex = lines.length;
@@ -822,17 +883,25 @@ export function deleteTaskFromMarkdown(
  */
 export function deleteSectionFromMarkdown(
   markdown: string,
-  groupTitle: string
+  groupTitle: string,
+  headingId?: string,
+  branchTitle?: string
 ): string {
   if (!markdown || !groupTitle) return markdown;
 
   const lines = markdown.split(/\r?\n/);
-  const { groupHeadings } = scanTaskBlocks(markdown);
+  const { groupHeadings, parentHeadings } = scanTaskBlocks(markdown);
 
   const cleanGroup = groupTitle.trim().toLowerCase().replace(/^#+\s*/, '');
-  const targetHeading = groupHeadings.find(
-    (gh) => gh.title.trim().toLowerCase().replace(/^#+\s*/, '') === cleanGroup
-  );
+  const allHeadings = [...groupHeadings, ...parentHeadings];
+  const targetHeading = allHeadings.find((gh) => {
+    if (headingId && gh.id === headingId) return true;
+    if (gh.title.trim().toLowerCase().replace(/^#+\s*/, '') !== cleanGroup) return false;
+    if (branchTitle && gh.branchTitle) {
+      return gh.branchTitle.toLowerCase() === branchTitle.toLowerCase();
+    }
+    return true;
+  });
 
   let startLine = targetHeading ? targetHeading.lineIndex : -1;
 
@@ -880,14 +949,23 @@ export function moveTaskToGroupInMarkdown(
   markdown: string,
   taskId: string,
   targetGroupTitle: string,
-  taskTitle?: string
+  taskTitle?: string,
+  targetHeadingId?: string,
+  targetBranchTitle?: string
 ): string {
   const cleanTargetGroup = targetGroupTitle.trim();
   const { taskBlocks } = scanTaskBlocks(markdown);
 
   const targetBlock = findMatchingTaskBlock(taskBlocks, taskId, taskTitle);
 
-  if (!targetBlock || targetBlock.groupTitle.toLowerCase() === cleanTargetGroup.toLowerCase()) {
+  if (!targetBlock) {
+    return markdown;
+  }
+  const isAlreadyThere =
+    targetBlock.groupTitle.toLowerCase() === cleanTargetGroup.toLowerCase() &&
+    (!targetHeadingId || targetBlock.headingId === targetHeadingId) &&
+    (!targetBranchTitle || targetBlock.branchTitle?.toLowerCase() === targetBranchTitle.toLowerCase());
+  if (isAlreadyThere) {
     return markdown;
   }
 
@@ -904,9 +982,15 @@ export function moveTaskToGroupInMarkdown(
 
   // Find target group
   const reScanned = scanTaskBlocks(lines.join('\n'));
-  const targetHeading = reScanned.groupHeadings.find(
-    (g) => g.title.toLowerCase() === cleanTargetGroup.toLowerCase()
-  );
+  const allPossibleTargets = [...reScanned.groupHeadings, ...reScanned.parentHeadings];
+  const targetHeading = allPossibleTargets.find((g) => {
+    if (targetHeadingId && g.id === targetHeadingId) return true;
+    if (g.title.toLowerCase() !== cleanTargetGroup.toLowerCase()) return false;
+    if (targetBranchTitle && g.branchTitle) {
+      return g.branchTitle.toLowerCase() === targetBranchTitle.toLowerCase();
+    }
+    return true;
+  });
 
   if (targetHeading) {
     let insertLine = lines.length;

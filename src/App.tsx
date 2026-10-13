@@ -633,10 +633,10 @@ export default function App() {
   // Handle task card moved to another group or separated to Out
   useEffect(() => {
     const handleTaskMovedGroup = (e: any) => {
-      const { taskId, targetGroupTitle } = e.detail || {};
+      const { taskId, targetGroupTitle, targetHeadingId, targetBranchTitle } = e.detail || {};
       if (taskId && targetGroupTitle) {
         setMarkdownInput((curr) => {
-          return moveTaskToGroupInMarkdown(curr, taskId, targetGroupTitle);
+          return moveTaskToGroupInMarkdown(curr, taskId, targetGroupTitle, undefined, targetHeadingId, targetBranchTitle);
         });
         if (editor) {
           updateAllGroupCounts(editor);
@@ -719,14 +719,17 @@ export default function App() {
       handleResolveSingleDuplicateId(lineIndex ?? taskId, taskTitle);
     };
     const handleDeleteSectionEvent = (e: any) => {
-      const { groupTitle, shapeId } = e.detail || {};
+      const { groupTitle, shapeId, headingId, branchTitle } = e.detail || {};
       if (groupTitle) {
         const normGroup = groupTitle.trim().toLowerCase().replace(/^#+\s*/, '');
-        setMarkdownInput((currentMd) => deleteSectionFromMarkdown(currentMd, groupTitle));
+        setMarkdownInput((currentMd) => deleteSectionFromMarkdown(currentMd, groupTitle, headingId, branchTitle));
 
         const ed = editorRef.current;
         if (ed) {
           const allShapes = ed.getCurrentPageShapes();
+          const targetShape = shapeId ? allShapes.find((s) => s.id === shapeId) as any : null;
+          const targetHeadingId = headingId || targetShape?.props?.headingId;
+          const targetBranch = branchTitle || targetShape?.props?.branchTitle;
           const shapesToDelete = new Set<string>();
 
           if (shapeId) {
@@ -736,14 +739,22 @@ export default function App() {
           for (const s of allShapes) {
             const anyS = s as any;
             if (anyS.type === 'task-group') {
-              const title = (anyS.props?.title || '').trim().toLowerCase().replace(/^#+\s*/, '');
-              if (title === normGroup) {
+              if (targetHeadingId && anyS.props?.headingId === targetHeadingId) {
                 shapesToDelete.add(s.id);
+              } else {
+                const title = (anyS.props?.title || '').trim().toLowerCase().replace(/^#+\s*/, '');
+                if (title === normGroup && (!targetBranch || !anyS.props?.branchTitle || anyS.props.branchTitle.toLowerCase() === targetBranch.toLowerCase())) {
+                  shapesToDelete.add(s.id);
+                }
               }
             } else if (anyS.type === 'task') {
-              const taskGroup = (anyS.props?.groupTitle || '').trim().toLowerCase().replace(/^#+\s*/, '');
-              if (taskGroup === normGroup) {
+              if (targetHeadingId && anyS.props?.groupHeadingId === targetHeadingId) {
                 shapesToDelete.add(s.id);
+              } else {
+                const taskGroup = (anyS.props?.groupTitle || '').trim().toLowerCase().replace(/^#+\s*/, '');
+                if (taskGroup === normGroup && (!targetBranch || !anyS.props?.branchTitle || anyS.props.branchTitle.toLowerCase() === targetBranch.toLowerCase())) {
+                  shapesToDelete.add(s.id);
+                }
               }
             }
           }
@@ -3135,31 +3146,41 @@ export default function App() {
                   if (!isResizing && (dx !== 0 || dy !== 0)) {
                     const selectedIds = new Set(editorInstance.getSelectedShapeIds());
                     const groupTitle = (to.props?.title || '').trim().toLowerCase();
+                    const groupHeadingId = to.props?.headingId;
+                    const groupBranch = to.props?.branchTitle;
 
                     // Collect all descendant group shapes (recursively for any level of nesting)
                     const allPageShapes = editorInstance.getCurrentPageShapes();
                     const allGroups = (allPageShapes.filter((s) => (s as any).type === 'task-group') as any[]);
 
                     const descendantGroupShapes: any[] = [];
+                    const relevantGroupHeadingIds = new Set<string>();
                     const relevantGroupTitles = new Set<string>();
+                    if (groupHeadingId) relevantGroupHeadingIds.add(groupHeadingId);
                     relevantGroupTitles.add(groupTitle);
 
-                    const queue = [groupTitle];
+                    const queue: Array<{ headingId?: string; title: string }> = [{ headingId: groupHeadingId, title: groupTitle }];
                     const visitedGroupIds = new Set<string>();
                     visitedGroupIds.add(to.id);
 
                     while (queue.length > 0) {
-                      const currentParentTitle = queue.shift()!;
+                      const currentParent = queue.shift()!;
                       for (const g of allGroups) {
                         if (!visitedGroupIds.has(g.id)) {
+                          const matchById = currentParent.headingId && g.props?.parentId === currentParent.headingId;
                           const pt = ((g.props?.parentTitle || '') as string).trim().toLowerCase();
-                          if (pt === currentParentTitle) {
+                          const matchByTitle = pt === currentParent.title.toLowerCase() &&
+                            (!groupBranch || !g.props?.branchTitle || g.props.branchTitle.toLowerCase() === groupBranch.toLowerCase());
+
+                          if (matchById || matchByTitle) {
                             visitedGroupIds.add(g.id);
                             descendantGroupShapes.push(g);
-                            const childTitle = ((g.props?.title || '') as string).trim().toLowerCase();
+                            const childHeadingId = g.props?.headingId;
+                            const childTitle = ((g.props?.title || '') as string).trim();
+                            if (childHeadingId) relevantGroupHeadingIds.add(childHeadingId);
                             if (childTitle) {
-                              relevantGroupTitles.add(childTitle);
-                              queue.push(childTitle);
+                              relevantGroupTitles.add(childTitle.toLowerCase());
+                              queue.push({ headingId: childHeadingId, title: childTitle });
                             }
                           }
                         }
@@ -3168,8 +3189,16 @@ export default function App() {
 
                     const tasksToMove = (allPageShapes.filter((s) => {
                       if ((s as any).type !== 'task') return false;
+                      const taskHeadId = (s as any).props?.groupHeadingId;
+                      if (taskHeadId && relevantGroupHeadingIds.size > 0) {
+                        return relevantGroupHeadingIds.has(taskHeadId);
+                      }
                       const tg = (((s as any).props?.groupTitle || '') as string).trim().toLowerCase();
-                      return relevantGroupTitles.has(tg);
+                      if (!relevantGroupTitles.has(tg)) return false;
+                      if (groupBranch && (s as any).props?.branchTitle) {
+                        return (s as any).props.branchTitle.toLowerCase() === groupBranch.toLowerCase();
+                      }
+                      return true;
                     }) as any[]);
 
                     const updates: any[] = [];
@@ -5219,8 +5248,8 @@ export default function App() {
                     const isSectionActive = taskFilters.section.toLowerCase() === grp.title.toLowerCase();
                     return (
                       <button
-                        id={`btn-filter-section-${grp.title.toLowerCase().replace(/\s+/g, '-')}`}
-                        key={grp.title}
+                        id={`btn-filter-section-${(grp.id || grp.title).toLowerCase().replace(/\s+/g, '-')}`}
+                        key={grp.id || `${grp.branchTitle || ''}-${grp.title}`}
                         type="button"
                         onClick={() => {
                           setTaskFilters((prev) => ({
@@ -5239,7 +5268,7 @@ export default function App() {
                       >
                         <span
                           className="truncate max-w-[140px]"
-                          title={grp.parentTitle ? `${grp.parentTitle} > ${grp.title}` : grp.title}
+                          title={grp.path ? grp.path : (grp.parentTitle ? `${grp.parentTitle} > ${grp.title}` : grp.title)}
                         >
                           {'#'.repeat(grp.level || 2)} {grp.title}
                         </span>

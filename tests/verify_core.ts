@@ -344,6 +344,95 @@ assert.strictEqual(parsedL3L4[0].tasks.length, 1);
 assert.strictEqual(parsedL3L4[0].tasks[0].taskId, 'task_l4');
 console.log('   ✓ Sección nivel 4 dentro de nivel 3 correctamente anidada y parseada.');
 
+// 12. Ramas independientes (##) con nombres de sección duplicados (### y ####)
+console.log('12. Verificando ramas independientes (##) con subsecciones duplicadas (Fronted vs Backend)...');
+const userBranchMd = `# Paco
+
+## Fronted
+
+### NPM
+
+- [ ] Nueva tarea
+  - ID: nueva-tarea
+  - Priority: P1
+
+#### Github
+
+- [ ] Nueva tarea 22
+  - ID: nueva-tarea-22
+  - Priority: P1
+
+---
+
+## Backend
+
+### NPM
+
+- [ ] Nueva tarea
+  - ID: nueva-tarea-2
+  - Priority: P1
+
+#### NPM
+
+- [ ] Nueva tarea
+  - ID: nueva-tarea1
+  - Priority: P1
+
+#### Github
+
+- [ ] Nueva tarea 22
+  - ID: nueva-tarea-221
+  - Priority: P1
+- [ ] Tarea en nivel 4
+  - ID: tarea-en-nivel-4
+`;
+
+const scanBranches = scanTaskBlocks(userBranchMd);
+assert.strictEqual(scanBranches.taskBlocks.length, 6, 'Debe haber exactamente 6 tareas en total');
+
+// Validar que se reconocen las ramas independientes
+const frontedTasks = scanBranches.taskBlocks.filter((b) => b.branchTitle === 'Fronted');
+const backendTasks = scanBranches.taskBlocks.filter((b) => b.branchTitle === 'Backend');
+assert.strictEqual(frontedTasks.length, 2, 'Fronted debe tener 2 tareas');
+assert.strictEqual(backendTasks.length, 4, 'Backend debe tener 4 tareas');
+
+// Validar que parseTasksMarkdown no colapsa grupos con el mismo nombre
+const parsedBranches = parseTasksMarkdown(userBranchMd);
+assert.strictEqual(parsedBranches.length, 5, 'Debe haber 5 grupos parseados independientes (no colapsados)');
+
+const frontedNPM = parsedBranches.find((g) => g.title === 'NPM' && g.branchTitle === 'Fronted');
+const backendNPM = parsedBranches.find((g) => g.title === 'NPM' && g.branchTitle === 'Backend' && g.level === 3);
+const backendNPM4 = parsedBranches.find((g) => g.title === 'NPM' && g.branchTitle === 'Backend' && g.level === 4);
+const frontedGithub = parsedBranches.find((g) => g.title === 'Github' && g.branchTitle === 'Fronted');
+const backendGithub = parsedBranches.find((g) => g.title === 'Github' && g.branchTitle === 'Backend');
+
+assert(frontedNPM && frontedNPM.tasks.length === 1 && frontedNPM.tasks[0].taskId === 'nueva-tarea', 'Fronted NPM debe tener nueva-tarea');
+assert(frontedGithub && frontedGithub.tasks.length === 1 && frontedGithub.tasks[0].taskId === 'nueva-tarea-22', 'Fronted Github debe tener nueva-tarea-22');
+assert(backendNPM && backendNPM.tasks.length === 1 && backendNPM.tasks[0].taskId === 'nueva-tarea-2', 'Backend NPM L3 debe tener nueva-tarea-2');
+assert(backendNPM4 && backendNPM4.tasks.length === 1 && backendNPM4.tasks[0].taskId === 'nueva-tarea1', 'Backend NPM L4 debe tener nueva-tarea1');
+assert(backendGithub && backendGithub.tasks.length === 2, 'Backend Github debe tener 2 tareas');
+
+// Verificar adición discriminando por branchTitle
+const { updatedMarkdown: withTaskInBackend } = addTaskToMarkdown(userBranchMd, {
+  title: 'Nueva tarea backend específica',
+  groupTitle: 'NPM',
+  branchTitle: 'Backend',
+});
+const parsedAfterAdd = parseTasksMarkdown(withTaskInBackend);
+const frontedNpmAfter = parsedAfterAdd.find((g) => g.title === 'NPM' && g.branchTitle === 'Fronted');
+const backendNpmAfter = parsedAfterAdd.find((g) => g.title === 'NPM' && g.branchTitle === 'Backend' && g.level === 3);
+assert.strictEqual(frontedNpmAfter?.tasks.length, 1, 'Fronted NPM no debe haber sido modificado');
+assert.strictEqual(backendNpmAfter?.tasks.length, 2, 'Backend NPM debe tener ahora 2 tareas');
+
+// Verificar borrado discriminando por branchTitle
+const withFrontedGithubDeleted = deleteSectionFromMarkdown(userBranchMd, 'Github', undefined, 'Fronted');
+const parsedAfterDelete = parseTasksMarkdown(withFrontedGithubDeleted);
+assert(!parsedAfterDelete.some((g) => g.title === 'Github' && g.branchTitle === 'Fronted'), 'Github de Fronted debe estar borrado');
+assert(parsedAfterDelete.some((g) => g.title === 'Github' && g.branchTitle === 'Backend'), 'Github de Backend debe seguir existiendo intacto');
+
+console.log('   ✓ Ramas independientes ## con subsecciones duplicadas completamente aisladas y verificadas.');
+
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
+
 
 
