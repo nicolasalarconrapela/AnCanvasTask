@@ -1,4 +1,5 @@
-import { scanTaskBlocks } from './markdownSync';
+import { scanTaskBlocks, SubtaskItem } from './markdownSync';
+export type { SubtaskItem };
 export type TaskPriority = 'P0' | 'P1' | 'P2' | 'P3';
 export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'blocked';
 export interface ParsedMarkdownTask {
@@ -9,7 +10,7 @@ export interface ParsedMarkdownTask {
   priority: TaskPriority;
   status?: TaskStatus;
   tags?: string[];
-  subtasks?: { total: number; completed: number };
+  subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
 }
 

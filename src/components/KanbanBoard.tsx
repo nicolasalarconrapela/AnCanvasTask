@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
-import { TaskPriority, TaskStatus } from '../shapes/TaskShapeUtil';
+import { TaskPriority, TaskStatus, SubtaskItem } from '../shapes/TaskShapeUtil';
 import { scanTaskBlocks, TaskBlockInfo } from '../utils/markdownSync';
 import { TaskFilterState } from './FilterBar';
 import { SkeletonKanbanColumn } from './Skeletons';
@@ -17,7 +17,7 @@ export interface KanbanTask {
   status: TaskStatus;
   groupTitle: string;
   tags?: string[];
-  subtasks?: { total: number; completed: number };
+  subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
   isDuplicateId?: boolean;
   hasMissingId?: boolean;
@@ -56,6 +56,7 @@ export interface KanbanBoardProps {
   filters?: TaskFilterState;
   onResetFilters?: () => void;
   isLoading?: boolean;
+  onToggleSubtask?: (taskId: string, subtaskIndex: number) => void;
 }
 
 type GroupByMode = 'status' | 'section';
@@ -99,6 +100,7 @@ export function KanbanBoard({
   filters,
   onResetFilters,
   isLoading = false,
+  onToggleSubtask,
 }: KanbanBoardProps) {
   const { i18n } = useLingui();
   const [groupBy, setGroupBy] = useState<GroupByMode>('status');
@@ -110,6 +112,33 @@ export function KanbanBoard({
   const [editingTitleText, setEditingTitleText] = useState<string>('');
   const [activeMenuTaskId, setActiveMenuTaskId] = useState<string | null>(null);
   const [activeMenuSectionId, setActiveMenuSectionId] = useState<string | null>(null);
+  const [collapsedSubtaskTaskIds, setCollapsedSubtaskTaskIds] = useState<Set<string>>(new Set());
+
+  const toggleSubtasksCollapse = (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCollapsedSubtaskTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSubtaskInKanban = (taskId: string, subtaskIndex: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onToggleSubtask) {
+      onToggleSubtask(taskId, subtaskIndex);
+    } else {
+      window.dispatchEvent(
+        new CustomEvent('antask:toggle-subtask', {
+          detail: { taskId, subtaskIndex },
+        })
+      );
+    }
+  };
 
   // Parse tasks from markdown
   const { allTasks, sections } = useMemo(() => {
@@ -823,8 +852,75 @@ export function KanbanBoard({
                               </div>
                             )}
 
-                            {/* Middle Row: Unboxed Tags & Subtasks */}
-                            {(task.tags?.length || task.subtasks) && (
+                            {/* Subtasks Section (Option A: Checklist Integrado Compacto) */}
+                            {task.subtasks && task.subtasks.items && task.subtasks.items.length > 0 && (
+                              <div id={`kanban-card-subtasks-${task.taskId}`} className="my-1 text-xs">
+                                <button
+                                  type="button"
+                                  onClick={(e) => toggleSubtasksCollapse(task.taskId, e)}
+                                  className="flex items-center gap-1 text-[10px] font-mono font-medium text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors py-0.5 cursor-pointer focus:outline-none"
+                                  title={collapsedSubtaskTaskIds.has(task.taskId) ? i18n._(msg`Mostrar subtareas`) : i18n._(msg`Ocultar subtareas`)}
+                                >
+                                  <span className="text-[9px] select-none">
+                                    {collapsedSubtaskTaskIds.has(task.taskId) ? '▸' : '▾'}
+                                  </span>
+                                  <span>{i18n._(msg`Subtareas`)}</span>
+                                  <span className="opacity-75">({task.subtasks.completed}/{task.subtasks.total})</span>
+                                </button>
+
+                                {!collapsedSubtaskTaskIds.has(task.taskId) && (
+                                  <div className="border-l-2 border-[var(--outline)] pl-2 space-y-1 mt-1 mb-1">
+                                    {task.subtasks.items.map((sub, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="flex items-start gap-1.5 text-[11px] leading-tight group/subtask"
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={(e) => handleToggleSubtaskInKanban(task.taskId, idx, e)}
+                                          aria-label={
+                                            sub.completed
+                                              ? i18n._(msg`Marcar subtarea como pendiente`)
+                                              : i18n._(msg`Marcar subtarea como completada`)
+                                          }
+                                          className="mt-0.5 flex-shrink-0 flex items-center justify-center cursor-pointer focus:outline-none"
+                                        >
+                                          <span
+                                            className={`w-3 h-3 rounded border flex items-center justify-center transition-all ${
+                                              sub.completed
+                                                ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)]'
+                                                : 'bg-[var(--surface-container-high)] border-[var(--outline)] hover:border-[var(--primary)]'
+                                            }`}
+                                          >
+                                            {sub.completed && (
+                                              <svg
+                                                className="w-2 h-2 stroke-current stroke-[3]"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                              >
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                              </svg>
+                                            )}
+                                          </span>
+                                        </button>
+                                        <span
+                                          className={`flex-1 transition-colors select-none ${
+                                            sub.completed
+                                              ? 'text-[var(--on-surface-variant)] line-through opacity-75'
+                                              : 'text-[var(--on-surface)]'
+                                          }`}
+                                        >
+                                          <HighlightText text={sub.title} query={searchQuery} />
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Middle Row: Unboxed Tags & Subtasks counter if collapsed or no items */}
+                            {(task.tags?.length || (task.subtasks && (!task.subtasks.items?.length || collapsedSubtaskTaskIds.has(task.taskId)))) && (
                               <div id="div-kanbanboard-20" className="flex items-center gap-1.5 flex-wrap text-[10px] text-[var(--on-surface-variant)]">
                                 {task.tags?.slice(0, 3).map((t) => (
                                   <span key={t} className="font-mono text-[var(--on-surface-variant)]">
@@ -836,7 +932,7 @@ export function KanbanBoard({
                                     +{task.tags.length - 3}
                                   </span>
                                 )}
-                                {task.subtasks && (
+                                {task.subtasks && (!task.subtasks.items?.length || collapsedSubtaskTaskIds.has(task.taskId)) && (
                                   <span className="font-mono text-[var(--on-surface-variant)] flex items-center gap-0.5">
                                     <span>✓</span>
                                     <span>{task.subtasks.completed}/{task.subtasks.total}</span>

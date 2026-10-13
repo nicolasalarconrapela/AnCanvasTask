@@ -1,5 +1,5 @@
-import { parseTasksMarkdown, type ParsedGroup, type ParsedMarkdownTask } from '../utils/taskMarkdown';
-export { parseTasksMarkdown, type ParsedGroup, type ParsedMarkdownTask } from '../utils/taskMarkdown';
+import { parseTasksMarkdown, type ParsedGroup, type ParsedMarkdownTask, type SubtaskItem } from '../utils/taskMarkdown';
+export { parseTasksMarkdown, type ParsedGroup, type ParsedMarkdownTask, type SubtaskItem } from '../utils/taskMarkdown';
 import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { i18n, formatTaskCount } from '../i18n';
@@ -119,7 +119,7 @@ export type TaskShapeProps = {
   status?: TaskStatus;
   groupTitle?: string;
   tags?: string[];
-  subtasks?: { total: number; completed: number };
+  subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
   isDuplicateId?: boolean;
   hasMissingId?: boolean;
@@ -155,6 +155,42 @@ function TaskCardComponent({
   const [editedTitle, setEditedTitle] = useState(title);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSelected, setIsSelected] = useState(false);
+  const [isSubtasksOpen, setIsSubtasksOpen] = useState(true);
+
+  const handleToggleSubtask = (index: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!subtasks?.items) return;
+    const currentSub = subtasks.items[index];
+    const nextCompleted = !currentSub.completed;
+
+    const nextItems = subtasks.items.map((sub, i) =>
+      i === index ? { ...sub, completed: nextCompleted } : sub
+    );
+    const nextCompletedCount = nextItems.filter((s) => s.completed).length;
+
+    editor.updateShape({
+      id: shape.id,
+      type: 'task',
+      props: {
+        subtasks: {
+          ...subtasks,
+          completed: nextCompletedCount,
+          items: nextItems,
+        },
+      },
+    } as any);
+
+    window.dispatchEvent(
+      new CustomEvent('antask:toggle-subtask', {
+        detail: {
+          taskId: shape.props?.taskId || taskId,
+          subtaskIndex: index,
+          completed: nextCompleted,
+          taskTitle: title,
+        },
+      })
+    );
+  };
 
   useEffect(() => {
     setEditedTitle(title);
@@ -785,8 +821,82 @@ function TaskCardComponent({
           </div>
         )}
 
-        {/* Middle Row: Unboxed Tags & Subtask progress */}
-        {(tags?.length || subtasks) && (
+        {/* Subtasks Section (Option A: Checklist Integrado Compacto) */}
+        {subtasks && subtasks.items && subtasks.items.length > 0 && (
+          <div id={`task-card-subtasks-${shape.id}`} className="my-1 text-xs">
+            {/* Collapsible toggle header */}
+            <button
+              id={`btn-task-card-toggle-subtasks-${shape.id}`}
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsSubtasksOpen((prev) => !prev);
+              }}
+              className="flex items-center gap-1 text-[10px] font-mono font-medium text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors py-0.5 cursor-pointer focus:outline-none"
+              title={isSubtasksOpen ? _(msg`Ocultar subtareas`) : _(msg`Mostrar subtareas`)}
+            >
+              <span className="text-[9px] select-none">{isSubtasksOpen ? '▾' : '▸'}</span>
+              <span>{_(msg`Subtareas`)}</span>
+              <span className="opacity-75">({subtasks.completed}/{subtasks.total})</span>
+            </button>
+
+            {/* Subtask list */}
+            {isSubtasksOpen && (
+              <div className="border-l-2 border-[var(--outline)] pl-2 space-y-1 mt-1 mb-1">
+                {subtasks.items.map((sub, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-start gap-1.5 text-[11px] leading-tight group/subtask"
+                  >
+                    <button
+                      id={`btn-task-card-subtask-${shape.id}-${idx}`}
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => handleToggleSubtask(idx, e)}
+                      aria-label={
+                        sub.completed
+                          ? _(msg`Marcar subtarea como pendiente`)
+                          : _(msg`Marcar subtarea como completada`)
+                      }
+                      className="mt-0.5 flex-shrink-0 flex items-center justify-center cursor-pointer focus:outline-none"
+                    >
+                      <span
+                        className={`w-3 h-3 rounded border flex items-center justify-center transition-all ${
+                          sub.completed
+                            ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)]'
+                            : 'bg-[var(--surface-container-high)] border-[var(--outline)] hover:border-[var(--primary)]'
+                        }`}
+                      >
+                        {sub.completed && (
+                          <svg
+                            className="w-2 h-2 stroke-current stroke-[3]"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                    </button>
+                    <span
+                      className={`flex-1 transition-colors select-none ${
+                        sub.completed
+                          ? 'text-[var(--on-surface-variant)] line-through opacity-75'
+                          : 'text-[var(--on-surface)]'
+                      }`}
+                    >
+                      <HighlightText text={sub.title} query={searchQuery} />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Middle Row: Unboxed Tags & Subtask progress summary if collapsed or no items */}
+        {(tags?.length || (subtasks && (!subtasks.items?.length || !isSubtasksOpen))) && (
           <div id={`task-card-tags-${shape.id}`} className="flex items-center gap-1.5 flex-wrap py-0.5 text-[10px] text-[var(--on-surface-variant)]">
             {tags?.slice(0, 3).map((t) => (
               <span key={t} className="font-mono text-[var(--on-surface-variant)]">
@@ -798,7 +908,7 @@ function TaskCardComponent({
                 +{tags.length - 3}
               </span>
             )}
-            {subtasks && (
+            {subtasks && (!subtasks.items?.length || !isSubtasksOpen) && (
               <span className="font-mono text-[var(--on-surface-variant)] flex items-center gap-0.5">
                 <span>✓</span>
                 <span>{subtasks.completed}/{subtasks.total}</span>
@@ -897,7 +1007,11 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     status: T.string.optional(),
     groupTitle: T.string.optional(),
     tags: T.arrayOf(T.string).optional(),
-    subtasks: T.object({ total: T.number, completed: T.number }).optional(),
+    subtasks: T.object({
+      total: T.number,
+      completed: T.number,
+      items: T.arrayOf(T.object({ title: T.string, completed: T.boolean })).optional(),
+    }).optional(),
     blockedBy: T.string.optional(),
     isDuplicateId: T.boolean.optional(),
     hasMissingId: T.boolean.optional(),
@@ -1697,16 +1811,25 @@ export function populateCanvasWithGroups(
   const groupPlacements = new Map<number, PlacedGroup>();
   const placedRects: PlacedGroup[] = [];
 
+  const getTaskCalculatedHeight = (task: ParsedMarkdownTask) => {
+    const subCount = task.subtasks?.items?.length || 0;
+    return subCount > 0 ? cardHeight + 20 + subCount * 22 : cardHeight;
+  };
+
   // Pass 1: Place groups that already have saved positions in savedGroupMap
   groups.forEach((group, index) => {
     const saved = savedGroupMap.get(group.title.toLowerCase());
     if (saved) {
       const taskCount = group.tasks.length;
+      const totalGroupTasksHeight = group.tasks.reduce(
+        (acc, t) => acc + getTaskCalculatedHeight(t),
+        0
+      );
       const defaultCalculatedHeight = Math.max(
         180,
         groupHeaderHeight +
           groupPaddingTop +
-          taskCount * cardHeight +
+          totalGroupTasksHeight +
           Math.max(0, taskCount - 1) * cardGap +
           groupPaddingBottom
       );
@@ -1731,11 +1854,15 @@ export function populateCanvasWithGroups(
     if (groupPlacements.has(index)) return;
 
     const taskCount = group.tasks.length;
+    const totalGroupTasksHeight = group.tasks.reduce(
+      (acc, t) => acc + getTaskCalculatedHeight(t),
+      0
+    );
     const defaultCalculatedHeight = Math.max(
       180,
       groupHeaderHeight +
         groupPaddingTop +
-        taskCount * cardHeight +
+        totalGroupTasksHeight +
         Math.max(0, taskCount - 1) * cardGap +
         groupPaddingBottom
     );
@@ -1794,13 +1921,12 @@ export function populateCanvasWithGroups(
     });
 
     // Create Task shapes
+    let currentTaskY = groupY + groupHeaderHeight + groupPaddingTop;
     group.tasks.forEach((task, taskIndex) => {
+      const taskCalculatedH = getTaskCalculatedHeight(task);
       const defaultTaskX = groupX + groupPaddingX;
-      const defaultTaskY =
-        groupY +
-        groupHeaderHeight +
-        groupPaddingTop +
-        taskIndex * (cardHeight + cardGap);
+      const defaultTaskY = currentTaskY;
+      currentTaskY += taskCalculatedH + cardGap;
 
       const shapeId = createShapeId();
       const resolvedTaskId = task.taskId || task.temporaryId || `temp-task-${groupIndex + 1}-${taskIndex + 1}`;
@@ -1829,7 +1955,7 @@ export function populateCanvasWithGroups(
       const taskX = savedTask && belongsToCurrentGroup ? savedTask.x : defaultTaskX;
       const taskY = savedTask && belongsToCurrentGroup ? savedTask.y : defaultTaskY;
       const taskW = savedTask && savedTask.width ? savedTask.width : cardWidth;
-      const taskH = savedTask && savedTask.height ? savedTask.height : cardHeight;
+      const taskH = savedTask && savedTask.height ? Math.max(savedTask.height, taskCalculatedH) : taskCalculatedH;
 
       taskShapesToCreate.push({
         id: shapeId,

@@ -136,6 +136,7 @@ import {
   scanNotesFromMarkdown,
   scanTaskBlocks,
   syncNotesToMarkdown,
+  toggleSubtaskInMarkdown,
   updateTaskInMarkdown,
   validateMarkdownDocument,
 } from './utils/markdownSync';
@@ -765,11 +766,27 @@ export default function App() {
       }
     };
 
+    const handleToggleSubtaskEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        taskId?: string;
+        subtaskIndex: number;
+        completed?: boolean;
+        taskTitle?: string;
+      }>;
+      const { taskId, subtaskIndex, completed, taskTitle } = customEvent.detail || {};
+      if (taskId !== undefined && subtaskIndex !== undefined) {
+        setMarkdownInput((curr) =>
+          toggleSubtaskInMarkdown(curr, taskId, subtaskIndex, completed, taskTitle)
+        );
+      }
+    };
+
     window.addEventListener('antask:assign-task-id', handleAssignEvent);
     window.addEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
     window.addEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
     window.addEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
     window.addEventListener('antask:delete-section', handleDeleteSectionEvent);
+    window.addEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
 
     return () => {
       window.removeEventListener('antask:assign-task-id', handleAssignEvent);
@@ -777,6 +794,7 @@ export default function App() {
       window.removeEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
       window.removeEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
       window.removeEventListener('antask:delete-section', handleDeleteSectionEvent);
+      window.removeEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
     };
   }, [handleAssignSingleTaskId, handleAutoAssignAllTaskIds, handleResolveDuplicateIds, handleResolveSingleDuplicateId]);
 
@@ -3033,6 +3051,7 @@ export default function App() {
                   const isStatusChanged = toProps.status !== fromProps.status;
                   const isTagsChanged = JSON.stringify(toProps.tags) !== JSON.stringify(fromProps.tags);
                   const isBlockedByChanged = toProps.blockedBy !== fromProps.blockedBy;
+                  const isSubtasksChanged = JSON.stringify(toProps.subtasks) !== JSON.stringify(fromProps.subtasks);
 
                   if (
                     isTitleChanged ||
@@ -3040,7 +3059,8 @@ export default function App() {
                     isPriorityChanged ||
                     isStatusChanged ||
                     isTagsChanged ||
-                    isBlockedByChanged
+                    isBlockedByChanged ||
+                    isSubtasksChanged
                   ) {
                     const taskId = toProps.taskId || fromProps.taskId || to.id;
                     const taskTitle = toProps.title || fromProps.title;
@@ -3056,6 +3076,7 @@ export default function App() {
                             status: toProps.status,
                             tags: toProps.tags,
                             blockedBy: toProps.blockedBy,
+                            subtasks: toProps.subtasks,
                           },
                           taskTitle
                         )
@@ -5637,6 +5658,11 @@ export default function App() {
                         setIsTaskDetailsOpen(true);
                       }}
                       selectedTaskId={selectedTaskShapeId}
+                      onToggleSubtask={(taskId, subtaskIndex) => {
+                        setMarkdownInput((curr) =>
+                          toggleSubtaskInMarkdown(curr, taskId, subtaskIndex)
+                        );
+                      }}
                       onOpenNewTaskModalWithGroup={(groupOrStatus) => {
                         handleOpenNewTaskModal(groupOrStatus);
                       }}

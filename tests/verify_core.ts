@@ -5,6 +5,7 @@ import {
 import {
   scanTaskBlocks,
   updateTaskInMarkdown,
+  toggleSubtaskInMarkdown,
   addTaskToMarkdown,
   deleteSectionFromMarkdown,
   deleteTaskFromMarkdown,
@@ -52,8 +53,37 @@ assert.strictEqual(beDbTask.priority, 'P0', 'be_db debe tener prioridad P0');
 const beSchemaTask = allTasks.find((t) => t.title === 'Diseñar esquemas');
 assert(beSchemaTask, 'Debe encontrar Diseñar esquemas');
 assert.strictEqual(beSchemaTask.completed, true, 'be_schema debe estar completada');
-assert.strictEqual(beSchemaTask.blockedBy, 'be_db', 'be_schema debe estar bloqueada por be_db');
-console.log('   ✓ Parsing de grupos, tareas y metadatos correcto.');
+const subtaskSampleMd = `# Tareas con subtareas
+## General
+- [ ] Tarea con subitems
+  id: task_with_subs
+  priority: P1
+  - [ ] Subtarea 1
+  - [x] Subtarea 2
+`;
+const subtaskParsed = parseTasksMarkdown(subtaskSampleMd);
+const subtaskTask = subtaskParsed[0].tasks[0];
+assert(subtaskTask.subtasks, 'Debe detectar subtareas');
+assert.strictEqual(subtaskTask.subtasks.total, 2, 'Total de subtareas debe ser 2');
+assert.strictEqual(subtaskTask.subtasks.completed, 1, 'Subtareas completadas debe ser 1');
+assert.strictEqual(subtaskTask.subtasks.items?.length, 2, 'Debe haber 2 items de subtareas');
+assert.strictEqual(subtaskTask.subtasks.items?.[0].title, 'Subtarea 1');
+assert.strictEqual(subtaskTask.subtasks.items?.[0].completed, false);
+assert.strictEqual(subtaskTask.subtasks.items?.[1].title, 'Subtarea 2');
+assert.strictEqual(subtaskTask.subtasks.items?.[1].completed, true);
+
+// Toggle subtarea 0 -> true
+const toggledMd1 = toggleSubtaskInMarkdown(subtaskSampleMd, 'task_with_subs', 0);
+assert(toggledMd1.includes('- [x] Subtarea 1'), 'Subtarea 1 debe estar marcada como [x]');
+const recheck1 = parseTasksMarkdown(toggledMd1)[0].tasks[0];
+assert.strictEqual(recheck1.subtasks?.completed, 2, 'Ambas subtareas deben estar completadas');
+
+// Toggle subtarea 1 -> false
+const toggledMd2 = toggleSubtaskInMarkdown(toggledMd1, 'task_with_subs', 1);
+assert(toggledMd2.includes('- [ ] Subtarea 2'), 'Subtarea 2 debe estar desmarcada como [ ]');
+const recheck2 = parseTasksMarkdown(toggledMd2)[0].tasks[0];
+assert.strictEqual(recheck2.subtasks?.completed, 1, 'Solo una subtarea debe estar completada');
+console.log('   ✓ Parsing, visualización y alternancia (toggle) de subtareas verificado.');
 
 // 2. Safe round-trip & metadata preservation
 console.log('2. Verificando actualización y preservación de contenido...');

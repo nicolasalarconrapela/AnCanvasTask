@@ -1,5 +1,10 @@
 import type { TaskPriority } from './taskMarkdown';
 
+export interface SubtaskItem {
+  title: string;
+  completed: boolean;
+}
+
 export interface TaskUpdatePayload {
   id?: string;
   title?: string;
@@ -8,6 +13,11 @@ export interface TaskUpdatePayload {
   status?: string;
   tags?: string[];
   blockedBy?: string;
+  subtasks?: {
+    total?: number;
+    completed?: number;
+    items?: SubtaskItem[];
+  };
 }
 
 export interface TaskBlockInfo {
@@ -22,7 +32,11 @@ export interface TaskBlockInfo {
   detectedBlockedBy?: string;
   detectedStatus?: string;
   detectedTags?: string[];
-  detectedSubtasks?: { total: number; completed: number };
+  detectedSubtasks?: {
+    total: number;
+    completed: number;
+    items?: SubtaskItem[];
+  };
   unknownMetadata: Array<{ key: string; rawLine: string }>;
   groupTitle: string;
   isOutsideHeading: boolean;
@@ -98,8 +112,10 @@ export function scanTaskBlocks(markdown: string): {
     }
 
     // Check for task item: "- [ ] Title" or "- [x] Title"
+    // Indented checkbox lines under an active task block are subtasks, not root tasks
+    const isIndented = line.startsWith(' ') || line.startsWith('\t');
     const taskMatch = line.match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/);
-    if (taskMatch) {
+    if (taskMatch && (!currentBlock || !isIndented)) {
       if (currentBlock) {
         currentBlock.endLineIndex = i - 1;
         taskBlocks.push(currentBlock);
@@ -187,12 +203,20 @@ export function scanTaskBlocks(markdown: string): {
         const subtaskMatch = trimmed.match(/^[-*]\s*\[([ xX])\]\s*(.+)$/);
         if (subtaskMatch) {
           if (!currentBlock.detectedSubtasks) {
-            currentBlock.detectedSubtasks = { completed: 0, total: 0 };
+            currentBlock.detectedSubtasks = { completed: 0, total: 0, items: [] };
+          }
+          if (!currentBlock.detectedSubtasks.items) {
+            currentBlock.detectedSubtasks.items = [];
           }
           currentBlock.detectedSubtasks.total += 1;
-          if (subtaskMatch[1].toLowerCase() === 'x') {
+          const isDone = subtaskMatch[1].toLowerCase() === 'x';
+          if (isDone) {
             currentBlock.detectedSubtasks.completed += 1;
           }
+          currentBlock.detectedSubtasks.items.push({
+            title: subtaskMatch[2].trim(),
+            completed: isDone,
+          });
           currentBlock.endLineIndex = i;
           continue;
         }
@@ -564,8 +588,61 @@ export function updateTaskInMarkdown(markdown: string, taskId: string, updates: 
   metadata(/^(\s*(?:[-*]\s*)?(?:Tags|Labels)\s*:\s*).*$/i, 'Tags', updates.tags?.join(', '));
   metadata(/^(\s*(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:\s*).*$/i, 'Blocked by', updates.blockedBy?.trim());
   metadata(/^(\s*(?:[-*]\s*)?ID\s*:\s*).*$/i, 'ID', updates.id?.trim());
+
+  if (updates.subtasks?.items) {
+    let subIdx = 0;
+    for (let i = 0; i < body.length; i++) {
+      const bTrimmed = body[i].trim();
+      const match = bTrimmed.match(/^([-*]\s*\[)([ xX])(\]\s*.*)$/);
+      if (match && subIdx < updates.subtasks.items.length) {
+        const targetSub = updates.subtasks.items[subIdx];
+        const leadingWhitespace = body[i].match(/^\s*/)?.[0] || `${block.indentation}  `;
+        body[i] = `${leadingWhitespace}${match[1]}${targetSub.completed ? 'x' : ' '}${match[3]}`;
+        subIdx++;
+      }
+    }
+  }
+
   lines.splice(block.taskLineIndex + 1, block.endLineIndex - block.taskLineIndex, ...body);
   return lines.join('\n');
+}
+
+/**
+ * Toggles a specific subtask's completion state within a task block in Markdown.
+ */
+export function toggleSubtaskInMarkdown(
+  markdown: string,
+  taskId: string,
+  subtaskIndex: number,
+  forceCompleted?: boolean,
+  taskTitle?: string
+): string {
+  const lines = markdown.split(/\r?\n/);
+  const { taskBlocks } = scanTaskBlocks(markdown);
+  const block = findMatchingTaskBlock(taskBlocks, taskId, taskTitle);
+  if (!block) return markdown;
+
+  let currentSubtaskIdx = 0;
+  for (let i = block.taskLineIndex + 1; i <= block.endLineIndex; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    const isSubLine = line.startsWith(' ') || line.startsWith('\t');
+    if (isSubLine) {
+      const match = trimmed.match(/^([-*]\s*\[)([ xX])(\]\s*.*)$/);
+      if (match) {
+        if (currentSubtaskIdx === subtaskIndex) {
+          const currentIsDone = match[2].toLowerCase() === 'x';
+          const nextIsDone = forceCompleted !== undefined ? forceCompleted : !currentIsDone;
+          const leadingWhitespace = line.match(/^\s*/)?.[0] || '  ';
+          lines[i] = `${leadingWhitespace}${match[1]}${nextIsDone ? 'x' : ' '}${match[3]}`;
+          return lines.join('\n');
+        }
+        currentSubtaskIdx++;
+      }
+    }
+  }
+
+  return markdown;
 }
 
 /**
