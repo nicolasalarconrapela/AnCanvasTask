@@ -1302,13 +1302,18 @@ export class TaskShapeUtil extends ShapeUtil<any> {
       // Check if group height needs expanding to fully contain the snapped card
       const neededHeight = (snappedY - targetGroup.y) + cardH + 24;
       if (neededHeight > (targetGroup.props?.h || 240)) {
+        const newH = Math.ceil(neededHeight);
         (this.editor.updateShape as any)({
           id: targetGroup.id,
           type: 'task-group',
           props: {
             ...targetGroup.props,
-            h: Math.ceil(neededHeight),
+            h: newH,
           },
+        });
+        expandParentContainersIfNeeded(this.editor, {
+          ...targetGroup,
+          props: { ...targetGroup.props, h: newH },
         });
       }
 
@@ -1360,6 +1365,66 @@ export class TaskShapeUtil extends ShapeUtil<any> {
 
   component(shape: ITaskShape) {
     return <TaskCardComponent shape={shape} editor={this.editor} />;
+  }
+}
+
+export function expandParentContainersIfNeeded(editor: Editor, childGroup: any) {
+  const allShapes = editor.getCurrentPageShapes();
+  const macroGroups = allShapes.filter(
+    (s) => (s as any).type === 'task-group' && Boolean((s as any).props?.isContainer)
+  ) as any[];
+
+  const MACRO_PAD_X = 28;
+  const MACRO_HEADER_PAD_Y = 56;
+  const MACRO_BOTTOM_PAD_Y = 28;
+
+  for (const mg of macroGroups) {
+    const isDirectParent =
+      (childGroup.props?.parentId && mg.props?.headingId === childGroup.props.parentId) ||
+      (childGroup.props?.parentTitle && mg.props?.title?.trim().toLowerCase() === childGroup.props.parentTitle.trim().toLowerCase()) ||
+      (mg.props?.level === 2 && childGroup.props?.branchTitle && mg.props?.title?.trim().toLowerCase() === childGroup.props.branchTitle.trim().toLowerCase());
+
+    if (isDirectParent) {
+      const siblings = allShapes.filter((s) => {
+        if ((s as any).type !== 'task-group' || s.id === mg.id) return false;
+        const sp = (s as any).props;
+        if (sp?.parentId && mg.props?.headingId) return sp.parentId === mg.props.headingId;
+        if (sp?.parentTitle && mg.props?.title) return sp.parentTitle.trim().toLowerCase() === mg.props.title.trim().toLowerCase();
+        if (mg.props?.level === 2 && sp?.branchTitle && mg.props?.title) return sp.branchTitle.trim().toLowerCase() === mg.props.title.trim().toLowerCase();
+        return false;
+      }) as any[];
+
+      const allChildren = siblings.length > 0 ? siblings : [childGroup];
+      const minX = Math.min(...allChildren.map((c) => c.x));
+      const minY = Math.min(...allChildren.map((c) => c.y));
+      const maxRight = Math.max(...allChildren.map((c) => c.x + (c.props?.w || 360)));
+      const maxBottom = Math.max(...allChildren.map((c) => c.y + (c.props?.h || 240)));
+
+      const calcX = minX - MACRO_PAD_X;
+      const calcY = minY - MACRO_HEADER_PAD_Y;
+      const calcW = (maxRight - minX) + MACRO_PAD_X * 2;
+      const calcH = (maxBottom - minY) + MACRO_HEADER_PAD_Y + MACRO_BOTTOM_PAD_Y;
+
+      if (mg.x !== calcX || mg.y !== calcY || mg.props.w !== calcW || mg.props.h !== calcH) {
+        (editor.updateShape as any)({
+          id: mg.id,
+          type: 'task-group',
+          x: calcX,
+          y: calcY,
+          props: {
+            ...mg.props,
+            w: Math.ceil(calcW),
+            h: Math.ceil(calcH),
+          },
+        });
+        expandParentContainersIfNeeded(editor, {
+          ...mg,
+          x: calcX,
+          y: calcY,
+          props: { ...mg.props, w: Math.ceil(calcW), h: Math.ceil(calcH) },
+        });
+      }
+    }
   }
 }
 
@@ -1944,6 +2009,44 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
   override canResize = () => true;
   override isAspectRatioLocked = () => false;
   override onResize(shape: ITaskGroupShape, info: any) {
+    const allShapes = this.editor.getCurrentPageShapes();
+    if (shape.props?.isContainer) {
+      const childGroups = allShapes.filter((s) => {
+        if ((s as any).type !== 'task-group' || s.id === shape.id) return false;
+        const sp = (s as any).props;
+        if (sp?.parentId && shape.props?.headingId) return sp.parentId === shape.props.headingId;
+        if (sp?.parentTitle && shape.props?.title) return sp.parentTitle.trim().toLowerCase() === shape.props.title.trim().toLowerCase();
+        if (shape.props?.level === 2 && sp?.branchTitle && shape.props?.title) return sp.branchTitle.trim().toLowerCase() === shape.props.title.trim().toLowerCase();
+        return false;
+      }) as any[];
+
+      if (childGroups.length > 0) {
+        const maxRight = Math.max(...childGroups.map((c) => c.x + (c.props?.w || 360)));
+        const maxBottom = Math.max(...childGroups.map((c) => c.y + (c.props?.h || 240)));
+        const minW = Math.max(360, (maxRight - shape.x) + 28);
+        const minH = Math.max(180, (maxBottom - shape.y) + 28);
+        return resizeBox(shape as any, info, { minWidth: minW, minHeight: minH });
+      }
+      return resizeBox(shape as any, info, { minWidth: 360, minHeight: 180 });
+    }
+
+    const tasks = allShapes.filter((s) => {
+      if ((s as any).type !== 'task') return false;
+      const tp = (s as any).props;
+      if (shape.props?.headingId && tp?.groupHeadingId) {
+        return tp.groupHeadingId === shape.props.headingId;
+      }
+      return (tp?.groupTitle || '').trim().toLowerCase() === (shape.props?.title || '').trim().toLowerCase();
+    }) as any[];
+
+    if (tasks.length > 0) {
+      const maxTaskBottom = Math.max(...tasks.map((t) => t.y + (t.props?.h || 96)));
+      const maxTaskRight = Math.max(...tasks.map((t) => t.x + (t.props?.w || 320)));
+      const minH = Math.max(180, (maxTaskBottom - shape.y) + 24);
+      const minW = Math.max(260, (maxTaskRight - shape.x) + 20);
+      return resizeBox(shape as any, info, { minWidth: minW, minHeight: minH });
+    }
+
     return resizeBox(shape as any, info, { minWidth: 200, minHeight: 120 });
   }
 
@@ -2213,8 +2316,8 @@ export function populateCanvasWithGroups(
           Math.max(0, taskCount - 1) * cardGap +
           groupPaddingBottom
       );
-      const w = saved.width || groupWidth;
-      const h = saved.height || defaultCalculatedHeight;
+      const w = Math.max(saved.width || 0, groupWidth);
+      const h = Math.max(saved.height || 0, defaultCalculatedHeight);
       let x = saved.x;
       let y = saved.y;
 
@@ -2391,6 +2494,31 @@ export function populateCanvasWithGroups(
     });
   });
 
+  // Ensure every group shape strictly encloses all of its tasks with safe padding
+  groupShapesToCreate.forEach((gShape) => {
+    const containedTasks = taskShapesToCreate.filter((t) => {
+      const p = t.props;
+      if (gShape.props?.headingId && p?.groupHeadingId) {
+        return p.groupHeadingId === gShape.props.headingId;
+      }
+      return (p?.groupTitle || '').trim().toLowerCase() === (gShape.props?.title || '').trim().toLowerCase();
+    });
+
+    if (containedTasks.length > 0) {
+      const maxTaskBottom = Math.max(...containedTasks.map((t) => t.y + (t.props?.h || 96)));
+      const requiredH = (maxTaskBottom - gShape.y) + groupPaddingBottom;
+      if (requiredH > gShape.props.h) {
+        gShape.props.h = Math.ceil(requiredH);
+      }
+
+      const maxTaskRight = Math.max(...containedTasks.map((t) => t.x + (t.props?.w || cardWidth)));
+      const requiredW = (maxTaskRight - gShape.x) + groupPaddingX;
+      if (requiredW > gShape.props.w) {
+        gShape.props.w = Math.ceil(requiredW);
+      }
+    }
+  });
+
   // Create native arrows from blocker task -> blocked task (ignoring nonexistent/duplicate targets)
   tasksWithDependencies.forEach(({ blockedShapeId, blockedByStr }) => {
     const blockerIds = blockedByStr
@@ -2520,11 +2648,11 @@ export function populateCanvasWithGroups(
     macroGroupShapesToCreate.push({
       id: createShapeId(),
       type: 'task-group' as const,
-      x: pSaved ? Math.min(pSaved.x, calcX) : calcX,
-      y: pSaved ? Math.min(pSaved.y, calcY) : calcY,
+      x: calcX,
+      y: calcY,
       props: {
-        w: pSaved ? Math.max(pSaved.width, (maxRight - Math.min(pSaved.x, calcX)) + MACRO_PAD_X) : calcW,
-        h: pSaved ? Math.max(pSaved.height, (maxBottom - Math.min(pSaved.y, calcY)) + MACRO_BOTTOM_PAD_Y) : calcH,
+        w: calcW,
+        h: calcH,
         title: ph.title,
         count: totalTasks,
         completedCount: completedTasks,

@@ -46,6 +46,7 @@ import {
   TaskShapeUtil,
   TaskStatus,
   updateAllGroupCounts,
+  expandParentContainersIfNeeded,
 } from './shapes/TaskShapeUtil';
 import { applyAutoLayout } from './utils/autoLayout';
 import { KanbanBoard } from './components/KanbanBoard';
@@ -3119,6 +3120,9 @@ export default function App() {
                   const isResizing = to.props?.w !== from.props?.w || to.props?.h !== from.props?.h;
                   const dx = to.x - from.x;
                   const dy = to.y - from.y;
+                  if (!to.props?.isContainer && (isResizing || dx !== 0 || dy !== 0)) {
+                    expandParentContainersIfNeeded(editorInstance, to);
+                  }
                   if (!isResizing && (dx !== 0 || dy !== 0)) {
                     const selectedIds = new Set(editorInstance.getSelectedShapeIds());
                     const groupTitle = (to.props?.title || '').trim().toLowerCase();
@@ -3642,27 +3646,51 @@ export default function App() {
       let targetY = 160;
 
       if (targetGroupShape) {
-        const tasksInGroup = allShapes.filter(
-          (s) =>
-            (s as any).type === 'task' &&
-            s.x >= targetGroupShape.x &&
-            s.x <= targetGroupShape.x + (targetGroupShape.props?.w || 360)
-        );
+        const tasksInGroup = allShapes.filter((s) => {
+          if ((s as any).type !== 'task') return false;
+          const p = (s as any).props;
+          if (targetGroupShape.props?.headingId && p?.groupHeadingId) {
+            return p.groupHeadingId === targetGroupShape.props.headingId;
+          }
+          if (p?.groupTitle) {
+            return p.groupTitle.toLowerCase() === groupTitle.toLowerCase();
+          }
+          return (
+            s.x >= targetGroupShape.x - 10 &&
+            s.x <= targetGroupShape.x + (targetGroupShape.props?.w || 360) + 10 &&
+            s.y >= targetGroupShape.y - 10 &&
+            s.y <= targetGroupShape.y + (targetGroupShape.props?.h || 240) + 200
+          );
+        });
 
         targetX = targetGroupShape.x + 20;
-        targetY = targetGroupShape.y + 70 + tasksInGroup.length * 126;
-
-        const neededHeight = 80 + (tasksInGroup.length + 1) * 126 + 20;
-        if (neededHeight > (targetGroupShape.props?.h || 240)) {
-          editor.updateShape({
-            id: targetGroupShape.id,
-            type: 'task-group',
-            props: {
-              h: neededHeight,
-              count: (targetGroupShape.props?.count || 0) + 1,
-            },
-          } as any);
+        if (tasksInGroup.length === 0) {
+          targetY = targetGroupShape.y + 70;
+        } else {
+          const maxTaskBottom = Math.max(...tasksInGroup.map((t) => t.y + ((t as any).props?.h || 96)));
+          targetY = maxTaskBottom + 12;
         }
+
+        const newTaskH = 110;
+        const neededHeight = Math.max(
+          targetGroupShape.props?.h || 240,
+          (targetY + newTaskH + 24) - targetGroupShape.y
+        );
+        const updatedGroupProps = {
+          ...targetGroupShape.props,
+          h: Math.ceil(neededHeight),
+          count: (targetGroupShape.props?.count || 0) + 1,
+        };
+        editor.updateShape({
+          id: targetGroupShape.id,
+          type: 'task-group',
+          props: updatedGroupProps,
+        } as any);
+
+        expandParentContainersIfNeeded(editor, {
+          ...targetGroupShape,
+          props: updatedGroupProps,
+        });
       } else {
         const existingGroupShapes = allShapes.filter((s) => (s as any).type === 'task-group') as any[];
         let newGroupX = 80;
@@ -3688,7 +3716,7 @@ export default function App() {
           }
         }
 
-        editor.createShape({
+        const newGroupShape = {
           id: createShapeId(),
           type: 'task-group' as const,
           x: newGroupX,
@@ -3700,7 +3728,9 @@ export default function App() {
             count: 1,
             completedCount: 0,
           },
-        } as any);
+        };
+        editor.createShape(newGroupShape as any);
+        expandParentContainersIfNeeded(editor, newGroupShape);
 
         targetX = newGroupX + 20;
         targetY = newGroupY + 70;
@@ -3719,6 +3749,9 @@ export default function App() {
           completed: false,
           priority: newTaskPriority,
           taskId,
+          groupTitle,
+          groupHeadingId: targetGroupShape?.props?.headingId,
+          branchTitle: targetGroupShape?.props?.branchTitle,
         },
       } as any);
 
