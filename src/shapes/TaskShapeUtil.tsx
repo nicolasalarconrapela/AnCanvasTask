@@ -1850,6 +1850,7 @@ export function populateCanvasWithGroups(
   });
 
   // Pass 2: Place new groups (not present in savedGroupMap), avoiding any overlap
+  const MAX_GROUPS_PER_ROW = 5;
   groups.forEach((group, index) => {
     if (groupPlacements.has(index)) return;
 
@@ -1872,14 +1873,18 @@ export function populateCanvasWithGroups(
     let x: number;
     let y: number;
 
-    if (placedRects.length > 0) {
-      const maxRight = Math.max(...placedRects.map((p) => p.x + p.w));
-      const minY = Math.min(...placedRects.map((p) => p.y));
-      x = maxRight + 40;
-      y = minY;
-    } else {
+    if (placedRects.length === 0) {
       x = 80;
       y = 80;
+    } else if (placedRects.length % MAX_GROUPS_PER_ROW === 0) {
+      // Wrap to next row to accommodate up to 10 sections in a clean 2-row grid
+      const maxBottom = Math.max(...placedRects.map((p) => p.y + p.h));
+      x = 80;
+      y = maxBottom + 64;
+    } else {
+      const prev = placedRects[placedRects.length - 1];
+      x = prev.x + prev.w + 40;
+      y = prev.y;
     }
 
     while (placedRects.some((p) => isRectOverlapping({ x, y, w, h }, p))) {

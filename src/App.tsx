@@ -3624,11 +3624,25 @@ export default function App() {
         const existingGroupShapes = allShapes.filter((s) => (s as any).type === 'task-group') as any[];
         let newGroupX = 80;
         let newGroupY = 80;
+        const MAX_GROUPS_PER_ROW = 5;
         if (existingGroupShapes.length > 0) {
-          const maxRight = Math.max(...existingGroupShapes.map((g) => (g.x ?? 0) + (g.props?.w ?? 360)));
-          const refY = Math.min(...existingGroupShapes.map((g) => g.y ?? 80));
-          newGroupX = maxRight + 40;
-          newGroupY = refY;
+          if (existingGroupShapes.length % MAX_GROUPS_PER_ROW === 0) {
+            // Wrap to next row to accommodate up to 10 sections in a clean 2-row grid
+            const maxBottom = Math.max(...existingGroupShapes.map((g) => (g.y ?? 80) + (g.props?.h ?? 240)));
+            newGroupX = 80;
+            newGroupY = maxBottom + 64;
+          } else {
+            const maxBottom = Math.max(...existingGroupShapes.map((g) => (g.y ?? 80) + (g.props?.h ?? 240)));
+            const currentRowShapes = existingGroupShapes.filter(
+              (g) => (g.y ?? 80) >= maxBottom - 350
+            );
+            const maxRightInRow = Math.max(
+              ...currentRowShapes.map((g) => (g.x ?? 80) + (g.props?.w ?? 360))
+            );
+            const rowY = currentRowShapes[0]?.y ?? 80;
+            newGroupX = maxRightInRow + 40;
+            newGroupY = rowY;
+          }
         }
 
         editor.createShape({

@@ -103,7 +103,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       );
 
       // 3. Sections
-      sections.slice(0, 4).forEach((s, i) =>
+      sections.slice(0, 10).forEach((s, i) =>
         items.push({
           type: 'section',
           item: s,
@@ -159,7 +159,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     const matchingSections = sections.filter((s) =>
       s.toLowerCase().includes(cleanSecQuery)
     );
-    matchingSections.slice(0, 4).forEach((s, i) =>
+    matchingSections.slice(0, 10).forEach((s, i) =>
       items.push({
         type: 'section',
         item: s,

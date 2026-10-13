@@ -60,30 +60,38 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
   const GROUP_PADDING_X = 24;
   const GROUP_PADDING_TOP = 64; // Space for header (## Section)
   const GROUP_PADDING_BOTTOM = 24;
-  const GROUP_GAP_X = 48;
-
-  const updates: any[] = [];
-  let currentGroupX = 80;
+  const GROUP_START_X = 80;
   const GROUP_START_Y = 80;
+  const GROUP_GAP_X = 48;
+  const GROUP_GAP_Y = 64;
+  const MAX_COLS_PER_ROW = 5;
 
-  // Process each group using Dagre for DAG dependency hierarchical ordering
+  interface GroupLayoutInfo {
+    groupTitle: string;
+    tasks: typeof taskBlocks;
+    groupShape: any | undefined;
+    width: number;
+    height: number;
+    minX: number;
+    minY: number;
+    g?: dagre.graphlib.Graph;
+  }
+
+  const groupLayouts: GroupLayoutInfo[] = [];
+
+  // Pass 1: Compute DAG layout and dimensions for each group independently
   for (const [groupTitle, tasks] of tasksByGroup.entries()) {
+    const groupShape = groupTitleToShapeMap.get(groupTitle.toLowerCase());
     if (tasks.length === 0) {
-      const groupShape = groupTitleToShapeMap.get(groupTitle.toLowerCase());
-      if (groupShape) {
-        updates.push({
-          id: groupShape.id,
-          type: 'task-group',
-          x: currentGroupX,
-          y: GROUP_START_Y,
-          props: {
-            ...groupShape.props,
-            w: 360,
-            h: 200,
-          },
-        });
-      }
-      currentGroupX += 360 + GROUP_GAP_X;
+      groupLayouts.push({
+        groupTitle,
+        tasks,
+        groupShape,
+        width: 360,
+        height: 200,
+        minX: 0,
+        minY: 0,
+      });
       continue;
     }
 
@@ -167,55 +175,88 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
       contentHeight + GROUP_PADDING_TOP + GROUP_PADDING_BOTTOM
     );
 
-    const groupX = currentGroupX;
-    const groupY = GROUP_START_Y;
+    groupLayouts.push({
+      groupTitle,
+      tasks,
+      groupShape,
+      width: groupWidth,
+      height: groupHeight,
+      minX,
+      minY,
+      g,
+    });
+  }
 
-    // Position group shape
-    const groupShape = groupTitleToShapeMap.get(groupTitle.toLowerCase());
-    if (groupShape) {
-      updates.push({
-        id: groupShape.id,
-        type: 'task-group',
-        x: groupX,
-        y: groupY,
-        props: {
-          ...groupShape.props,
-          w: groupWidth,
-          h: groupHeight,
-          count: tasks.length,
-        },
-      });
-    }
+  // Pass 2: Distribute groups into a balanced multi-row grid (up to 5 sections per row, accommodating up to 10+ sections)
+  const updates: any[] = [];
+  const rows: GroupLayoutInfo[][] = [];
+  for (let i = 0; i < groupLayouts.length; i += MAX_COLS_PER_ROW) {
+    rows.push(groupLayouts.slice(i, i + MAX_COLS_PER_ROW));
+  }
 
-    // Position task shapes inside the group
-    tasks.forEach((t) => {
-      const taskId = (t.detectedId || `task-${t.taskLineIndex}`).toLowerCase();
-      const node = g.node(taskId);
-      const shape = taskIdToShapeMap.get(taskId);
+  let currentRowY = GROUP_START_Y;
+  for (const row of rows) {
+    let currentGroupX = GROUP_START_X;
+    let rowMaxHeight = 0;
 
-      if (shape && node) {
-        const nodeLeft = node.x - node.width / 2;
-        const nodeTop = node.y - node.height / 2;
+    for (const info of row) {
+      if (info.height > rowMaxHeight) {
+        rowMaxHeight = info.height;
+      }
 
-        const taskX = groupX + GROUP_PADDING_X + (nodeLeft - minX);
-        const taskY = groupY + GROUP_PADDING_TOP + (nodeTop - minY);
+      const groupX = currentGroupX;
+      const groupY = currentRowY;
 
+      // Position group shape
+      if (info.groupShape) {
         updates.push({
-          id: shape.id,
-          type: 'task',
-          x: taskX,
-          y: taskY,
+          id: info.groupShape.id,
+          type: 'task-group',
+          x: groupX,
+          y: groupY,
           props: {
-            ...shape.props,
-            groupTitle: groupTitle,
-            w: CARD_WIDTH,
-            h: CARD_HEIGHT,
+            ...info.groupShape.props,
+            w: info.width,
+            h: info.height,
+            count: info.tasks.length,
           },
         });
       }
-    });
 
-    currentGroupX += groupWidth + GROUP_GAP_X;
+      // Position task shapes inside the group
+      if (info.g && info.tasks.length > 0) {
+        info.tasks.forEach((t) => {
+          const taskId = (t.detectedId || `task-${t.taskLineIndex}`).toLowerCase();
+          const node = info.g!.node(taskId);
+          const shape = taskIdToShapeMap.get(taskId);
+
+          if (shape && node) {
+            const nodeLeft = node.x - node.width / 2;
+            const nodeTop = node.y - node.height / 2;
+
+            const taskX = groupX + GROUP_PADDING_X + (nodeLeft - info.minX);
+            const taskY = groupY + GROUP_PADDING_TOP + (nodeTop - info.minY);
+
+            updates.push({
+              id: shape.id,
+              type: 'task',
+              x: taskX,
+              y: taskY,
+              props: {
+                ...shape.props,
+                groupTitle: info.groupTitle,
+                w: CARD_WIDTH,
+                h: CARD_HEIGHT,
+              },
+            });
+          }
+        });
+      }
+
+      currentGroupX += info.width + GROUP_GAP_X;
+    }
+
+    currentRowY += rowMaxHeight + GROUP_GAP_Y;
   }
 
   // Apply all shape position updates to editor in one atomic batch

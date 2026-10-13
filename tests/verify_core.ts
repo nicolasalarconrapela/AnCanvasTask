@@ -238,7 +238,53 @@ assert.strictEqual(fallbackWs.id, 'empty-ws');
 assert.strictEqual(fallbackWs.branches.length, 1, 'Debe autogenerar rama default');
 assert.strictEqual(fallbackWs.branches[0].name, 'main');
 assert(fallbackWs.branches[0].taskDocuments.length > 0, 'Debe autogenerar documento inicial');
-console.log('   ✓ Normalización, resiliencia y Zero Data Loss de Workspaces verificado.');
+// 9. Agrupación de hasta 10 secciones (10 task-groups)
+console.log('9. Verificando agrupación de hasta 10 secciones en Canvas y Markdown...');
+const tenSectionsMd = [
+  '# Tablero de Proyecto Complejo',
+  ...Array.from({ length: 10 }, (_, i) => {
+    const secNum = i + 1;
+    return [
+      `## Sección ${secNum}`,
+      `- [ ] Tarea inicial del bloque ${secNum}`,
+      `  id: t_${secNum}_a`,
+      `  priority: P1`,
+      `- [ ] Tarea dependiente del bloque ${secNum}`,
+      `  id: t_${secNum}_b`,
+      `  priority: P2`,
+      `  blockedBy: t_${secNum}_a`,
+    ].join('\n');
+  }),
+].join('\n\n');
+
+const parsedTenGroups = parseTasksMarkdown(tenSectionsMd);
+assert.strictEqual(parsedTenGroups.length, 10, 'Debe parsear exactamente 10 grupos/secciones');
+
+const { groupHeadings: scannedHeadings, taskBlocks: scannedBlocks } = scanTaskBlocks(tenSectionsMd);
+assert.strictEqual(scannedHeadings.length, 10, 'scanTaskBlocks debe detectar exactamente 10 encabezados');
+assert.strictEqual(scannedBlocks.length, 20, 'Debe detectar 20 tareas en total a lo largo de las 10 secciones');
+
+for (let i = 1; i <= 10; i++) {
+  const grp = parsedTenGroups.find((g) => g.title === `Sección ${i}`);
+  assert(grp, `Debe existir la sección ${i}`);
+  assert.strictEqual(grp.tasks.length, 2, `La sección ${i} debe contener 2 tareas`);
+  const depTask = grp.tasks.find((t) => t.taskId === `t_${i}_b`);
+  assert(depTask, `Debe existir la tarea dependiente en sección ${i}`);
+  assert.strictEqual(depTask.blockedBy, `t_${i}_a`);
+}
+
+// Agregar tarea a la décima sección
+const { updatedMarkdown: withNewTaskInSec10 } = addTaskToMarkdown(tenSectionsMd, {
+  title: 'Tercera tarea en sección diez',
+  groupTitle: 'Sección 10',
+  priority: 'P0',
+});
+const reParsedTen = parseTasksMarkdown(withNewTaskInSec10);
+const sec10 = reParsedTen.find((g) => g.title === 'Sección 10');
+assert(sec10, 'Debe existir la Sección 10 tras adición');
+assert.strictEqual(sec10.tasks.length, 3, 'La Sección 10 debe tener 3 tareas tras añadir una nueva');
+console.log('   ✓ Agrupación, parsing y sincronización de hasta 10 secciones verificado.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
+
 
