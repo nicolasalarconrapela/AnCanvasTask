@@ -14,6 +14,7 @@ import {
   scanTaskBlocks,
   isTaskIdLine,
   stripTaskIdsFromMarkdown,
+  sanitizeTaskMetadataOrder,
 } from '../utils/markdownSync';
 import { SafeMarkdownNormalizerModal } from './SafeMarkdownNormalizerModal';
 
@@ -202,6 +203,31 @@ export function MarkdownSplitEditor({
     }
   }, [onOpenNormalizer]);
 
+  // Sanitize task metadata order (Description -> ID -> Status -> Priority)
+  const handleSanitizeMetadataOrder = useCallback(() => {
+    const { updatedMarkdown, reorderedCount } = sanitizeTaskMetadataOrder(value);
+    if (reorderedCount > 0) {
+      onChange(updatedMarkdown);
+      onShowToast(
+        i18n._(msg`Orden sanitizado en ${reorderedCount} tarea(s) (Description / ID / Status / Priority)`),
+        'success'
+      );
+    } else {
+      onShowToast(
+        i18n._(msg`El orden de los metadatos ya está sanitizado (Description / ID / Status / Priority)`),
+        'info'
+      );
+    }
+  }, [value, onChange, onShowToast, i18n]);
+
+  useEffect(() => {
+    const handleEvent = () => handleSanitizeMetadataOrder();
+    window.addEventListener('antask:sanitize-task-metadata-order', handleEvent);
+    return () => {
+      window.removeEventListener('antask:sanitize-task-metadata-order', handleEvent);
+    };
+  }, [handleSanitizeMetadataOrder]);
+
   // Track cursor position
   const cursorTrackerPlugin = useMemo(() => {
     return EditorView.updateListener.of((update) => {
@@ -316,6 +342,19 @@ export function MarkdownSplitEditor({
             <span className="hidden sm:inline">{i18n._(msg`Normalizar`)}</span>
           </button>
 
+          {/* Sanitize Metadata Order (Description / ID / Status / Priority) */}
+          <button
+            id="btn-markdown-sanitize-order"
+            type="button"
+            onClick={handleSanitizeMetadataOrder}
+            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-950/60 text-indigo-300 border border-indigo-800/80 hover:bg-indigo-900/80 cursor-pointer transition-colors flex items-center gap-1 shadow-xs"
+            title={i18n._(msg`Sanitizar orden de metadatos (Description / ID / Status / Priority)`)}
+            aria-label={i18n._(msg`Sanitizar orden`)}
+          >
+            <span className="material-symbols-outlined text-[14px] text-indigo-400">low_priority</span>
+            <span className="hidden sm:inline">{i18n._(msg`Sanitizar orden`)}</span>
+          </button>
+
           {/* Toggle Show/Hide Task IDs in Editor */}
           {onToggleShowTaskIds && (
             <button
@@ -394,7 +433,7 @@ export function MarkdownSplitEditor({
           <button
             id="btn-markdown-insert-task"
             type="button"
-            onClick={() => insertText('\n- [ ] Nueva tarea\n  - Priority: P3\n  - Status: backlog\n')}
+            onClick={() => insertText('\n- [ ] Nueva tarea\n  - Status: backlog\n  - Priority: P3\n')}
             className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-[var(--on-surface)] flex items-center gap-1 cursor-pointer transition-colors"
             title={i18n._(msg`Insertar nueva tarea pendiente (- [ ])`)}
           >
@@ -405,7 +444,7 @@ export function MarkdownSplitEditor({
           <button
             id="btn-markdown-insert-section"
             type="button"
-            onClick={() => insertText('\n## Nueva Sección\n\n- [ ] Tarea inicial\n  - Priority: P3\n  - Status: backlog\n')}
+            onClick={() => insertText('\n## Nueva Sección\n\n- [ ] Tarea inicial\n  - Status: backlog\n  - Priority: P3\n')}
             className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-[var(--on-surface)] flex items-center gap-1 cursor-pointer transition-colors"
             title={i18n._(msg`Insertar nueva sección (## Sección)`)}
           >

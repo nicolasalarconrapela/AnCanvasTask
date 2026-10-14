@@ -144,6 +144,7 @@ import {
   updateTaskInMarkdown,
   validateMarkdownDocument,
   stripTaskIdsFromMarkdown,
+  sanitizeTaskMetadataOrder,
 } from './utils/markdownSync';
 
 export type SyncStatus = 'idle' | 'saving' | 'synced' | 'local' | 'loading';
@@ -758,6 +759,24 @@ export default function App() {
     [pushToast]
   );
 
+  const handleSanitizeMetadataOrder = useCallback(() => {
+    setMarkdownInput((curr) => {
+      const { updatedMarkdown, reorderedCount } = sanitizeTaskMetadataOrder(curr);
+      if (reorderedCount > 0) {
+        pushToast(
+          i18n._(msg`Orden sanitizado en ${reorderedCount} tarea(s) (Description / ID / Status / Priority)`),
+          'success'
+        );
+      } else {
+        pushToast(
+          i18n._(msg`El orden de los metadatos ya está sanitizado (Description / ID / Status / Priority)`),
+          'info'
+        );
+      }
+      return updatedMarkdown;
+    });
+  }, [pushToast]);
+
   useEffect(() => {
     const handleAssignEvent = (e: any) => {
       const { taskId, taskTitle } = e.detail || {};
@@ -880,6 +899,8 @@ export default function App() {
     window.addEventListener('antask:delete-section', handleDeleteSectionEvent);
     window.addEventListener('antask:section-color-changed', handleSectionColorChangedEvent);
     window.addEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
+    const handleSanitizeOrderEvent = () => handleSanitizeMetadataOrder();
+    window.addEventListener('antask:sanitize-task-metadata-order', handleSanitizeOrderEvent);
 
     return () => {
       window.removeEventListener('antask:assign-task-id', handleAssignEvent);
@@ -891,6 +912,7 @@ export default function App() {
       window.removeEventListener('antask:delete-section', handleDeleteSectionEvent);
       window.removeEventListener('antask:section-color-changed', handleSectionColorChangedEvent);
       window.removeEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
+      window.removeEventListener('antask:sanitize-task-metadata-order', handleSanitizeOrderEvent);
     };
   }, [
     handleAssignSingleTaskId,
@@ -899,6 +921,7 @@ export default function App() {
     handleAutoAssignAllTaskStatuses,
     handleResolveDuplicateIds,
     handleResolveSingleDuplicateId,
+    handleSanitizeMetadataOrder,
   ]);
 
   // Online / Offline network status listener
@@ -4377,6 +4400,16 @@ export default function App() {
         category: 'action',
         perform: () => {
           handleResolveDuplicateIds();
+        },
+      },
+      {
+        id: 'sanitize-metadata-order',
+        title: 'Sanitizar orden de metadatos (Description / ID / Status / Priority)',
+        shortcut: '⇧O',
+        icon: 'low_priority',
+        category: 'action',
+        perform: () => {
+          handleSanitizeMetadataOrder();
         },
       },
       {

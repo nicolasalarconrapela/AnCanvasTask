@@ -275,7 +275,7 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
       const fullName = `${owner}/${repo}`;
       const branchName = newWsBranch.trim() || 'main';
 
-      const initialMd = `# ${newWsName.trim()} - TASKS.md\n\n## Tareas Principales\n- [ ] Configurar entorno y dependencias del proyecto\n  id: setup_env\n  priority: P0\n  status: in_progress\n- [ ] Conectar persistencia estructurada con Sanity CMS\n  id: sanity_struct\n  priority: P3\n  status: todo\n`;
+      const initialMd = `# ${newWsName.trim()} - TASKS.md\n\n## Tareas Principales\n- [ ] Configurar entorno y dependencias del proyecto\n  id: setup_env\n  status: in_progress\n  priority: P0\n- [ ] Conectar persistencia estructurada con Sanity CMS\n  id: sanity_struct\n  status: todo\n  priority: P3\n`;
 
       const newWs = {
         _id: `workspace-${wsId}`,

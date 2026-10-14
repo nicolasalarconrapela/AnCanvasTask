@@ -14,6 +14,7 @@ import {
   assignStatusToTask,
   validateMarkdownDocument,
   updateSectionColorInMarkdown,
+  sanitizeTaskMetadataOrder,
 } from '../src/utils/markdownSync';
 import {
   getInitialDefaultWorkspaces,
@@ -265,6 +266,67 @@ assert.strictEqual(noPrioParsed.priority, 'P3', 'Una tarea en markdown sin prior
 const noPrioFields = taskFields(noPriorityMd)[0];
 assert.strictEqual(noPrioFields.priority, 'P3', 'taskFields debe asignar prioridad P3 por defecto si no está especificada');
 console.log('   ✓ Fallback de prioridad P3 por defecto en Markdown verificado.');
+
+// Verificación de orden canónico de metadatos: Description -> ID -> Status -> Priority -> Blocked by -> Tags -> Subtasks
+console.log('4.b Verificando orden canónico Description/ID/Status/Priority y sanitización...');
+const unorderedMd = `## General
+- [ ] Tarea con orden caótico
+  - Tags: urgent, backend
+  - Priority: P0
+  - Blocked by: root
+  - Status: in_progress
+  - ID: task_chaotic
+  - Description: Descripción importante
+  - [ ] Subtarea 1
+  - [x] Subtarea 2
+`;
+
+const { updatedMarkdown: sanitizedMd, reorderedCount } = sanitizeTaskMetadataOrder(unorderedMd);
+assert.strictEqual(reorderedCount, 1, 'Debe haber reordenado 1 tarea');
+
+// Verificar que las líneas aparecen exactamente en el orden requerido
+const descIdx = sanitizedMd.indexOf('Description:');
+const idIdx = sanitizedMd.indexOf('ID:');
+const statusIdx = sanitizedMd.indexOf('Status:');
+const priorityIdx = sanitizedMd.indexOf('Priority:');
+const blockedByIdx = sanitizedMd.indexOf('Blocked by:');
+const tagsIdx = sanitizedMd.indexOf('Tags:');
+const subtask1Idx = sanitizedMd.indexOf('- [ ] Subtarea 1');
+const subtask2Idx = sanitizedMd.indexOf('- [x] Subtarea 2');
+
+assert(descIdx < idIdx, 'Description debe ir ANTES de ID');
+assert(idIdx < statusIdx, 'ID debe ir ANTES de Status');
+assert(statusIdx < priorityIdx, 'Status debe ir ANTES de Priority');
+assert(priorityIdx < blockedByIdx, 'Priority debe ir ANTES de Blocked by');
+assert(blockedByIdx < tagsIdx, 'Blocked by debe ir ANTES de Tags');
+assert(tagsIdx < subtask1Idx, 'Tags debe ir ANTES de Subtasks');
+assert(subtask1Idx < subtask2Idx, 'El orden relativo de subtareas debe preservarse');
+
+// Si se vuelve a ejecutar sobre el markdown ya sanitizado, reorderedCount debe ser 0
+const secondPass = sanitizeTaskMetadataOrder(sanitizedMd);
+assert.strictEqual(secondPass.reorderedCount, 0, 'No debe modificar markdown ya sanitizado');
+assert.strictEqual(secondPass.updatedMarkdown, sanitizedMd, 'El contenido debe permanecer idéntico');
+
+// Verificar que addTaskToMarkdown genera automáticamente el orden canónico
+const { updatedMarkdown: fromAddMd } = addTaskToMarkdown(`## General\n`, {
+  title: 'Tarea creada con addTask',
+  groupTitle: 'General',
+  description: 'Mi descripción',
+  customId: 'task_added_order',
+  status: 'backlog',
+  priority: 'P3',
+  blockedBy: 'dep1',
+  tags: ['front', 'ui'],
+});
+
+const addDescIdx = fromAddMd.indexOf('Description:');
+const addIdIdx = fromAddMd.indexOf('ID:');
+const addStatusIdx = fromAddMd.indexOf('Status:');
+const addPriorityIdx = fromAddMd.indexOf('Priority:');
+assert(addDescIdx < addIdIdx, 'En addTaskToMarkdown Description va antes de ID');
+assert(addIdIdx < addStatusIdx, 'En addTaskToMarkdown ID va antes de Status');
+assert(addStatusIdx < addPriorityIdx, 'En addTaskToMarkdown Status va antes de Priority');
+console.log('   ✓ Orden Description/ID/Status/Priority y sanitización verificados.');
 
 // 5. Workspaces and Local Recovery without GitHub dependency
 console.log('5. Verificando estructura de Workspaces local y desacoplamiento de GitHub...');

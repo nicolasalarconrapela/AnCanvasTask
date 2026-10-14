@@ -763,6 +763,31 @@ export function findDependentTasks(
 }
 
 /**
+ * Returns canonical rank for task metadata lines:
+ * 1: Description
+ * 2: ID
+ * 3: Status
+ * 4: Priority
+ * 5: Blocked by
+ * 6: Tags
+ * 7: Progress
+ * 8: Subtasks
+ * 9: Other / comments / unknown metadata
+ */
+export function getMetadataLineRank(line: string): number {
+  const trimmed = line.trim();
+  if (/^(?:[-*]\s*)?(?:Description|Descripci[oó]n|Desc)\s*:/i.test(trimmed)) return 1;
+  if (/^(?:[-*]\s*)?ID\s*:/i.test(trimmed)) return 2;
+  if (/^(?:[-*]\s*)?Status\s*:/i.test(trimmed)) return 3;
+  if (/^(?:[-*]\s*)?Priority\s*:/i.test(trimmed)) return 4;
+  if (/^(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:/i.test(trimmed)) return 5;
+  if (/^(?:[-*]\s*)?(?:Tags?|Labels)\s*:/i.test(trimmed)) return 6;
+  if (/^(?:[-*]\s*)?(?:Progress|Subtasks)\s*:\s*\d+/i.test(trimmed)) return 7;
+  if (/^[-*]\s*\[[ xX]\]/.test(trimmed)) return 8;
+  return 9;
+}
+
+/**
  * Updates a specific task's title, completed status, or priority in a markdown string
  * while preserving unknown metadata, surrounding text, comments, and structure.
  */
@@ -811,7 +836,12 @@ export function updateTaskInMarkdown(markdown: string, taskId: string, updates: 
     }
   }
 
-  lines.splice(block.taskLineIndex + 1, block.endLineIndex - block.taskLineIndex, ...body);
+  // Stable sort body lines according to canonical metadata order: Description -> ID -> Status -> Priority -> etc.
+  const indexed = body.map((line, idx) => ({ line, idx, rank: getMetadataLineRank(line) }));
+  indexed.sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.idx - b.idx));
+  const sortedBody = indexed.map((item) => item.line);
+
+  lines.splice(block.taskLineIndex + 1, block.endLineIndex - block.taskLineIndex, ...sortedBody);
   return lines.join('\n');
 }
 
@@ -873,7 +903,7 @@ export function addTaskToMarkdown(
   }
 ): { updatedMarkdown: string; taskId: string } {
   const cleanTitle = payload.title.trim();
-  const cleanGroup = payload.groupTitle.trim() || 'General';
+  const cleanGroup = (payload.groupTitle || 'General').trim() || 'General';
   const priority = payload.priority || 'P3';
   const status = payload.status || 'backlog';
   const finalId = payload.customId?.trim() || generateUniqueTaskId(cleanTitle, markdown);
@@ -883,14 +913,15 @@ export function addTaskToMarkdown(
 
   const taskLines: string[] = [
     `- [ ] ${cleanTitle}`,
-    `  - ID: ${finalId}`,
-    `  - Priority: ${priority}`,
-    `  - Status: ${status}`,
   ];
 
   if (payload.description && payload.description.trim()) {
     taskLines.push(`  - Description: ${payload.description.trim()}`);
   }
+
+  taskLines.push(`  - ID: ${finalId}`);
+  taskLines.push(`  - Status: ${status}`);
+  taskLines.push(`  - Priority: ${priority}`);
 
   if (payload.blockedBy && payload.blockedBy.trim()) {
     taskLines.push(`  - Blocked by: ${payload.blockedBy.trim()}`);
@@ -1618,4 +1649,62 @@ export function stripTaskIdsFromMarkdown(markdown: string): string {
     .split(/\r?\n/)
     .filter((line) => !isTaskIdLine(line))
     .join('\n');
+}
+
+/**
+ * Sanitizes the metadata line order for all tasks in Markdown so they adhere
+ * strictly to the canonical sequence:
+ * Description -> ID -> Status -> Priority -> Blocked by -> Tags -> Progress -> Subtasks -> Others
+ */
+export function sanitizeTaskMetadataOrder(markdown: string): {
+  updatedMarkdown: string;
+  reorderedCount: number;
+} {
+  if (!markdown || !markdown.trim()) {
+    return { updatedMarkdown: markdown, reorderedCount: 0 };
+  }
+
+  const { taskBlocks } = scanTaskBlocks(markdown);
+  if (taskBlocks.length === 0) {
+    return { updatedMarkdown: markdown, reorderedCount: 0 };
+  }
+
+  const lines = markdown.split(/\r?\n/);
+  let reorderedCount = 0;
+
+  // Process blocks in reverse order (bottom to top) to ensure line index stability
+  const sortedBlocks = [...taskBlocks].sort((a, b) => b.taskLineIndex - a.taskLineIndex);
+
+  for (const block of sortedBlocks) {
+    if (block.endLineIndex <= block.taskLineIndex) continue;
+
+    const originalBody = lines.slice(block.taskLineIndex + 1, block.endLineIndex + 1);
+    if (originalBody.length <= 1) continue;
+
+    // Stable sort according to metadata rank
+    const indexed = originalBody.map((line, idx) => ({
+      line,
+      idx,
+      rank: getMetadataLineRank(line),
+    }));
+
+    indexed.sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return a.idx - b.idx;
+    });
+
+    const newBody = indexed.map((item) => item.line);
+
+    // Check if reordering actually occurred
+    const hasChanged = newBody.some((line, i) => line !== originalBody[i]);
+    if (hasChanged) {
+      lines.splice(block.taskLineIndex + 1, originalBody.length, ...newBody);
+      reorderedCount++;
+    }
+  }
+
+  return {
+    updatedMarkdown: lines.join('\n'),
+    reorderedCount,
+  };
 }

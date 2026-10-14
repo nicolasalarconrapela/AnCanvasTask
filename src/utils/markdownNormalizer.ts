@@ -3,6 +3,7 @@ import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
 import remarkStringify from 'remark-stringify';
 import * as Diff from 'diff';
+import { sanitizeTaskMetadataOrder } from './markdownSync';
 
 export type ChangeCategory =
   | 'formato_seguro'
@@ -160,7 +161,7 @@ function postProcessCanonicalMarkdown(stringified: string, original: string): st
   if (finalContent.length > 0) {
     finalContent += '\n';
   }
-  return finalContent;
+  return sanitizeTaskMetadataOrder(finalContent).updatedMarkdown;
 }
 
 /**
