@@ -97,6 +97,7 @@ export function isShapeFilteredOut(
       completed: p.completed,
       priority: p.priority,
       status: normalizedStatus,
+      description: p.description,
       groupTitle: p.groupTitle,
       tags: p.tags,
       blockedBy: p.blockedBy,
@@ -147,6 +148,7 @@ function TaskCardComponent({
     priority,
     taskId,
     status,
+    description,
     tags,
     subtasks,
     blockedBy,
@@ -435,6 +437,7 @@ function TaskCardComponent({
       completed,
       priority,
       status: normalizedStatus,
+      description,
       groupTitle: shape.props.groupTitle,
       tags,
       blockedBy,
@@ -767,6 +770,17 @@ function TaskCardComponent({
             </button>
           </div>
         </div>
+
+        {/* Optional Description */}
+        {description && (
+          <p
+            id={`task-card-desc-${shape.id}`}
+            className="text-[11px] text-[var(--on-surface-variant)] leading-snug line-clamp-2 my-0.5 select-none"
+            title={description}
+          >
+            <HighlightText text={description} query={searchQuery} />
+          </p>
+        )}
 
         {/* Popover Contextual Menu */}
         {isMenuOpen && menuCoords && typeof document !== 'undefined' && createPortal(
@@ -2345,7 +2359,8 @@ export function populateCanvasWithGroups(
 
   const getTaskCalculatedHeight = (task: ParsedMarkdownTask) => {
     const subCount = task.subtasks?.items?.length || 0;
-    return subCount > 0 ? cardHeight + 20 + subCount * 22 : cardHeight;
+    const descExtra = task.description ? 24 : 0;
+    return subCount > 0 ? cardHeight + 20 + subCount * 22 + descExtra : cardHeight + descExtra;
   };
 
   // Pass 1: Place groups that already have saved positions in savedGroupMap

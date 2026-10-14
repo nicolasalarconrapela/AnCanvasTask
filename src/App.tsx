@@ -3753,7 +3753,8 @@ export default function App() {
           targetY = maxTaskBottom + 12;
         }
 
-        const newTaskH = 110;
+        const descExtra = newTaskDescription.trim() ? 24 : 0;
+        const newTaskH = 110 + descExtra;
         const neededHeight = Math.max(
           targetGroupShape.props?.h || 240,
           (targetY + newTaskH + 24) - targetGroupShape.y
@@ -3826,7 +3827,7 @@ export default function App() {
         y: targetY,
         props: {
           w: 320,
-          h: 110,
+          h: 110 + (newTaskDescription.trim() ? 24 : 0),
           title: newTaskTitle.trim(),
           completed: false,
           priority: newTaskPriority,
@@ -4110,6 +4111,12 @@ export default function App() {
         });
 
         if (taskShape) {
+          const currentP = (taskShape as any).props || {};
+          const nextDescription = updates.description !== undefined ? updates.description : currentP.description;
+          const subCount = currentP.subtasks?.items?.length || 0;
+          const descExtra = nextDescription ? 24 : 0;
+          const targetH = subCount > 0 ? 110 + 20 + subCount * 22 + descExtra : 110 + descExtra;
+
           editor.updateShape({
             id: taskShape.id,
             type: 'task',
@@ -4118,7 +4125,7 @@ export default function App() {
               ...(updates.completed !== undefined ? { completed: updates.completed } : {}),
               ...(updates.priority !== undefined ? { priority: updates.priority } : {}),
               ...(updates.status !== undefined ? { status: updates.status } : {}),
-              ...(updates.description !== undefined ? { description: updates.description } : {}),
+              ...(updates.description !== undefined ? { description: updates.description, h: Math.max(currentP.h || 110, targetH) } : {}),
               ...(updates.tags !== undefined ? { tags: updates.tags } : {}),
               ...(updates.blockedBy !== undefined ? { blockedBy: updates.blockedBy } : {}),
               ...(updates.groupTitle !== undefined ? { groupTitle: updates.groupTitle } : {}),
@@ -4242,6 +4249,7 @@ export default function App() {
         completed: isCompleted,
         priority: (b.detectedPriority || 'P1') as TaskPriority,
         status: ((b.detectedStatus as any) || (isCompleted ? 'done' : 'todo')) as TaskStatus,
+        description: b.detectedDescription,
         tags: b.detectedTags,
         blockedBy: b.detectedBlockedBy,
       };

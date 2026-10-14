@@ -7,6 +7,7 @@ export interface TaskFilterData {
   completed?: boolean;
   priority?: string;
   status?: string;
+  description?: string;
   groupTitle?: string;
   section?: string;
   tags?: string[];
@@ -103,6 +104,7 @@ export function isTaskMatchingFilters(
     for (const term of rawTerms) {
       const cleanTerm = term.replace(/^[#@]/, '');
       const title = (task.title || '').toLowerCase();
+      const desc = (task.description || '').toLowerCase();
       const id = (task.taskId || '').toLowerCase();
       const group = (task.groupTitle || task.section || '').toLowerCase();
       const priority = (task.priority || '').toLowerCase();
@@ -110,6 +112,7 @@ export function isTaskMatchingFilters(
       const isCompleted = Boolean(task.completed);
 
       const matchTitle = title.includes(term) || (cleanTerm && title.includes(cleanTerm));
+      const matchDesc = desc.includes(term) || (cleanTerm && desc.includes(cleanTerm));
       const matchId = id.includes(term) || (cleanTerm && id.includes(cleanTerm));
       const matchGroup = group.includes(term) || (cleanTerm && group.includes(cleanTerm));
       const matchTags = task.tags?.some(
@@ -123,7 +126,7 @@ export function isTaskMatchingFilters(
         ((term === 'todo' || term === 'pendiente' || term === 'por hacer') && !isCompleted);
 
       // Every term in a multi-word search must match at least one field
-      if (!matchTitle && !matchId && !matchGroup && !matchTags && !matchPriority && !matchStatus) {
+      if (!matchTitle && !matchDesc && !matchId && !matchGroup && !matchTags && !matchPriority && !matchStatus) {
         return false;
       }
     }

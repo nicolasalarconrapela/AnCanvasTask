@@ -218,6 +218,7 @@ export function KanbanBoard({
           completed: t.completed,
           priority: t.priority,
           status: t.status,
+          description: t.description,
           groupTitle: t.groupTitle,
           tags: t.tags,
           blockedBy: t.blockedBy,
@@ -885,6 +886,17 @@ export function KanbanBoard({
                               </div>
                             )}
 
+                            {/* Optional Description */}
+                            {task.description && (
+                              <p
+                                id={`p-kanban-desc-${task.taskId}`}
+                                className="text-[11px] text-[var(--on-surface-variant)] leading-snug line-clamp-2 my-1 select-none"
+                                title={task.description}
+                              >
+                                <HighlightText text={task.description} query={searchQuery} />
+                              </p>
+                            )}
+
                             {/* Subtasks Section (Option A: Checklist Integrado Compacto) */}
                             {task.subtasks && task.subtasks.items && task.subtasks.items.length > 0 && (
                               <div id={`kanban-card-subtasks-${task.taskId}`} className="my-1 text-xs">
@@ -1292,6 +1304,17 @@ export function KanbanBoard({
                                 <span>{task.priority}</span>
                               </button>
                             </div>
+
+                            {/* Optional Description */}
+                            {task.description && (
+                              <p
+                                id={`p-kanban-sec-desc-${task.taskId}`}
+                                className="text-[11px] text-[var(--on-surface-variant)] leading-snug line-clamp-2 my-1 select-none"
+                                title={task.description}
+                              >
+                                <HighlightText text={task.description} query={searchQuery} />
+                              </p>
+                            )}
 
                             <div id="div-kanbanboard-29" className="flex items-center justify-between text-xs pt-1 border-t border-[var(--outline)] mt-0.5">
                               {showTaskIds ? (

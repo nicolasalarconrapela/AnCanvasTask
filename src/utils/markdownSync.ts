@@ -213,7 +213,7 @@ export function scanTaskBlocks(markdown: string): {
     const isIndented = line.startsWith(' ') || line.startsWith('\t');
     const isMetadataLine =
       Boolean(currentBlock) &&
-      /^(?:\s*[-*]\s*(?:\[[ xX]\]\s*)?)?(?:ID|Priority|Status|Description|Tags?|Blocked\s*(?:by|-by)?)\s*:/i.test(trimmed);
+      /^(?:\s*[-*]\s*(?:\[[ xX]\]\s*)?)?(?:ID|Priority|Status|Description|Descripci[oó]n|Desc|Tags?|Blocked\s*(?:by|-by)?)\s*:/i.test(trimmed);
     const taskMatch = line.match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/);
     if (taskMatch && (!currentBlock || !isIndented) && !isMetadataLine) {
       if (currentBlock) {
@@ -283,7 +283,7 @@ export function scanTaskBlocks(markdown: string): {
           continue;
         }
 
-        const descriptionMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?Description\s*:\s*(.+)$/i);
+        const descriptionMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?(?:Description|Descripci[oó]n|Desc)\s*:\s*(.+)$/i);
         if (descriptionMatch) {
           currentBlock.detectedDescription = descriptionMatch[1].trim();
           currentBlock.endLineIndex = i;
@@ -346,6 +346,16 @@ export function scanTaskBlocks(markdown: string): {
       }
 
       if (trimmed.length > 0 && !trimmed.startsWith('#')) {
+        if (
+          !currentBlock.detectedDescription &&
+          isIndented &&
+          !trimmed.startsWith('```') &&
+          !trimmed.startsWith('-') &&
+          !trimmed.startsWith('*') &&
+          !trimmed.includes(':')
+        ) {
+          currentBlock.detectedDescription = trimmed;
+        }
         currentBlock.endLineIndex = i;
       }
     }
@@ -782,7 +792,7 @@ export function updateTaskInMarkdown(markdown: string, taskId: string, updates: 
 
   metadata(/^(\s*(?:[-*]\s*)?Priority\s*:\s*).*$/i, 'Priority', updates.priority);
   metadata(/^(\s*(?:[-*]\s*)?Status\s*:\s*).*$/i, 'Status', statusToSet, !['todo', 'done'].includes(statusToSet || ''));
-  metadata(/^(\s*(?:[-*]\s*)?Description\s*:\s*).*$/i, 'Description', updates.description !== undefined ? updates.description.trim() : undefined, Boolean(updates.description && updates.description.trim()));
+  metadata(/^(\s*(?:[-*]\s*)?(?:Description|Descripci[oó]n|Desc)\s*:\s*).*$/i, 'Description', updates.description !== undefined ? updates.description.trim() : undefined, Boolean(updates.description && updates.description.trim()));
   metadata(/^(\s*(?:[-*]\s*)?(?:Tags|Labels)\s*:\s*).*$/i, 'Tags', updates.tags?.join(', '));
   metadata(/^(\s*(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:\s*).*$/i, 'Blocked by', updates.blockedBy?.trim());
   metadata(/^(\s*(?:[-*]\s*)?ID\s*:\s*).*$/i, 'ID', updates.id?.trim());

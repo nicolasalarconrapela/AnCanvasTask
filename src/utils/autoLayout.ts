@@ -12,6 +12,7 @@ export interface ComputedTaskLayout {
   taskId: string;
   temporaryId?: string;
   title: string;
+  description?: string;
   x: number;
   y: number;
   w: number;
@@ -66,7 +67,8 @@ export const BRANCH_GAP_X = 64;
 
 export function getTaskCalculatedHeight(task: ParsedMarkdownTask): number {
   const subCount = task.subtasks?.items?.length || 0;
-  return subCount > 0 ? CARD_HEIGHT + 20 + subCount * 22 : CARD_HEIGHT;
+  const descExtra = task.description ? 24 : 0;
+  return subCount > 0 ? CARD_HEIGHT + 20 + subCount * 22 + descExtra : CARD_HEIGHT + descExtra;
 }
 
 export function isRectOverlapping(
@@ -233,6 +235,7 @@ export function computeAutoLayout(markdown: string): ComputedAutoLayout {
           taskId: tId,
           temporaryId: task.temporaryId,
           title: task.title,
+          description: task.description,
           x: colX + GROUP_PADDING_X,
           y: currentTaskY,
           w: CARD_WIDTH,
@@ -505,6 +508,7 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
           ...existingTask.props,
           w: t.w,
           h: t.h,
+          description: t.description !== undefined ? t.description : existingTask.props?.description,
           groupTitle: t.groupTitle,
           branchTitle: t.branchTitle,
           groupHeadingId: t.groupHeadingId,
@@ -524,6 +528,7 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
           priority: 'P1',
           taskId: t.taskId,
           status: 'todo',
+          description: t.description,
           groupTitle: t.groupTitle,
           branchTitle: t.branchTitle,
           groupHeadingId: t.groupHeadingId,
