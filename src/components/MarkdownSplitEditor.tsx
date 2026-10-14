@@ -3,7 +3,8 @@ import CodeMirror, { ReactCodeMirrorRef, ExternalChange, Transaction } from '@ui
 import { diffChars } from 'diff';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { EditorView } from '@codemirror/view';
+import { EditorView, Decoration, DecorationSet } from '@codemirror/view';
+import { RangeSetBuilder, StateField, EditorState } from '@codemirror/state';
 import { useLingui } from '@lingui/react';
 import { msg, plural } from '@lingui/core/macro';
 import {
@@ -11,8 +12,36 @@ import {
   MarkdownValidationReport,
   validateMarkdownDocument,
   scanTaskBlocks,
+  isTaskIdLine,
+  stripTaskIdsFromMarkdown,
 } from '../utils/markdownSync';
 import { SafeMarkdownNormalizerModal } from './SafeMarkdownNormalizerModal';
+
+function buildHideTaskIdsDeco(state: EditorState): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  for (let l = 1; l <= state.doc.lines; l++) {
+    const line = state.doc.line(l);
+    if (isTaskIdLine(line.text)) {
+      const lFrom = line.from;
+      const lTo = l < state.doc.lines ? line.to + 1 : line.to;
+      builder.add(lFrom, lTo, Decoration.replace({ block: true }));
+    }
+  }
+  return builder.finish();
+}
+
+const hideTaskIdsExtension = StateField.define<DecorationSet>({
+  create(state) {
+    return buildHideTaskIdsDeco(state);
+  },
+  update(decorations, tr) {
+    if (tr.docChanged) {
+      return buildHideTaskIdsDeco(tr.state);
+    }
+    return decorations.map(tr.changes);
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 interface MarkdownSplitEditorProps {
   value: string;
@@ -25,6 +54,8 @@ interface MarkdownSplitEditorProps {
   splitRatio: number;
   onChangeSplitRatio?: (ratio: number) => void;
   onOpenNormalizer?: () => void;
+  showTaskIds?: boolean;
+  onToggleShowTaskIds?: () => void;
 }
 
 export function MarkdownSplitEditor({
@@ -38,6 +69,8 @@ export function MarkdownSplitEditor({
   splitRatio,
   onChangeSplitRatio,
   onOpenNormalizer,
+  showTaskIds,
+  onToggleShowTaskIds,
 }: MarkdownSplitEditorProps) {
   const { i18n } = useLingui();
   const editorRef = useRef<ReactCodeMirrorRef>(null);
@@ -147,14 +180,18 @@ export function MarkdownSplitEditor({
   // Copy markdown to clipboard
   const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(value);
+      const textToCopy =
+        showTaskIds === false
+          ? stripTaskIdsFromMarkdown(value)
+          : value;
+      await navigator.clipboard.writeText(textToCopy);
       setCopied(true);
       onShowToast(i18n._(msg`Markdown copiado al portapapeles`), 'success');
       setTimeout(() => setCopied(false), 2000);
     } catch {
       onShowToast(i18n._(msg`Error al copiar al portapapeles`), 'error');
     }
-  }, [value, onShowToast, i18n]);
+  }, [value, showTaskIds, onShowToast, i18n]);
 
   // Open safe normalization dialog
   const handleOpenNormalizer = useCallback(() => {
@@ -180,12 +217,16 @@ export function MarkdownSplitEditor({
   }, []);
 
   const extensions = useMemo(() => {
-    return [
+    const exts = [
       markdown(),
       cursorTrackerPlugin,
       EditorView.lineWrapping,
     ];
-  }, [cursorTrackerPlugin]);
+    if (showTaskIds === false) {
+      exts.push(hideTaskIdsExtension);
+    }
+    return exts;
+  }, [cursorTrackerPlugin, showTaskIds]);
 
   return (
     <aside
@@ -274,6 +315,36 @@ export function MarkdownSplitEditor({
             <span className="material-symbols-outlined text-[14px] text-sky-400">verified</span>
             <span className="hidden sm:inline">{i18n._(msg`Normalizar`)}</span>
           </button>
+
+          {/* Toggle Show/Hide Task IDs in Editor */}
+          {onToggleShowTaskIds && (
+            <button
+              id="btn-markdown-toggle-ids"
+              type="button"
+              onClick={onToggleShowTaskIds}
+              className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs ${
+                showTaskIds !== false
+                  ? 'bg-amber-950/40 text-amber-300 border-amber-800/80 hover:bg-amber-900/60'
+                  : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+              }`}
+              title={
+                showTaskIds !== false
+                  ? i18n._(msg`Ocultar identificadores (id:) en el editor Markdown`)
+                  : i18n._(msg`Mostrar identificadores (id:) en el editor Markdown`)
+              }
+              aria-label={
+                showTaskIds !== false
+                  ? i18n._(msg`Ocultar IDs en Markdown`)
+                  : i18n._(msg`Mostrar IDs en Markdown`)
+              }
+            >
+              <span className="material-symbols-outlined text-[13px]">tag</span>
+              <span className="font-mono text-[10px] font-bold">#ID</span>
+              <span className="hidden sm:inline text-[10px]">
+                {showTaskIds !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
+              </span>
+            </button>
+          )}
 
           {/* Copy Markdown */}
           <button

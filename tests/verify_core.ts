@@ -630,7 +630,4 @@ assert(
 console.log('   ✓ Auto-layout verificado: 0 solapamientos, límites respetados y estricta pertenencia por sección.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
-
-
-
-
+process.exit(0);

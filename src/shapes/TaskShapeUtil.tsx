@@ -441,6 +441,7 @@ function TaskCardComponent({
   );
 
   const isHidden = isFilterActive && !isMatch;
+  const showTaskIds = globalFilters.showTaskIds !== false;
 
   useLayoutEffect(() => {
     const container = document.querySelector(`[data-shape-id="${shape.id}"]`) as HTMLElement | null;
@@ -973,28 +974,30 @@ function TaskCardComponent({
         {/* Bottom Row: Metadata & Status */}
         <div id={`task-card-footer-${shape.id}`} className="flex items-center justify-between text-xs text-[var(--on-surface-variant)] pt-1.5 border-t border-[var(--outline)] mt-0.5">
           <div id={`task-card-footer-meta-${shape.id}`} className="flex items-center gap-1.5 truncate max-w-[200px]">
-            {taskId && !hasMissingId ? (
-              <span className="text-[var(--on-surface-variant)] font-mono text-[11px] truncate tracking-tight" title={`ID: ${taskId}`}>
-                #<HighlightText text={taskId} query={searchQuery} />
-              </span>
-            ) : (
-              <button
-                id={`btn-task-card-generate-id-${shape.id}`}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.dispatchEvent(
-                    new CustomEvent('antask:assign-task-id', {
-                      detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
-                    })
-                  );
-                }}
-                className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
-                title={_(msg`Tarea sin ID explícito. Clic para generar ID automático en Markdown.`)}
-              >
-                <span>+ ID</span>
-                <span className="material-symbols-outlined text-[10px]">auto_fix_high</span>
-              </button>
+            {showTaskIds && (
+              taskId && !hasMissingId ? (
+                <span className="text-[var(--on-surface-variant)] font-mono text-[11px] truncate tracking-tight" title={`ID: ${taskId}`}>
+                  #<HighlightText text={taskId} query={searchQuery} />
+                </span>
+              ) : (
+                <button
+                  id={`btn-task-card-generate-id-${shape.id}`}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.dispatchEvent(
+                      new CustomEvent('antask:assign-task-id', {
+                        detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
+                      })
+                    );
+                  }}
+                  className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
+                  title={_(msg`Tarea sin ID explícito. Clic para generar ID automático en Markdown.`)}
+                >
+                  <span>+ ID</span>
+                  <span className="material-symbols-outlined text-[10px]">auto_fix_high</span>
+                </button>
+              )
             )}
 
             {isDuplicateId && (

@@ -20,6 +20,7 @@ export const DEFAULT_TASK_FILTERS: TaskFilterState = {
   tag: 'all',
   onlyBlocked: false,
   sortBy: 'default',
+  showTaskIds: true,
 };
 
 let currentGlobalFilters: TaskFilterState = { ...DEFAULT_TASK_FILTERS };
