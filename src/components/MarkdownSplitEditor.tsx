@@ -518,6 +518,21 @@ export function MarkdownSplitEditor({
                 <span>{i18n._(msg`Generar IDs (${validationReport.missingIdTaskIds.size})`)}</span>
               </button>
             )}
+
+            {validationReport.missingStatusTaskIds.size > 0 && (
+              <button
+                id="btn-markdown-auto-assign-all-statuses"
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('antask:auto-assign-all-statuses'));
+                }}
+                className="px-2 py-0.5 rounded text-[10px] font-sans font-medium bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                title={i18n._(msg`Asignar estado a todas las tareas sin estado`)}
+              >
+                <span className="material-symbols-outlined text-[11px]">check_circle</span>
+                <span>{i18n._(msg`Asignar Status (${validationReport.missingStatusTaskIds.size})`)}</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -602,6 +617,24 @@ export function MarkdownSplitEditor({
                     title={i18n._(msg`Asignar ID automático a esta tarea`)}
                   >
                     <span>+ ID</span>
+                  </button>
+                )}
+                {issue.type === 'missing_status' && (
+                  <button
+                    id={`btn-issue-assign-status-${issue.id}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.dispatchEvent(
+                        new CustomEvent('antask:assign-task-status', {
+                          detail: { taskId: issue.taskId, taskTitle: issue.taskTitle },
+                        })
+                      );
+                    }}
+                    className="px-1.5 py-0.2 rounded text-[10px] font-sans font-medium bg-cyan-500/20 hover:bg-cyan-500/35 text-cyan-200 border border-cyan-500/50 cursor-pointer transition-colors flex items-center gap-0.5"
+                    title={i18n._(msg`Asignar estado obligatorio a esta tarea`)}
+                  >
+                    <span>+ Status</span>
                   </button>
                 )}
                 {issue.lineIndex !== undefined && (

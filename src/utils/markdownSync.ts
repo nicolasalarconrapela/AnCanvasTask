@@ -54,6 +54,8 @@ export type MarkdownIssueType =
   | 'duplicate_id'
   | 'unresolved_blocker'
   | 'invalid_priority'
+  | 'missing_status'
+  | 'invalid_status'
   | 'unknown_metadata'
   | 'task_outside_heading'
   | 'empty_heading';
@@ -79,6 +81,7 @@ export interface MarkdownValidationReport {
   infoCount: number;
   duplicateIds: Set<string>;
   missingIdTaskIds: Set<string>;
+  missingStatusTaskIds: Set<string>;
   unresolvedBlockerMap: Map<string, string[]>; // taskId -> missing blocker IDs
 }
 
@@ -404,10 +407,12 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
 
   const duplicateIds = new Set<string>();
   const missingIdTaskIds = new Set<string>();
+  const missingStatusTaskIds = new Set<string>();
   const unresolvedBlockerMap = new Map<string, string[]>();
 
   const idCounts = new Map<string, TaskBlockInfo[]>();
   const allKnownIds = new Set<string>();
+  const VALID_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked']);
 
   // 1. Index all detected IDs and check for missing IDs
   taskBlocks.forEach((block, idx) => {
@@ -508,6 +513,37 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
     }
   });
 
+  // 5. Check for Mandatory Status (missing or invalid)
+  taskBlocks.forEach((block, idx) => {
+    const taskKey = block.detectedId || block.temporaryId || `temp-${idx + 1}`;
+    if (!block.detectedStatus) {
+      missingStatusTaskIds.add(taskKey);
+      issues.push({
+        id: `missing-status-${block.detectedId || idx}`,
+        type: 'missing_status',
+        severity: 'warning',
+        message: `Tarea sin Estado: "${block.detectedTitle || 'Sin título'}"`,
+        taskId: taskKey,
+        taskTitle: block.detectedTitle,
+        groupTitle: block.groupTitle,
+        lineIndex: block.taskLineIndex,
+        details: 'El campo "- Status:" es obligatorio. Asigna un estado (ej. backlog, todo, in_progress, review, done, blocked).',
+      });
+    } else if (!VALID_STATUSES.has(block.detectedStatus.trim().toLowerCase())) {
+      issues.push({
+        id: `invalid-status-${block.detectedId || idx}`,
+        type: 'invalid_status',
+        severity: 'warning',
+        message: `Estado no válido "${block.detectedStatus}" en "${block.detectedTitle}"`,
+        taskId: taskKey,
+        taskTitle: block.detectedTitle,
+        groupTitle: block.groupTitle,
+        lineIndex: block.taskLineIndex,
+        details: 'Valores válidos: backlog, todo, in_progress, review, done, blocked. Se usará backlog por defecto.',
+      });
+    }
+  });
+
   // 5. Check for Unknown Metadata (Preserved info)
   taskBlocks.forEach((block, idx) => {
     if (block.unknownMetadata.length > 0) {
@@ -576,6 +612,7 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
     infoCount,
     duplicateIds,
     missingIdTaskIds,
+    missingStatusTaskIds,
     unresolvedBlockerMap,
   };
 }
@@ -726,8 +763,16 @@ export function updateTaskInMarkdown(markdown: string, taskId: string, updates: 
       else body.splice(index, 1);
     } else if (value && insert) body.unshift(`${block.indentation}  - ${label}: ${value}`);
   };
+  const statusToSet = updates.status !== undefined
+    ? updates.status
+    : updates.completed === true
+      ? 'done'
+      : updates.completed === false && block.detectedStatus === 'done'
+        ? 'backlog'
+        : undefined;
+
   metadata(/^(\s*(?:[-*]\s*)?Priority\s*:\s*).*$/i, 'Priority', updates.priority);
-  metadata(/^(\s*(?:[-*]\s*)?Status\s*:\s*).*$/i, 'Status', updates.status, !['todo', 'done'].includes(updates.status || ''));
+  metadata(/^(\s*(?:[-*]\s*)?Status\s*:\s*).*$/i, 'Status', statusToSet, !['todo', 'done'].includes(statusToSet || ''));
   metadata(/^(\s*(?:[-*]\s*)?(?:Tags|Labels)\s*:\s*).*$/i, 'Tags', updates.tags?.join(', '));
   metadata(/^(\s*(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:\s*).*$/i, 'Blocked by', updates.blockedBy?.trim());
   metadata(/^(\s*(?:[-*]\s*)?ID\s*:\s*).*$/i, 'ID', updates.id?.trim());
@@ -1118,6 +1163,93 @@ export function autoAssignAllMissingTaskIds(markdown: string): {
     assignedCount: assignedTasks.length,
     assignedTasks,
   };
+}
+
+/**
+ * Automatically assigns a valid Status to all tasks in Markdown that do not have a Status field.
+ * Completed tasks (- [x]) get 'done', pending tasks get the defaultStatus (defaults to 'backlog').
+ */
+export function autoAssignAllMissingTaskStatuses(
+  markdown: string,
+  defaultStatus: TaskStatus = 'backlog'
+): {
+  updatedMarkdown: string;
+  assignedCount: number;
+  assignedTasks: Array<{ taskId: string; title: string; status: TaskStatus }>;
+} {
+  const { taskBlocks } = scanTaskBlocks(markdown);
+  const missingBlocks = taskBlocks.filter((b) => !b.detectedStatus);
+
+  if (missingBlocks.length === 0) {
+    return { updatedMarkdown: markdown, assignedCount: 0, assignedTasks: [] };
+  }
+
+  const lines = markdown.split(/\r?\n/);
+  const assignedTasks: Array<{ taskId: string; title: string; status: TaskStatus }> = [];
+
+  // Sort blocks in reverse line order to prevent index shifting on insertion
+  const sortedBlocks = [...missingBlocks].sort((a, b) => b.taskLineIndex - a.taskLineIndex);
+
+  for (const block of sortedBlocks) {
+    const isCompleted = block.rawTaskLine.includes('[x]') || block.rawTaskLine.includes('[X]');
+    const assignedStatus: TaskStatus = isCompleted ? 'done' : defaultStatus;
+    const baseIndent = block.indentation ? `${block.indentation}  ` : '  ';
+    const statusLine = `${baseIndent}- Status: ${assignedStatus}`;
+
+    // Find the best insertion point after ID or Priority if present
+    let insertOffset = 1;
+    for (let i = block.taskLineIndex + 1; i <= block.endLineIndex; i++) {
+      const lineText = lines[i];
+      if (/^\s*(?:[-*]\s*)?(?:ID|Priority)\s*:/i.test(lineText)) {
+        insertOffset = i - block.taskLineIndex + 1;
+      }
+    }
+
+    lines.splice(block.taskLineIndex + insertOffset, 0, statusLine);
+    assignedTasks.unshift({
+      taskId: block.detectedId || block.temporaryId,
+      title: block.detectedTitle,
+      status: assignedStatus,
+    });
+  }
+
+  return {
+    updatedMarkdown: lines.join('\n'),
+    assignedCount: assignedTasks.length,
+    assignedTasks,
+  };
+}
+
+/**
+ * Assigns or updates the Status field of a single task in Markdown.
+ */
+export function assignStatusToTask(
+  markdown: string,
+  taskIdOrTitle: string,
+  status: TaskStatus = 'backlog'
+): string {
+  const { taskBlocks } = scanTaskBlocks(markdown);
+  const targetBlock = findMatchingTaskBlock(taskBlocks, taskIdOrTitle);
+  if (!targetBlock) {
+    return markdown;
+  }
+  if (targetBlock.detectedStatus) {
+    return updateTaskInMarkdown(markdown, taskIdOrTitle, { status });
+  }
+  const lines = markdown.split(/\r?\n/);
+  const baseIndent = targetBlock.indentation ? `${targetBlock.indentation}  ` : '  ';
+  const statusLine = `${baseIndent}- Status: ${status}`;
+
+  let insertOffset = 1;
+  for (let i = targetBlock.taskLineIndex + 1; i <= targetBlock.endLineIndex; i++) {
+    const lineText = lines[i];
+    if (/^\s*(?:[-*]\s*)?(?:ID|Priority)\s*:/i.test(lineText)) {
+      insertOffset = i - targetBlock.taskLineIndex + 1;
+    }
+  }
+
+  lines.splice(targetBlock.taskLineIndex + insertOffset, 0, statusLine);
+  return lines.join('\n');
 }
 
 /**

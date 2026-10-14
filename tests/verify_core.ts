@@ -10,6 +10,8 @@ import {
   deleteSectionFromMarkdown,
   deleteTaskFromMarkdown,
   autoAssignAllMissingTaskIds,
+  autoAssignAllMissingTaskStatuses,
+  assignStatusToTask,
   validateMarkdownDocument,
   updateSectionColorInMarkdown,
 } from '../src/utils/markdownSync';
@@ -153,6 +155,40 @@ assert.strictEqual(assignedCount, 2, 'Debe haber asignado 2 IDs automáticos');
 const postValidation = validateMarkdownDocument(normalizedMd);
 assert.strictEqual(postValidation.issues.filter((i) => i.type === 'missing_id').length, 0, 'No deben quedar tareas sin ID');
 console.log('   ✓ Saneado y normalización conservadora verificada.');
+
+// 4b. Mandatory Status validation and automatic resolution
+console.log('4b. Verificando obligatoriedad de Status y resolvedor automático...');
+const noStatusMd = `# Proyecto
+## Sprint
+- [ ] Tarea pendiente sin estado
+  id: task_pending
+- [x] Tarea terminada sin estado
+  id: task_completed
+- [ ] Tarea con estado inválido
+  id: task_invalid
+  status: random_unknown_status
+`;
+const statusVal = validateMarkdownDocument(noStatusMd);
+assert.strictEqual(statusVal.missingStatusTaskIds.size, 2, 'Debe registrar 2 tareas en missingStatusTaskIds');
+assert.strictEqual(statusVal.issues.filter((i) => i.type === 'missing_status').length, 2, 'Debe detectar 2 issues missing_status');
+assert.strictEqual(statusVal.issues.filter((i) => i.type === 'invalid_status').length, 1, 'Debe detectar 1 issue invalid_status');
+
+// Resolver automáticamente todas las tareas sin estado
+const { updatedMarkdown: resolvedStatusMd, assignedCount: statusCount, assignedTasks } = autoAssignAllMissingTaskStatuses(noStatusMd);
+assert.strictEqual(statusCount, 2, 'Debe asignar estado a las 2 tareas faltantes');
+assert.strictEqual(assignedTasks.find((t) => t.taskId === 'task_pending')?.status, 'backlog', 'Tarea pendiente debe inicializarse con backlog');
+assert.strictEqual(assignedTasks.find((t) => t.taskId === 'task_completed')?.status, 'done', 'Tarea con [x] debe inicializarse con done');
+
+// Validar que en el markdown generado se resolvieron los missing_status
+const postStatusVal = validateMarkdownDocument(resolvedStatusMd);
+assert.strictEqual(postStatusVal.missingStatusTaskIds.size, 0, 'No deben quedar tareas con status faltante');
+assert.strictEqual(postStatusVal.issues.filter((i) => i.type === 'missing_status').length, 0, 'No debe haber issues missing_status');
+
+// Resolver status individualmente
+const singleResolvedMd = assignStatusToTask(noStatusMd, 'task_invalid', 'in_progress');
+const postSingleVal = validateMarkdownDocument(singleResolvedMd);
+assert.strictEqual(postSingleVal.issues.filter((i) => i.type === 'invalid_status').length, 0, 'Estado inválido debe haberse corregido');
+console.log('   ✓ Obligatoriedad de Status y resolvedor automático/individual verificados con éxito.');
 
 // 5. Workspaces and Local Recovery without GitHub dependency
 console.log('5. Verificando estructura de Workspaces local y desacoplamiento de GitHub...');

@@ -128,6 +128,8 @@ import {
   addTaskToMarkdown,
   assignTaskIdToTask,
   autoAssignAllMissingTaskIds,
+  autoAssignAllMissingTaskStatuses,
+  assignStatusToTask,
   resolveDuplicateTaskIds,
   resolveSingleDuplicateTaskId,
   deleteSectionFromMarkdown,
@@ -733,6 +735,29 @@ export default function App() {
     [pushToast]
   );
 
+  const handleAutoAssignAllTaskStatuses = useCallback(() => {
+    setMarkdownInput((curr) => {
+      const { updatedMarkdown, assignedCount } = autoAssignAllMissingTaskStatuses(curr);
+      if (assignedCount > 0) {
+        pushToast(i18n._(msg`Se asignaron estados automáticos a ${assignedCount} tareas`), 'success');
+      } else {
+        pushToast(i18n._(msg`Todas las tareas ya cuentan con estado`), 'info');
+      }
+      return updatedMarkdown;
+    });
+  }, [pushToast]);
+
+  const handleAssignSingleTaskStatus = useCallback(
+    (taskIdOrTitle: string, status?: TaskStatus) => {
+      setMarkdownInput((curr) => {
+        const updatedMarkdown = assignStatusToTask(curr, taskIdOrTitle, status || 'backlog');
+        pushToast(i18n._(msg`Estado asignado a la tarea`), 'success');
+        return updatedMarkdown;
+      });
+    },
+    [pushToast]
+  );
+
   useEffect(() => {
     const handleAssignEvent = (e: any) => {
       const { taskId, taskTitle } = e.detail || {};
@@ -742,6 +767,15 @@ export default function App() {
     };
     const handleBatchAssignEvent = () => {
       handleAutoAssignAllTaskIds();
+    };
+    const handleAssignStatusEvent = (e: any) => {
+      const { taskId, taskTitle, status } = e.detail || {};
+      if (taskId !== undefined || taskTitle !== undefined) {
+        handleAssignSingleTaskStatus(taskId ?? taskTitle, status);
+      }
+    };
+    const handleBatchAssignStatusesEvent = () => {
+      handleAutoAssignAllTaskStatuses();
     };
     const handleResolveDuplicateEvent = () => {
       handleResolveDuplicateIds();
@@ -839,6 +873,8 @@ export default function App() {
 
     window.addEventListener('antask:assign-task-id', handleAssignEvent);
     window.addEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
+    window.addEventListener('antask:assign-task-status', handleAssignStatusEvent);
+    window.addEventListener('antask:auto-assign-all-statuses', handleBatchAssignStatusesEvent);
     window.addEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
     window.addEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
     window.addEventListener('antask:delete-section', handleDeleteSectionEvent);
@@ -848,13 +884,22 @@ export default function App() {
     return () => {
       window.removeEventListener('antask:assign-task-id', handleAssignEvent);
       window.removeEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
+      window.removeEventListener('antask:assign-task-status', handleAssignStatusEvent);
+      window.removeEventListener('antask:auto-assign-all-statuses', handleBatchAssignStatusesEvent);
       window.removeEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
       window.removeEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
       window.removeEventListener('antask:delete-section', handleDeleteSectionEvent);
       window.removeEventListener('antask:section-color-changed', handleSectionColorChangedEvent);
       window.removeEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
     };
-  }, [handleAssignSingleTaskId, handleAutoAssignAllTaskIds, handleResolveDuplicateIds, handleResolveSingleDuplicateId]);
+  }, [
+    handleAssignSingleTaskId,
+    handleAutoAssignAllTaskIds,
+    handleAssignSingleTaskStatus,
+    handleAutoAssignAllTaskStatuses,
+    handleResolveDuplicateIds,
+    handleResolveSingleDuplicateId,
+  ]);
 
   // Online / Offline network status listener
   useEffect(() => {
@@ -4590,6 +4635,7 @@ export default function App() {
           blockedBy: tProps.blockedBy || matchedBlock?.detectedBlockedBy || '',
           groupTitle: matchedBlock?.groupTitle || 'General',
           hasMissingId: !matchedBlock?.detectedId,
+          hasMissingStatus: !matchedBlock?.detectedStatus,
         };
       }
     }
@@ -4614,6 +4660,7 @@ export default function App() {
         blockedBy: block.detectedBlockedBy || '',
         groupTitle: block.groupTitle || 'General',
         hasMissingId: !block.detectedId,
+        hasMissingStatus: !block.detectedStatus,
       };
     }
 
@@ -6496,6 +6543,18 @@ export default function App() {
                     <span>{i18n._(msg`Generar IDs a todas (${validationReport.missingIdTaskIds.size})`)}</span>
                   </button>
                 )}
+                {validationReport.missingStatusTaskIds.size > 0 && (
+                  <button
+                    id="btn-problems-auto-assign-all-statuses"
+                    type="button"
+                    onClick={handleAutoAssignAllTaskStatuses}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-sans font-medium bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 cursor-pointer transition-colors"
+                    title={i18n._(msg`Asignar estado obligatorio a todas las tareas sin estado`)}
+                  >
+                    <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                    <span>{i18n._(msg`Asignar Status a todas (${validationReport.missingStatusTaskIds.size})`)}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -6545,6 +6604,17 @@ export default function App() {
                         >
                           <span className="material-symbols-outlined text-[12px]">auto_fix_high</span>
                           <span>{i18n._(msg`Generar ID`)}</span>
+                        </button>
+                      )}
+                      {issue.type === 'missing_status' && (
+                        <button
+                          id={`btn-problems-assign-status-${issue.id}`}
+                          type="button"
+                          onClick={() => handleAssignSingleTaskStatus(issue.taskId ?? issue.taskTitle ?? '')}
+                          className="px-2.5 py-1 rounded text-[11px] font-medium bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 cursor-pointer transition-colors flex items-center gap-1"
+                        >
+                          <span className="material-symbols-outlined text-[12px]">check_circle</span>
+                          <span>{i18n._(msg`Asignar Status`)}</span>
                         </button>
                       )}
                       {issue.taskId && (

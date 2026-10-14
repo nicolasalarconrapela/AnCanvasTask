@@ -15,6 +15,7 @@ export interface TaskDetailsData {
   blockedBy?: string;
   groupTitle?: string;
   hasMissingId?: boolean;
+  hasMissingStatus?: boolean;
 }
 
 export interface MinimalTaskInfo {
@@ -523,6 +524,25 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
                     </button>
                   )}
 
+                  {task.hasMissingStatus && (
+                    <button
+                      id="btn-task-menu-assign-status"
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        window.dispatchEvent(
+                          new CustomEvent('antask:assign-task-status', {
+                            detail: { taskId: task.taskId, taskTitle: task.title },
+                          })
+                        );
+                      }}
+                      className="px-2 py-1 rounded text-left text-cyan-300 hover:bg-[var(--surface-container-highest)] flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                      <span>{i18n._(msg`Asignar Estado obligatorio`)}</span>
+                    </button>
+                  )}
+
                   <button
                     id="btn-task-menu-copy-id"
                     type="button"
@@ -668,9 +688,16 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
 
         {/* 4. Status Grid */}
         <div id="div-taskdetailspanel-21" className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-mono font-semibold text-[var(--on-surface-variant)] uppercase tracking-wider">
-            {i18n._(msg`Estado`)}
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] font-mono font-semibold text-[var(--on-surface-variant)] uppercase tracking-wider">
+              {i18n._(msg`Estado`)}
+            </label>
+            {task.hasMissingStatus && (
+              <span className="text-[10px] font-mono font-medium text-cyan-400 bg-cyan-950/60 border border-cyan-800/80 px-1.5 py-0.2 rounded">
+                {i18n._(msg`Obligatorio pendiente`)}
+              </span>
+            )}
+          </div>
           <div id="div-taskdetailspanel-22" className="grid grid-cols-3 gap-1">
             {statusOptions.map((st) => {
               const isCurrent = currentStatusId === st.id;

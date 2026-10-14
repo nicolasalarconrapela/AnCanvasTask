@@ -126,6 +126,7 @@ export type TaskShapeProps = {
   blockedBy?: string;
   isDuplicateId?: boolean;
   hasMissingId?: boolean;
+  hasMissingStatus?: boolean;
   unresolvedBlockers?: string[];
 };
 
@@ -150,6 +151,7 @@ function TaskCardComponent({
     blockedBy,
     isDuplicateId,
     hasMissingId,
+    hasMissingStatus,
     unresolvedBlockers,
     w,
     h,
@@ -811,6 +813,26 @@ function TaskCardComponent({
               </button>
             )}
 
+            {hasMissingStatus && (
+              <button
+                id={`btn-task-card-menu-assign-status-${shape.id}`}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsMenuOpen(false);
+                  window.dispatchEvent(
+                    new CustomEvent('antask:assign-task-status', {
+                      detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
+                    })
+                  );
+                }}
+                className="px-2 py-1 rounded text-left text-cyan-300 hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer font-medium"
+              >
+                <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                <span>{_(msg`Asignar Estado obligatorio`)}</span>
+              </button>
+            )}
+
             <button
               id={`btn-task-card-menu-connect-${shape.id}`}
               type="button"
@@ -1040,9 +1062,29 @@ function TaskCardComponent({
           </div>
 
           <div id={`task-card-footer-status-${shape.id}`} className="flex items-center gap-1 shrink-0">
-            <span className={`text-[10px] font-mono uppercase tracking-wider ${currentStatus.text}`}>
-              {currentStatus.label}
-            </span>
+            {hasMissingStatus ? (
+              <button
+                id={`btn-task-card-assign-status-${shape.id}`}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.dispatchEvent(
+                    new CustomEvent('antask:assign-task-status', {
+                      detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
+                    })
+                  );
+                }}
+                className="flex items-center gap-0.5 text-cyan-400 hover:text-cyan-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
+                title={_(msg`Tarea sin Estado obligatorio. Clic para asignar estado.`)}
+              >
+                <span>+ Status</span>
+                <span className="material-symbols-outlined text-[10px]">check_circle</span>
+              </button>
+            ) : (
+              <span className={`text-[10px] font-mono uppercase tracking-wider ${currentStatus.text}`}>
+                {currentStatus.label}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -1073,6 +1115,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     blockedBy: T.string.optional(),
     isDuplicateId: T.boolean.optional(),
     hasMissingId: T.boolean.optional(),
+    hasMissingStatus: T.boolean.optional(),
     unresolvedBlockers: T.arrayOf(T.string).optional(),
   };
 
@@ -2231,6 +2274,7 @@ export function populateCanvasWithGroups(
   const validationReport = rawMarkdown ? validateMarkdownDocument(rawMarkdown) : null;
   const duplicateIds = validationReport?.duplicateIds || new Set<string>();
   const missingIdTaskIds = validationReport?.missingIdTaskIds || new Set<string>();
+  const missingStatusTaskIds = validationReport?.missingStatusTaskIds || new Set<string>();
   const unresolvedBlockerMap = validationReport?.unresolvedBlockerMap || new Map<string, string[]>();
 
   const cardWidth = 320;
@@ -2448,6 +2492,7 @@ export function populateCanvasWithGroups(
       // Only associate for arrow bindings if not duplicated collision
       const isDuplicate = task.taskId ? duplicateIds.has(task.taskId.toLowerCase()) : false;
       const isMissingId = !task.taskId || missingIdTaskIds.has(resolvedTaskId);
+      const isMissingStatus = !task.status || missingStatusTaskIds.has(resolvedTaskId);
       const unresolvedBlockers = unresolvedBlockerMap.get(normalizedId);
 
       if (!isDuplicate) {
@@ -2491,6 +2536,7 @@ export function populateCanvasWithGroups(
           blockedBy: task.blockedBy,
           isDuplicateId: isDuplicate,
           hasMissingId: isMissingId,
+          hasMissingStatus: isMissingStatus,
           unresolvedBlockers,
         },
       });

@@ -21,6 +21,7 @@ export interface KanbanTask {
   blockedBy?: string;
   isDuplicateId?: boolean;
   hasMissingId?: boolean;
+  hasMissingStatus?: boolean;
   unresolvedBlockers?: string[];
 }
 
@@ -184,6 +185,7 @@ export function KanbanBoard({
         subtasks: b.detectedSubtasks,
         blockedBy: b.detectedBlockedBy,
         hasMissingId: !b.detectedId,
+        hasMissingStatus: !b.detectedStatus,
       };
     });
 
@@ -842,6 +844,26 @@ export function KanbanBoard({
                                   </button>
                                 )}
 
+                                {task.hasMissingStatus && (
+                                  <button
+                                    id={`btn-kanban-menu-assign-status-${task.taskId}`}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuTaskId(null);
+                                      window.dispatchEvent(
+                                        new CustomEvent('antask:assign-task-status', {
+                                          detail: { taskId: task.taskId, taskTitle: task.title },
+                                        })
+                                      );
+                                    }}
+                                    className="px-2 py-1 rounded text-left text-cyan-300 hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer font-medium"
+                                  >
+                                    <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                                    <span>{i18n._(msg`Asignar Estado obligatorio`)}</span>
+                                  </button>
+                                )}
+
                                 <div id="div-kanbanboard-19" className="h-px bg-[var(--outline)] my-0.5" />
 
                                 <button
@@ -1296,9 +1318,29 @@ export function KanbanBoard({
                               ) : (
                                 <span />
                               )}
-                              <span className="text-[10px] font-mono text-[var(--on-surface-variant)] uppercase">
-                                {task.completed ? 'DONE' : task.status}
-                              </span>
+                              {task.hasMissingStatus ? (
+                                <button
+                                  id={`btn-kanban-sec-assign-status-${task.taskId}`}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    window.dispatchEvent(
+                                      new CustomEvent('antask:assign-task-status', {
+                                        detail: { taskId: task.taskId, taskTitle: task.title },
+                                      })
+                                    );
+                                  }}
+                                  className="flex items-center gap-0.5 text-cyan-400 hover:text-cyan-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
+                                  title={i18n._(msg`Tarea sin Estado obligatorio. Clic para asignar estado.`)}
+                                >
+                                  <span>+ Status</span>
+                                  <span className="material-symbols-outlined text-[10px]">check_circle</span>
+                                </button>
+                              ) : (
+                                <span className="text-[10px] font-mono text-[var(--on-surface-variant)] uppercase">
+                                  {task.completed ? 'DONE' : task.status}
+                                </span>
+                              )}
                             </div>
                           </div>
                         );
