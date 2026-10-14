@@ -1141,7 +1141,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
       h: 110,
       title: 'New developer task',
       completed: false,
-      priority: 'P1',
+      priority: 'P3',
       taskId: 'task',
     };
   }

@@ -68,7 +68,7 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
 
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState<boolean>(false);
   const [newTaskTitleInput, setNewTaskTitleInput] = useState<string>('');
-  const [newTaskPriorityInput, setNewTaskPriorityInput] = useState<'P0' | 'P1' | 'P2' | 'P3'>('P1');
+  const [newTaskPriorityInput, setNewTaskPriorityInput] = useState<'P0' | 'P1' | 'P2' | 'P3'>('P3');
   const [newTaskWorkspaceId, setNewTaskWorkspaceId] = useState<string>('');
   const [newTaskSectionInput, setNewTaskSectionInput] = useState<string>('General');
   const [isCustomTaskSectionInput, setIsCustomTaskSectionInput] = useState<boolean>(false);
@@ -337,7 +337,7 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
 
   const handleOpenCreateTaskModal = (defaultWsId?: string) => {
     setNewTaskTitleInput('Nueva tarea de Sanity');
-    setNewTaskPriorityInput('P1');
+    setNewTaskPriorityInput('P3');
     setNewTaskWorkspaceId(defaultWsId || (formState._type === 'workspace' ? (formState.workspaceId || formState._id) : ''));
     setIsCreateTaskOpen(true);
   };

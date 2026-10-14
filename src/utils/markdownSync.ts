@@ -874,7 +874,7 @@ export function addTaskToMarkdown(
 ): { updatedMarkdown: string; taskId: string } {
   const cleanTitle = payload.title.trim();
   const cleanGroup = payload.groupTitle.trim() || 'General';
-  const priority = payload.priority || 'P1';
+  const priority = payload.priority || 'P3';
   const status = payload.status || 'backlog';
   const finalId = payload.customId?.trim() || generateUniqueTaskId(cleanTitle, markdown);
 

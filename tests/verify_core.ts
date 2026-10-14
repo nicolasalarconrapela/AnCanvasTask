@@ -244,6 +244,7 @@ const { updatedMarkdown: addedWithDescMd } = addTaskToMarkdown(descSampleMd, {
 const reParsedAdded = parseTasksMarkdown(addedWithDescMd)[0].tasks.find((t) => t.taskId === 'task_new_desc');
 assert(reParsedAdded, 'Debe existir la nueva tarea añadida');
 assert.strictEqual(reParsedAdded.description, 'Notas iniciales opcionales', 'Debe guardar y parsear la descripción inicial');
+assert.strictEqual(reParsedAdded.priority, 'P3', 'La nueva tarea debe tener prioridad P3 por defecto');
 
 // Aplicar tarea remota de Sanity con Description a Markdown (applyTaskToMarkdown)
 const appliedRemoteMd = applyTaskToMarkdown(strippedDescMd, {

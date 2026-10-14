@@ -72,7 +72,7 @@ export const taskSchema = {
           { title: 'P3 - Baja', value: 'P3' },
         ],
       },
-      initialValue: 'P1',
+      initialValue: 'P3',
     },
     {
       name: 'groupTitle',

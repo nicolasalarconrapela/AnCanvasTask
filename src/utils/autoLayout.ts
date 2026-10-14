@@ -525,7 +525,7 @@ export function applyAutoLayout(editor: Editor, markdown: string): AutoLayoutRes
           h: t.h,
           title: t.title,
           completed: false,
-          priority: 'P1',
+          priority: 'P3',
           taskId: t.taskId,
           status: 'todo',
           description: t.description,

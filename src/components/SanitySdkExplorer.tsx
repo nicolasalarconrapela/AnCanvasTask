@@ -520,7 +520,7 @@ function SdkDocumentCreator({
 }) {
   const createTask = useCreateDocument<any>({ documentType: 'task' });
   const [title, setTitle] = useState<string>('');
-  const [priority, setPriority] = useState<string>('P1');
+  const [priority, setPriority] = useState<string>('P3');
   const [groupTitle, setGroupTitle] = useState<string>('Desarrollo SDK');
   const [isCreating, setIsCreating] = useState<boolean>(false);
 

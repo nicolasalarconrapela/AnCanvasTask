@@ -944,7 +944,7 @@ export default function App() {
   // New task form state
   const [newTaskTitle, setNewTaskTitle] = useState<string>('');
   const [newTaskDescription, setNewTaskDescription] = useState<string>('');
-  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('P1');
+  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('P3');
   const [newTaskGroup, setNewTaskGroup] = useState<string>('General');
   const [customGroupInput, setCustomGroupInput] = useState<string>('');
   const [isCustomGroup, setIsCustomGroup] = useState<boolean>(false);
@@ -2796,7 +2796,7 @@ export default function App() {
     (defaultGroup?: string) => {
       setNewTaskTitle('');
       setNewTaskDescription('');
-      setNewTaskPriority('P1');
+      setNewTaskPriority('P3');
       if (defaultGroup && defaultGroup.trim()) {
         const trimmed = defaultGroup.trim();
         if (existingSections.includes(trimmed)) {
@@ -3845,7 +3845,7 @@ export default function App() {
 
     setNewTaskTitle('');
     setNewTaskDescription('');
-    setNewTaskPriority('P1');
+    setNewTaskPriority('P3');
     setIsNewTaskModalOpen(false);
     showToast(
       taskFilters.showTaskIds === false
@@ -4024,7 +4024,7 @@ export default function App() {
       const groupTitle = taskDoc.groupTitle || 'General';
       const { updatedMarkdown, taskId } = addTaskToMarkdown(markdownInput, {
         title: taskDoc.title,
-        priority: taskDoc.priority || 'P1',
+        priority: taskDoc.priority || 'P3',
         groupTitle,
         blockedBy: taskDoc.blockedBy,
         tags: taskDoc.tags,
@@ -4247,7 +4247,7 @@ export default function App() {
         title: b.detectedTitle,
         groupTitle: b.groupTitle || 'General',
         completed: isCompleted,
-        priority: (b.detectedPriority || 'P1') as TaskPriority,
+        priority: (b.detectedPriority || 'P3') as TaskPriority,
         status: ((b.detectedStatus as any) || (isCompleted ? 'done' : 'todo')) as TaskStatus,
         description: b.detectedDescription,
         tags: b.detectedTags,
