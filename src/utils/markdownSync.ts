@@ -1439,3 +1439,23 @@ export function updateSectionColorInMarkdown(
 
   return lines.join('\n');
 }
+
+/**
+ * Detects whether a line represents a task ID metadata entry (e.g. `  id: task-1`, `  - ID: 123`).
+ * Excludes normal root task lines that have checkboxes.
+ */
+export function isTaskIdLine(lineText: string): boolean {
+  const trimmed = lineText.trim();
+  if (/^[-*]\s*\[[ xX]\]/i.test(trimmed)) return false;
+  return /^(?:[-*]\s*)?ID\s*:\s*.+$/i.test(trimmed);
+}
+
+/**
+ * Strips task ID metadata lines from a Markdown document for clean viewing/copying.
+ */
+export function stripTaskIdsFromMarkdown(markdown: string): string {
+  return markdown
+    .split(/\r?\n/)
+    .filter((line) => !isTaskIdLine(line))
+    .join('\n');
+}

@@ -141,6 +141,7 @@ import {
   updateSectionColorInMarkdown,
   updateTaskInMarkdown,
   validateMarkdownDocument,
+  stripTaskIdsFromMarkdown,
 } from './utils/markdownSync';
 
 export type SyncStatus = 'idle' | 'saving' | 'synced' | 'local' | 'loading';
@@ -3976,7 +3977,11 @@ export default function App() {
   );
 
   const handleCopyMarkdown = () => {
-    navigator.clipboard.writeText(markdownInput);
+    const textToCopy =
+      taskFilters.showTaskIds === false
+        ? stripTaskIdsFromMarkdown(markdownInput)
+        : markdownInput;
+    navigator.clipboard.writeText(textToCopy);
     setCopiedMarkdown(true);
     setTimeout(() => setCopiedMarkdown(false), 2000);
   };
@@ -5968,6 +5973,8 @@ export default function App() {
                   splitRatio={splitRatio}
                   onChangeSplitRatio={handleSetSplitRatio}
                   onOpenNormalizer={() => setIsSafeNormalizerOpen(true)}
+                  showTaskIds={taskFilters.showTaskIds}
+                  onToggleShowTaskIds={handleToggleShowTaskIds}
                 />
               </div>
             )}
@@ -6904,20 +6911,48 @@ export default function App() {
                   {formatTaskCount(parsedStats.taskCount)} · {formatSectionCount(parsedStats.groupCount)}
                 </p>
               </div>
-              <button
-                id="btn-view-markdown-close-header"
-                type="button"
-                onClick={() => setIsViewMarkdownOpen(false)}
-                className="btn-m3-icon w-7 h-7 cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px]">close</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  id="btn-view-markdown-toggle-ids"
+                  type="button"
+                  onClick={handleToggleShowTaskIds}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs ${
+                    taskFilters.showTaskIds !== false
+                      ? 'bg-amber-950/40 text-amber-300 border-amber-800/80 hover:bg-amber-900/60'
+                      : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+                  }`}
+                  title={
+                    taskFilters.showTaskIds !== false
+                      ? i18n._(msg`Ocultar identificadores (id:) en el Markdown`)
+                      : i18n._(msg`Mostrar identificadores (id:) en el Markdown`)
+                  }
+                  aria-label={
+                    taskFilters.showTaskIds !== false
+                      ? i18n._(msg`Ocultar IDs en Markdown`)
+                      : i18n._(msg`Mostrar IDs en Markdown`)
+                  }
+                >
+                  <span className="material-symbols-outlined text-[13px]">tag</span>
+                  <span className="font-mono text-[10px] font-bold">#ID</span>
+                  <span className="text-[10px]">
+                    {taskFilters.showTaskIds !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
+                  </span>
+                </button>
+                <button
+                  id="btn-view-markdown-close-header"
+                  type="button"
+                  onClick={() => setIsViewMarkdownOpen(false)}
+                  className="btn-m3-icon w-7 h-7 cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
             </div>
 
             <div id="div-app-81" className="p-4 flex flex-col gap-2.5 overflow-hidden">
               <div id="div-app-82" className="relative w-full rounded bg-[var(--surface)] border border-[var(--outline)] overflow-hidden">
                 <pre className="p-3 text-xs font-mono text-[var(--on-surface)] overflow-auto max-h-[46vh] leading-relaxed select-text whitespace-pre-wrap">
-                  {markdownInput}
+                  {taskFilters.showTaskIds === false ? stripTaskIdsFromMarkdown(markdownInput) : markdownInput}
                 </pre>
               </div>
             </div>

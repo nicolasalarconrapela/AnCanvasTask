@@ -441,7 +441,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div id="div-settings-canvas-show-ids" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
                   <div className="flex flex-col gap-0.5">
                     <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Mostrar identificadores (#ID)`)}</span>
-                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Mostrar u ocultar los IDs de tarea en las tarjetas`)}</span>
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Mostrar u ocultar los IDs en tarjetas y en el editor Markdown`)}</span>
                   </div>
                   <input
                     id="checkbox-settings-show-task-ids-canvas"
@@ -544,7 +544,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div id="div-settings-kanban-show-ids" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
                   <div className="flex flex-col gap-0.5">
                     <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Mostrar identificadores (#ID)`)}</span>
-                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Mostrar u ocultar los IDs de tarea en las tarjetas`)}</span>
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Mostrar u ocultar los IDs en tarjetas y en el editor Markdown`)}</span>
                   </div>
                   <input
                     id="checkbox-settings-show-task-ids-kanban"
