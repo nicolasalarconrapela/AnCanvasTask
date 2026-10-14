@@ -394,7 +394,7 @@ export function MarkdownSplitEditor({
           <button
             id="btn-markdown-insert-task"
             type="button"
-            onClick={() => insertText('\n- [ ] Nueva tarea\n  - Priority: P1\n')}
+            onClick={() => insertText('\n- [ ] Nueva tarea\n  - Priority: P1\n  - Status: backlog\n')}
             className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-[var(--on-surface)] flex items-center gap-1 cursor-pointer transition-colors"
             title={i18n._(msg`Insertar nueva tarea pendiente (- [ ])`)}
           >
@@ -405,7 +405,7 @@ export function MarkdownSplitEditor({
           <button
             id="btn-markdown-insert-section"
             type="button"
-            onClick={() => insertText('\n## Nueva Sección\n\n- [ ] Tarea inicial\n  - Priority: P1\n')}
+            onClick={() => insertText('\n## Nueva Sección\n\n- [ ] Tarea inicial\n  - Priority: P1\n  - Status: backlog\n')}
             className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-[var(--on-surface)] flex items-center gap-1 cursor-pointer transition-colors"
             title={i18n._(msg`Insertar nueva sección (## Sección)`)}
           >

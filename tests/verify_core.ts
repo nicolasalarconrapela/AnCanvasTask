@@ -122,7 +122,9 @@ const { updatedMarkdown: addedMd } = addTaskToMarkdown(updatedMd, {
 });
 const withAddedTasks = parseTasksMarkdown(addedMd).flatMap((g) => g.tasks);
 assert.strictEqual(withAddedTasks.length, 4, 'Debe haber 4 tareas tras añadir una');
-assert(withAddedTasks.some((t) => t.taskId === 'fe_test'), 'fe_test debe estar en el markdown');
+const feTestTask = withAddedTasks.find((t) => t.taskId === 'fe_test');
+assert(feTestTask, 'fe_test debe estar en el markdown');
+assert.strictEqual(feTestTask.status, 'backlog', 'La nueva tarea debe inicializarse con status: backlog');
 
 const deletedMd = deleteTaskFromMarkdown(addedMd, 'fe_test');
 const withDeletedTasks = parseTasksMarkdown(deletedMd).flatMap((g) => g.tasks);

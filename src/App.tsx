@@ -3659,6 +3659,7 @@ export default function App() {
     const { updatedMarkdown, taskId } = addTaskToMarkdown(markdownInput, {
       title: newTaskTitle.trim(),
       priority: newTaskPriority,
+      status: 'backlog',
       groupTitle,
     });
 
@@ -3778,6 +3779,7 @@ export default function App() {
           title: newTaskTitle.trim(),
           completed: false,
           priority: newTaskPriority,
+          status: 'backlog',
           taskId,
           groupTitle,
           groupHeadingId: targetGroupShape?.props?.headingId,

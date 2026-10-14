@@ -1,4 +1,4 @@
-import type { TaskPriority } from './taskMarkdown';
+import type { TaskPriority, TaskStatus } from './taskMarkdown';
 
 export interface SubtaskItem {
   title: string;
@@ -796,6 +796,7 @@ export function addTaskToMarkdown(
   payload: {
     title: string;
     priority?: TaskPriority;
+    status?: TaskStatus;
     groupTitle: string;
     customId?: string;
     blockedBy?: string;
@@ -808,6 +809,7 @@ export function addTaskToMarkdown(
   const cleanTitle = payload.title.trim();
   const cleanGroup = payload.groupTitle.trim() || 'General';
   const priority = payload.priority || 'P1';
+  const status = payload.status || 'backlog';
   const finalId = payload.customId?.trim() || generateUniqueTaskId(cleanTitle, markdown);
 
   const lines = markdown.split(/\r?\n/);
@@ -817,6 +819,7 @@ export function addTaskToMarkdown(
     `- [ ] ${cleanTitle}`,
     `  - ID: ${finalId}`,
     `  - Priority: ${priority}`,
+    `  - Status: ${status}`,
   ];
 
   if (payload.blockedBy && payload.blockedBy.trim()) {
