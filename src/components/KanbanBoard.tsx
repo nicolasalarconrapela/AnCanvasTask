@@ -103,6 +103,7 @@ export function KanbanBoard({
   onToggleSubtask,
 }: KanbanBoardProps) {
   const { i18n } = useLingui();
+  const showTaskIds = filters?.showTaskIds !== false;
   const [groupBy, setGroupBy] = useState<GroupByMode>('status');
   const [activeMobileColumn, setActiveMobileColumn] = useState<string>('todo');
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
@@ -951,28 +952,30 @@ export function KanbanBoard({
                             {/* Bottom Row: #ID & Section / Blockers */}
                             <div id="div-kanbanboard-21" className="flex items-center justify-between text-xs pt-1 border-t border-[var(--outline)] mt-0.5">
                               <div id="div-kanbanboard-22" className="flex items-center gap-1.5 truncate max-w-[160px]">
-                                {task.hasMissingId ? (
-                                  <button
-                                    id={`btn-kanban-generate-id-${task.taskId}`}
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      window.dispatchEvent(
-                                        new CustomEvent('antask:assign-task-id', {
-                                          detail: { taskId: task.taskId, taskTitle: task.title },
-                                        })
-                                      );
-                                    }}
-                                    className="flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
-                                    title={i18n._(msg`Tarea sin ID explícito. Clic para generar ID automático en Markdown.`)}
-                                  >
-                                    <span>+ ID</span>
-                                    <span className="material-symbols-outlined text-[10px]">auto_fix_high</span>
-                                  </button>
-                                ) : (
-                                  <span className="font-mono text-[11px] text-[var(--on-surface-variant)] truncate">
-                                    #<HighlightText text={task.taskId} query={searchQuery} />
-                                  </span>
+                                {showTaskIds && (
+                                  task.hasMissingId ? (
+                                    <button
+                                      id={`btn-kanban-generate-id-${task.taskId}`}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.dispatchEvent(
+                                          new CustomEvent('antask:assign-task-id', {
+                                            detail: { taskId: task.taskId, taskTitle: task.title },
+                                          })
+                                        );
+                                      }}
+                                      className="flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
+                                      title={i18n._(msg`Tarea sin ID explícito. Clic para generar ID automático en Markdown.`)}
+                                    >
+                                      <span>+ ID</span>
+                                      <span className="material-symbols-outlined text-[10px]">auto_fix_high</span>
+                                    </button>
+                                  ) : (
+                                    <span className="font-mono text-[11px] text-[var(--on-surface-variant)] truncate">
+                                      #<HighlightText text={task.taskId} query={searchQuery} />
+                                    </span>
+                                  )
                                 )}
                                 {task.blockedBy && !task.completed && (
                                   <span
@@ -1266,9 +1269,33 @@ export function KanbanBoard({
                             </div>
 
                             <div id="div-kanbanboard-29" className="flex items-center justify-between text-xs pt-1 border-t border-[var(--outline)] mt-0.5">
-                              <span className="font-mono text-[11px] text-[var(--on-surface-variant)] truncate">
-                                #<HighlightText text={task.taskId} query={searchQuery} />
-                              </span>
+                              {showTaskIds ? (
+                                task.hasMissingId ? (
+                                  <button
+                                    id={`btn-kanban-sec-generate-id-${task.taskId}`}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      window.dispatchEvent(
+                                        new CustomEvent('antask:assign-task-id', {
+                                          detail: { taskId: task.taskId, taskTitle: task.title },
+                                        })
+                                      );
+                                    }}
+                                    className="flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
+                                    title={i18n._(msg`Tarea sin ID explícito. Clic para generar ID automático en Markdown.`)}
+                                  >
+                                    <span>+ ID</span>
+                                    <span className="material-symbols-outlined text-[10px]">auto_fix_high</span>
+                                  </button>
+                                ) : (
+                                  <span className="font-mono text-[11px] text-[var(--on-surface-variant)] truncate">
+                                    #<HighlightText text={task.taskId} query={searchQuery} />
+                                  </span>
+                                )
+                              ) : (
+                                <span />
+                              )}
                               <span className="text-[10px] font-mono text-[var(--on-surface-variant)] uppercase">
                                 {task.completed ? 'DONE' : task.status}
                               </span>

@@ -263,11 +263,6 @@ export default function App() {
     );
   }, [userSettings.accessibilityReducedMotion]);
 
-  const handleUpdateSettings = useCallback((newSettings: AppUserSettings) => {
-    setUserSettings(newSettings);
-    saveUserSettings(newSettings);
-  }, []);
-
   // Safeguard routing & error detection (e.g. /404, /403, /500, /503 or ?error=404 / unknown sub-paths)
   const [safeguardError, setSafeguardError] = useState<{
     type: '404' | '403' | '500' | '503' | 'generic';
@@ -339,19 +334,53 @@ export default function App() {
   const [activeFilter, setActiveFilter] = useState<'all' | 'todo' | 'done' | 'critical' | 'blocked'>('all');
 
   // Advanced Filters State (DESIGN.md Section 6 & 7)
-  const [taskFilters, setTaskFilters] = useState<TaskFilterState>({
+  const [taskFilters, setTaskFilters] = useState<TaskFilterState>(() => ({
     status: 'all',
     priority: 'all',
     section: 'all',
     tag: 'all',
     onlyBlocked: false,
     sortBy: 'default',
-  });
+    showTaskIds: userSettings.showTaskIds ?? true,
+  }));
 
   // Sync React taskFilters state into global filter store for canvas shapes & listeners
   useEffect(() => {
     setGlobalTaskFilters(taskFilters);
   }, [taskFilters]);
+
+  const handleUpdateSettings = useCallback((newSettings: AppUserSettings) => {
+    setUserSettings(newSettings);
+    saveUserSettings(newSettings);
+    if (newSettings.showTaskIds !== undefined) {
+      setTaskFilters((prev) => ({
+        ...prev,
+        showTaskIds: newSettings.showTaskIds,
+      }));
+    }
+  }, []);
+
+  const handleToggleShowTaskIds = useCallback(() => {
+    setTaskFilters((prev) => {
+      const nextShow = prev.showTaskIds === false ? true : false;
+      setUserSettings((currSettings) => {
+        const updated = { ...currSettings, showTaskIds: nextShow };
+        saveUserSettings(updated);
+        return updated;
+      });
+      return { ...prev, showTaskIds: nextShow };
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleToggleIdsEvent = () => {
+      handleToggleShowTaskIds();
+    };
+    window.addEventListener('antask:toggle-show-ids', handleToggleIdsEvent);
+    return () => {
+      window.removeEventListener('antask:toggle-show-ids', handleToggleIdsEvent);
+    };
+  }, [handleToggleShowTaskIds]);
 
   // Command Palette & Recent Tasks State (DESIGN.md Section 12 & 15)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
@@ -4282,6 +4311,19 @@ export default function App() {
         },
       },
       {
+        id: 'toggle-show-task-ids',
+        title:
+          taskFilters.showTaskIds === false
+            ? 'Mostrar identificadores (#ID)'
+            : 'Ocultar identificadores (#ID)',
+        shortcut: '⇧I',
+        icon: 'tag',
+        category: 'action',
+        perform: () => {
+          handleToggleShowTaskIds();
+        },
+      },
+      {
         id: 'open-settings',
         title: 'Abrir configuración y preferencias',
         shortcut: '⌘,',
@@ -4396,13 +4438,14 @@ export default function App() {
             tag: 'all',
             onlyBlocked: false,
             sortBy: 'default',
+            showTaskIds: userSettings.showTaskIds ?? true,
           });
           resetGlobalTaskFilters();
           setActiveFilter('all');
         },
       },
     ],
-    [effectiveTheme, handleExportFile]
+    [effectiveTheme, handleExportFile, taskFilters.showTaskIds, handleToggleShowTaskIds, userSettings.showTaskIds]
   );
 
   // Filtered tasks count computed
@@ -5320,9 +5363,11 @@ export default function App() {
                 tag: 'all',
                 onlyBlocked: false,
                 sortBy: 'default',
+                showTaskIds: userSettings.showTaskIds ?? true,
               });
               setActiveFilter('all');
             }}
+            onToggleShowIds={handleToggleShowTaskIds}
             searchQuery={searchQuery}
             onSearchChange={(q) => setSearchQuery(q)}
             availableSections={existingSections}
@@ -5791,6 +5836,7 @@ export default function App() {
                           tag: 'all',
                           onlyBlocked: false,
                           sortBy: 'default',
+                          showTaskIds: userSettings.showTaskIds ?? true,
                         });
                         resetGlobalTaskFilters();
                         setActiveFilter('all');

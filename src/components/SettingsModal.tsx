@@ -437,6 +437,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   />
                 </div>
 
+                {/* Show Task IDs */}
+                <div id="div-settings-canvas-show-ids" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Mostrar identificadores (#ID)`)}</span>
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Mostrar u ocultar los IDs de tarea en las tarjetas`)}</span>
+                  </div>
+                  <input
+                    id="checkbox-settings-show-task-ids-canvas"
+                    type="checkbox"
+                    checked={settings.showTaskIds !== false}
+                    onChange={(e) => handleUpdate('showTaskIds', e.target.checked)}
+                    className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
+                  />
+                </div>
+
                 {/* tldraw SDK License */}
                 <div id="div-settings-tldraw-license" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
                   <div className="flex flex-col gap-0.5 min-w-0">
@@ -521,6 +536,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     type="checkbox"
                     checked={settings.kanbanShowSubtasks}
                     onChange={(e) => handleUpdate('kanbanShowSubtasks', e.target.checked)}
+                    className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
+                  />
+                </div>
+
+                {/* Show Task IDs in Kanban Cards */}
+                <div id="div-settings-kanban-show-ids" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Mostrar identificadores (#ID)`)}</span>
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Mostrar u ocultar los IDs de tarea en las tarjetas`)}</span>
+                  </div>
+                  <input
+                    id="checkbox-settings-show-task-ids-kanban"
+                    type="checkbox"
+                    checked={settings.showTaskIds !== false}
+                    onChange={(e) => handleUpdate('showTaskIds', e.target.checked)}
                     className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
                   />
                 </div>
