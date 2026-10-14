@@ -15,6 +15,7 @@ export interface KanbanTask {
   completed: boolean;
   priority: TaskPriority;
   status: TaskStatus;
+  description?: string;
   groupTitle: string;
   tags?: string[];
   subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
@@ -34,6 +35,7 @@ export interface KanbanBoardProps {
       completed?: boolean;
       priority?: TaskPriority;
       status?: TaskStatus;
+      description?: string;
       groupTitle?: string;
     }
   ) => void;
@@ -180,6 +182,7 @@ export function KanbanBoard({
         completed: isCompleted,
         priority: b.detectedPriority || 'P1',
         status,
+        description: b.detectedDescription,
         groupTitle: b.groupTitle || 'General',
         tags: b.detectedTags,
         subtasks: b.detectedSubtasks,

@@ -54,7 +54,8 @@ export function taskFields(markdown: string): any[] {
     return { taskId: b.detectedId, title: b.detectedTitle, completed: /\[[xX]\]/.test(b.rawTaskLine),
       status: b.detectedStatus || (/\[[xX]\]/.test(b.rawTaskLine) ? 'done' : 'todo'),
       priority: b.detectedPriority || 'P1', groupTitle: b.groupTitle,
-      tags: b.detectedTags || [], blockedBy: b.detectedBlockedBy || '' };
+      tags: b.detectedTags || [], blockedBy: b.detectedBlockedBy || '',
+      ...(b.detectedDescription !== undefined ? { description: b.detectedDescription } : {}) };
   });
 }
 
@@ -62,11 +63,13 @@ export function applyTaskToMarkdown(markdown: string, task: any): string {
   if (task.syncDeleted) return deleteTaskFromMarkdown(markdown, task.taskId);
   if (!scanTaskBlocks(markdown).taskBlocks.some(b => b.detectedId === task.taskId)) {
     markdown = addTaskToMarkdown(markdown, { title: task.title, customId: task.taskId,
-      priority: task.priority, groupTitle: task.groupTitle || 'General' }).updatedMarkdown;
+      priority: task.priority, groupTitle: task.groupTitle || 'General',
+      description: task.description }).updatedMarkdown;
   }
   if (task.groupTitle) markdown = moveTaskToGroupInMarkdown(markdown, task.taskId, task.groupTitle);
   return updateTaskInMarkdown(markdown, task.taskId, { title: task.title, completed: task.completed,
-    status: task.status, priority: task.priority, tags: task.tags || [], blockedBy: task.blockedBy || '' });
+    status: task.status, priority: task.priority, tags: task.tags || [], blockedBy: task.blockedBy || '',
+    description: task.description });
 }
 
 // Rebase insertions/deletions onto the common base. Independent

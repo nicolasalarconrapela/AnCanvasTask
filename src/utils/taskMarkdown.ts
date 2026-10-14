@@ -9,6 +9,7 @@ export interface ParsedMarkdownTask {
   temporaryId?: string;
   priority: TaskPriority;
   status?: TaskStatus;
+  description?: string;
   tags?: string[];
   subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
@@ -77,6 +78,7 @@ export function parseTasksMarkdown(markdown: string): ParsedGroup[] {
       temporaryId: block.temporaryId,
       priority: block.detectedPriority || 'P1',
       status: (block.detectedStatus as any) || (isCompleted ? 'done' : 'todo'),
+      description: block.detectedDescription,
       tags: block.detectedTags,
       subtasks: block.detectedSubtasks,
       blockedBy: block.detectedBlockedBy,

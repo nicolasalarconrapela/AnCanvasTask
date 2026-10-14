@@ -118,6 +118,7 @@ export type TaskShapeProps = {
   priority: TaskPriority;
   taskId?: string;
   status?: TaskStatus;
+  description?: string;
   groupTitle?: string;
   groupHeadingId?: string;
   branchTitle?: string;
@@ -1103,6 +1104,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     priority: T.string,
     taskId: T.string.optional(),
     status: T.string.optional(),
+    description: T.string.optional(),
     groupTitle: T.string.optional(),
     groupHeadingId: T.string.optional(),
     branchTitle: T.string.optional(),
@@ -2528,6 +2530,7 @@ export function populateCanvasWithGroups(
           priority: task.priority || 'P1',
           taskId: resolvedTaskId,
           status: task.status,
+          description: task.description,
           groupTitle: group.title,
           groupHeadingId: group.id,
           branchTitle: group.branchTitle,

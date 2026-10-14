@@ -10,6 +10,7 @@ export interface TaskDetailsData {
   completed: boolean;
   priority: TaskPriority;
   status: TaskStatus;
+  description?: string;
   tags?: string[];
   subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
@@ -40,6 +41,7 @@ interface TaskDetailsPanelProps {
       completed?: boolean;
       priority?: TaskPriority;
       status?: TaskStatus;
+      description?: string;
       groupTitle?: string;
       tags?: string[];
       blockedBy?: string;
@@ -81,6 +83,7 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
 
   // Single task local editing states
   const [localTitle, setLocalTitle] = useState('');
+  const [localDescription, setLocalDescription] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
@@ -94,12 +97,13 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
   useEffect(() => {
     if (task) {
       setLocalTitle(task.title);
+      setLocalDescription(task.description || '');
       setIsEditingTitle(false);
       setIsMenuOpen(false);
       setIsAddingTag(false);
       setNewTagInput('');
     }
-  }, [task?.taskId, task?.title]);
+  }, [task?.taskId, task?.title, task?.description]);
 
   // Global escape handler to close panel when not editing inputs
   useEffect(() => {
@@ -168,6 +172,19 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
       setLocalTitle(task.title);
     }
     setIsEditingTitle(false);
+  };
+
+  const handleDescriptionCommit = () => {
+    if (!task) return;
+    const trimmed = localDescription.trim();
+    if (trimmed !== (task.description || '').trim()) {
+      setSaveIndicator('saving');
+      onUpdateTask(task.taskId, { description: trimmed });
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(() => {
+        setSaveIndicator('saved');
+      }, 500);
+    }
   };
 
   const handleCopyId = () => {
@@ -685,6 +702,25 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
             </select>
           </div>
         )}
+
+        {/* Description Field (Optional / Sanity) */}
+        <div id="div-taskdetailspanel-description" className="flex flex-col gap-1">
+          <label className="text-[10px] font-mono font-semibold text-[var(--on-surface-variant)] uppercase tracking-wider flex items-center justify-between">
+            <span>{i18n._(msg`Descripción`)}</span>
+            <span className="text-[9px] font-sans text-[var(--on-surface-variant)] lowercase">
+              ({i18n._(msg`opcional / Sanity`)})
+            </span>
+          </label>
+          <textarea
+            id="textarea-task-description"
+            rows={2}
+            value={localDescription}
+            onChange={(e) => setLocalDescription(e.target.value)}
+            onBlur={handleDescriptionCommit}
+            placeholder={i18n._(msg`Añadir descripción o notas opcionales...`)}
+            className="w-full bg-[var(--surface)] text-[var(--on-surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2 py-1 text-xs font-sans focus:outline-none resize-none transition-colors"
+          />
+        </div>
 
         {/* 4. Status Grid */}
         <div id="div-taskdetailspanel-21" className="flex flex-col gap-1.5">

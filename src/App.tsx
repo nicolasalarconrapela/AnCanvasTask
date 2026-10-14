@@ -943,6 +943,7 @@ export default function App() {
 
   // New task form state
   const [newTaskTitle, setNewTaskTitle] = useState<string>('');
+  const [newTaskDescription, setNewTaskDescription] = useState<string>('');
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('P1');
   const [newTaskGroup, setNewTaskGroup] = useState<string>('General');
   const [customGroupInput, setCustomGroupInput] = useState<string>('');
@@ -2794,6 +2795,7 @@ export default function App() {
   const handleOpenNewTaskModal = useCallback(
     (defaultGroup?: string) => {
       setNewTaskTitle('');
+      setNewTaskDescription('');
       setNewTaskPriority('P1');
       if (defaultGroup && defaultGroup.trim()) {
         const trimmed = defaultGroup.trim();
@@ -3152,6 +3154,7 @@ export default function App() {
                   const isCompletedChanged = toProps.completed !== fromProps.completed;
                   const isPriorityChanged = toProps.priority !== fromProps.priority;
                   const isStatusChanged = toProps.status !== fromProps.status;
+                  const isDescriptionChanged = toProps.description !== fromProps.description;
                   const isTagsChanged = JSON.stringify(toProps.tags) !== JSON.stringify(fromProps.tags);
                   const isBlockedByChanged = toProps.blockedBy !== fromProps.blockedBy;
                   const isSubtasksChanged = JSON.stringify(toProps.subtasks) !== JSON.stringify(fromProps.subtasks);
@@ -3161,6 +3164,7 @@ export default function App() {
                     isCompletedChanged ||
                     isPriorityChanged ||
                     isStatusChanged ||
+                    isDescriptionChanged ||
                     isTagsChanged ||
                     isBlockedByChanged ||
                     isSubtasksChanged
@@ -3177,6 +3181,7 @@ export default function App() {
                             completed: toProps.completed,
                             priority: toProps.priority,
                             status: toProps.status,
+                            description: toProps.description,
                             tags: toProps.tags,
                             blockedBy: toProps.blockedBy,
                             subtasks: toProps.subtasks,
@@ -3706,6 +3711,7 @@ export default function App() {
       priority: newTaskPriority,
       status: 'backlog',
       groupTitle,
+      description: newTaskDescription.trim() || undefined,
     });
 
     setMarkdownInput(updatedMarkdown);
@@ -3825,6 +3831,7 @@ export default function App() {
           completed: false,
           priority: newTaskPriority,
           status: 'backlog',
+          description: newTaskDescription.trim() || undefined,
           taskId,
           groupTitle,
           groupHeadingId: targetGroupShape?.props?.headingId,
@@ -3836,6 +3843,7 @@ export default function App() {
     }
 
     setNewTaskTitle('');
+    setNewTaskDescription('');
     setNewTaskPriority('P1');
     setIsNewTaskModalOpen(false);
     showToast(
@@ -4020,6 +4028,7 @@ export default function App() {
         blockedBy: taskDoc.blockedBy,
         tags: taskDoc.tags,
         subtasks: taskDoc.subtasks,
+        description: taskDoc.description,
       });
       setMarkdownInput(updatedMarkdown);
       pushToast(
@@ -4051,6 +4060,7 @@ export default function App() {
         completed?: boolean;
         priority?: TaskPriority;
         status?: TaskStatus;
+        description?: string;
         groupTitle?: string;
         tags?: string[];
         blockedBy?: string;
@@ -4068,6 +4078,7 @@ export default function App() {
           updates.completed !== undefined ||
           updates.priority !== undefined ||
           updates.status !== undefined ||
+          updates.description !== undefined ||
           updates.tags !== undefined ||
           updates.blockedBy !== undefined
         ) {
@@ -4079,6 +4090,7 @@ export default function App() {
               completed: updates.completed,
               priority: updates.priority,
               status: updates.status,
+              description: updates.description,
               tags: updates.tags,
               blockedBy: updates.blockedBy,
             },
@@ -4106,6 +4118,7 @@ export default function App() {
               ...(updates.completed !== undefined ? { completed: updates.completed } : {}),
               ...(updates.priority !== undefined ? { priority: updates.priority } : {}),
               ...(updates.status !== undefined ? { status: updates.status } : {}),
+              ...(updates.description !== undefined ? { description: updates.description } : {}),
               ...(updates.tags !== undefined ? { tags: updates.tags } : {}),
               ...(updates.blockedBy !== undefined ? { blockedBy: updates.blockedBy } : {}),
               ...(updates.groupTitle !== undefined ? { groupTitle: updates.groupTitle } : {}),
@@ -4630,6 +4643,7 @@ export default function App() {
           completed: Boolean(tProps.completed),
           priority: (tProps.priority || 'P1') as TaskPriority,
           status: (tProps.status || (tProps.completed ? 'done' : 'todo')) as TaskStatus,
+          description: tProps.description ?? matchedBlock?.detectedDescription ?? '',
           tags: tProps.tags || matchedBlock?.detectedTags || [],
           subtasks: tProps.subtasks || matchedBlock?.detectedSubtasks,
           blockedBy: tProps.blockedBy || matchedBlock?.detectedBlockedBy || '',
@@ -4655,6 +4669,7 @@ export default function App() {
         completed: isCompleted,
         priority: block.detectedPriority || 'P1',
         status: (block.detectedStatus as any) || (isCompleted ? 'done' : 'todo'),
+        description: block.detectedDescription || '',
         tags: block.detectedTags || [],
         subtasks: block.detectedSubtasks,
         blockedBy: block.detectedBlockedBy || '',
@@ -6842,6 +6857,22 @@ export default function App() {
                   onChange={(e) => setNewTaskTitle(e.target.value)}
                   placeholder={i18n._(msg`ej. Crear recuperación de contraseña`)}
                   className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+
+              {/* Description Input (Optional / Sanity) */}
+              <div id="div-app-new-task-description" className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--on-surface)] flex items-center justify-between">
+                  <span>{i18n._(msg`Descripción`)}</span>
+                  <span className="text-[10px] text-[var(--on-surface-variant)] font-normal">{i18n._(msg`opcional / Sanity`)}</span>
+                </label>
+                <textarea
+                  id="textarea-new-task-description"
+                  rows={2}
+                  value={newTaskDescription}
+                  onChange={(e) => setNewTaskDescription(e.target.value)}
+                  placeholder={i18n._(msg`Notas o descripción de la tarea...`)}
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none resize-none"
                 />
               </div>
 

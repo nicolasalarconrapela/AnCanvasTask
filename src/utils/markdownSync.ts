@@ -11,6 +11,7 @@ export interface TaskUpdatePayload {
   completed?: boolean;
   priority?: TaskPriority;
   status?: string;
+  description?: string;
   tags?: string[];
   blockedBy?: string;
   subtasks?: {
@@ -31,6 +32,7 @@ export interface TaskBlockInfo {
   rawPriority?: string;
   detectedBlockedBy?: string;
   detectedStatus?: string;
+  detectedDescription?: string;
   detectedTags?: string[];
   detectedSubtasks?: {
     total: number;
@@ -211,7 +213,7 @@ export function scanTaskBlocks(markdown: string): {
     const isIndented = line.startsWith(' ') || line.startsWith('\t');
     const isMetadataLine =
       Boolean(currentBlock) &&
-      /^(?:\s*[-*]\s*(?:\[[ xX]\]\s*)?)?(?:ID|Priority|Status|Tags?|Blocked\s*(?:by|-by)?)\s*:/i.test(trimmed);
+      /^(?:\s*[-*]\s*(?:\[[ xX]\]\s*)?)?(?:ID|Priority|Status|Description|Tags?|Blocked\s*(?:by|-by)?)\s*:/i.test(trimmed);
     const taskMatch = line.match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/);
     if (taskMatch && (!currentBlock || !isIndented) && !isMetadataLine) {
       if (currentBlock) {
@@ -277,6 +279,13 @@ export function scanTaskBlocks(markdown: string): {
         const statusMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?Status\s*:\s*(.+)$/i);
         if (statusMatch) {
           currentBlock.detectedStatus = statusMatch[1].trim();
+          currentBlock.endLineIndex = i;
+          continue;
+        }
+
+        const descriptionMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?Description\s*:\s*(.+)$/i);
+        if (descriptionMatch) {
+          currentBlock.detectedDescription = descriptionMatch[1].trim();
           currentBlock.endLineIndex = i;
           continue;
         }
@@ -773,6 +782,7 @@ export function updateTaskInMarkdown(markdown: string, taskId: string, updates: 
 
   metadata(/^(\s*(?:[-*]\s*)?Priority\s*:\s*).*$/i, 'Priority', updates.priority);
   metadata(/^(\s*(?:[-*]\s*)?Status\s*:\s*).*$/i, 'Status', statusToSet, !['todo', 'done'].includes(statusToSet || ''));
+  metadata(/^(\s*(?:[-*]\s*)?Description\s*:\s*).*$/i, 'Description', updates.description !== undefined ? updates.description.trim() : undefined, Boolean(updates.description && updates.description.trim()));
   metadata(/^(\s*(?:[-*]\s*)?(?:Tags|Labels)\s*:\s*).*$/i, 'Tags', updates.tags?.join(', '));
   metadata(/^(\s*(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:\s*).*$/i, 'Blocked by', updates.blockedBy?.trim());
   metadata(/^(\s*(?:[-*]\s*)?ID\s*:\s*).*$/i, 'ID', updates.id?.trim());
@@ -844,6 +854,7 @@ export function addTaskToMarkdown(
     status?: TaskStatus;
     groupTitle: string;
     customId?: string;
+    description?: string;
     blockedBy?: string;
     tags?: string[];
     subtasks?: Array<{ title: string; completed?: boolean }>;
@@ -866,6 +877,10 @@ export function addTaskToMarkdown(
     `  - Priority: ${priority}`,
     `  - Status: ${status}`,
   ];
+
+  if (payload.description && payload.description.trim()) {
+    taskLines.push(`  - Description: ${payload.description.trim()}`);
+  }
 
   if (payload.blockedBy && payload.blockedBy.trim()) {
     taskLines.push(`  - Blocked by: ${payload.blockedBy.trim()}`);

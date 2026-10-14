@@ -26,6 +26,10 @@ import {
   computeAutoLayout,
   isRectOverlapping,
 } from '../src/utils/autoLayout';
+import {
+  taskFields,
+  applyTaskToMarkdown,
+} from '../src/services/documentSyncService';
 
 console.log('--- Iniciando suite de pruebas de AnTaskCanvas (Core sin GitHub) ---');
 
@@ -189,6 +193,69 @@ const singleResolvedMd = assignStatusToTask(noStatusMd, 'task_invalid', 'in_prog
 const postSingleVal = validateMarkdownDocument(singleResolvedMd);
 assert.strictEqual(postSingleVal.issues.filter((i) => i.type === 'invalid_status').length, 0, 'Estado inválido debe haberse corregido');
 console.log('   ✓ Obligatoriedad de Status y resolvedor automático/individual verificados con éxito.');
+
+// 4c. Optional Description field parsing, updating, stripping, and Sanity sync
+console.log('4c. Verificando campo opcional Description y sincronización con Sanity...');
+const descSampleMd = `# Proyecto
+## Backend
+- [ ] Tarea con notas detalladas
+  - ID: task_desc
+  - Priority: P1
+  - Status: backlog
+  - Description: Esta es una descripción técnica para Sanity
+- [ ] Tarea sin descripción
+  - ID: task_nodesc
+  - Priority: P2
+  - Status: todo
+`;
+
+const descParsed = parseTasksMarkdown(descSampleMd);
+const descTasks = descParsed[0].tasks;
+assert.strictEqual(descTasks[0].description, 'Esta es una descripción técnica para Sanity', 'Debe parsear la descripción opcional');
+assert.strictEqual(descTasks[1].description, undefined, 'Tarea sin descripción debe tener description undefined');
+
+// Sincronización con Sanity via taskFields
+const fieldsSanity = taskFields(descSampleMd);
+assert.strictEqual(fieldsSanity[0].description, 'Esta es una descripción técnica para Sanity', 'Sanity taskFields debe incluir description');
+assert.strictEqual(fieldsSanity[1].description, undefined, 'Sanity taskFields no debe incluir description cuando no está');
+
+// Actualizar descripción en Markdown
+const updatedDescMd = updateTaskInMarkdown(descSampleMd, 'task_desc', {
+  description: 'Nueva descripción actualizada',
+});
+const reParsedDesc = parseTasksMarkdown(updatedDescMd)[0].tasks[0];
+assert.strictEqual(reParsedDesc.description, 'Nueva descripción actualizada', 'Debe actualizar description en Markdown');
+
+// Eliminar descripción pasando string vacío
+const strippedDescMd = updateTaskInMarkdown(updatedDescMd, 'task_desc', {
+  description: '',
+});
+assert(!strippedDescMd.includes('Description:'), 'Al pasar description vacía debe eliminar la línea Description');
+const reParsedStripped = parseTasksMarkdown(strippedDescMd)[0].tasks[0];
+assert.strictEqual(reParsedStripped.description, undefined, 'Description debe ser undefined tras removerla');
+
+// Añadir nueva tarea con Description mediante addTaskToMarkdown
+const { updatedMarkdown: addedWithDescMd } = addTaskToMarkdown(descSampleMd, {
+  title: 'Nueva tarea con descripción',
+  groupTitle: 'Backend',
+  customId: 'task_new_desc',
+  description: 'Notas iniciales opcionales',
+});
+const reParsedAdded = parseTasksMarkdown(addedWithDescMd)[0].tasks.find((t) => t.taskId === 'task_new_desc');
+assert(reParsedAdded, 'Debe existir la nueva tarea añadida');
+assert.strictEqual(reParsedAdded.description, 'Notas iniciales opcionales', 'Debe guardar y parsear la descripción inicial');
+
+// Aplicar tarea remota de Sanity con Description a Markdown (applyTaskToMarkdown)
+const appliedRemoteMd = applyTaskToMarkdown(strippedDescMd, {
+  taskId: 'task_desc',
+  title: 'Tarea con notas detalladas',
+  description: 'Descripción importada de Sanity Cloud',
+  status: 'in_progress',
+  priority: 'P0',
+});
+const reParsedApplied = parseTasksMarkdown(appliedRemoteMd)[0].tasks.find((t) => t.taskId === 'task_desc');
+assert.strictEqual(reParsedApplied?.description, 'Descripción importada de Sanity Cloud', 'applyTaskToMarkdown debe aplicar description');
+console.log('   ✓ Campo Description opcional, actualización, eliminación y sincronización con Sanity verificados.');
 
 // 5. Workspaces and Local Recovery without GitHub dependency
 console.log('5. Verificando estructura de Workspaces local y desacoplamiento de GitHub...');
