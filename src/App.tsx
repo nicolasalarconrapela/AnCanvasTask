@@ -3791,7 +3791,11 @@ export default function App() {
     setNewTaskTitle('');
     setNewTaskPriority('P1');
     setIsNewTaskModalOpen(false);
-    showToast(i18n._(msg`Tarea #${taskId} creada en "${groupTitle}"`));
+    showToast(
+      taskFilters.showTaskIds === false
+        ? i18n._(msg`Tarea "${newTaskTitle.trim()}" creada en "${groupTitle}"`)
+        : i18n._(msg`Tarea #${taskId} creada en "${groupTitle}"`)
+    );
   };
 
   // Load Sample Project Helper
@@ -3971,7 +3975,12 @@ export default function App() {
         subtasks: taskDoc.subtasks,
       });
       setMarkdownInput(updatedMarkdown);
-      pushToast(i18n._(msg`Tarea #${taskId} importada de Sanity al lienzo`), 'success');
+      pushToast(
+        taskFilters.showTaskIds === false
+          ? i18n._(msg`Tarea "${taskDoc.title}" importada de Sanity al lienzo`)
+          : i18n._(msg`Tarea #${taskId} importada de Sanity al lienzo`),
+        'success'
+      );
     },
     [markdownInput, pushToast]
   );
