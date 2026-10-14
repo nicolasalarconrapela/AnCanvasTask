@@ -180,7 +180,7 @@ export function KanbanBoard({
         temporaryId: b.temporaryId,
         title: b.detectedTitle,
         completed: isCompleted,
-        priority: b.detectedPriority || 'P1',
+        priority: b.detectedPriority || 'P3',
         status,
         description: b.detectedDescription,
         groupTitle: b.groupTitle || 'General',
@@ -640,7 +640,7 @@ export function KanbanBoard({
                         const isSelected =
                           selectedTaskId === task.taskId || selectedTaskIds.has(task.taskId);
                         const isDragging = draggedTaskId === task.taskId;
-                        const prio = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.P1;
+                        const prio = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.P3;
                         const isSearchMatch = Boolean(searchQuery.trim()) && checkTaskMatchesQuery(task, searchQuery);
 
                         return (

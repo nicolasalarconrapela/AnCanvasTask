@@ -348,7 +348,7 @@ export async function analyzeSyncDifferences(
               branchName: b.name,
               documentPath: doc.path,
               title: `Tarea: [${resTaskId}] ${lt.title}`,
-              subtitle: `Doc: "${doc.path}" (${b.name}) • Sección "${lt.groupTitle}" • Prioridad ${lt.priority || 'P1'}`,
+              subtitle: `Doc: "${doc.path}" (${b.name}) • Sección "${lt.groupTitle}" • Prioridad ${lt.priority || 'P3'}`,
               diffType: 'only_local',
               localTimestamp: doc.updatedAt,
               localData: lt,
@@ -360,10 +360,10 @@ export async function analyzeSyncDifferences(
             processedRemoteTaskIds.add(remoteKey);
 
             const titleDiff = lt.title !== matchedRemote.title;
-            const fields: Record<string, any> = { title: lt.title, completed: lt.completed, priority: lt.priority || 'P1', status: lt.status, groupTitle: lt.groupTitle, tags: lt.tags || [], blockedBy: lt.blockedBy || '' };
+            const fields: Record<string, any> = { title: lt.title, completed: lt.completed, priority: lt.priority || 'P3', status: lt.status, groupTitle: lt.groupTitle, tags: lt.tags || [], blockedBy: lt.blockedBy || '' };
             const select = (value: any) => Object.fromEntries(Object.keys(fields).map(k => [k, value[k] ?? (k === 'tags' ? [] : k === 'blockedBy' ? '' : k === 'status' ? (value.completed ? 'done' : 'todo') : fields[k])]));
             const completedDiff = Boolean(lt.completed) !== Boolean(matchedRemote.completed);
-            const priorityDiff = (lt.priority || 'P1') !== (matchedRemote.priority || 'P1');
+            const priorityDiff = (lt.priority || 'P3') !== (matchedRemote.priority || 'P3');
 
             if (JSON.stringify(syncComparable(fields)) === JSON.stringify(syncComparable(select(matchedRemote)))) {
               items.push({
@@ -395,7 +395,7 @@ export async function analyzeSyncDifferences(
               const changes: string[] = [];
               if (titleDiff) changes.push(`Título: "${matchedRemote.title}" vs "${lt.title}"`);
               if (completedDiff) changes.push(`Estado completado: Remoto (${Boolean(matchedRemote.completed)}) vs Local (${Boolean(lt.completed)})`);
-              if (priorityDiff) changes.push(`Prioridad: Remoto (${matchedRemote.priority || 'P1'}) vs Local (${lt.priority || 'P1'})`);
+              if (priorityDiff) changes.push(`Prioridad: Remoto (${matchedRemote.priority || 'P3'}) vs Local (${lt.priority || 'P3'})`);
 
               items.push({
                 id: `task_${ws.id}_${b.name}_${doc.id}_${resTaskId}`,

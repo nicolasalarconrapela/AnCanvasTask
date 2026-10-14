@@ -53,7 +53,7 @@ export function taskFields(markdown: string): any[] {
     ids.add(b.detectedId);
     return { taskId: b.detectedId, title: b.detectedTitle, completed: /\[[xX]\]/.test(b.rawTaskLine),
       status: b.detectedStatus || (/\[[xX]\]/.test(b.rawTaskLine) ? 'done' : 'todo'),
-      priority: b.detectedPriority || 'P1', groupTitle: b.groupTitle,
+      priority: b.detectedPriority || 'P3', groupTitle: b.groupTitle,
       tags: b.detectedTags || [], blockedBy: b.detectedBlockedBy || '',
       ...(b.detectedDescription !== undefined ? { description: b.detectedDescription } : {}) };
   });

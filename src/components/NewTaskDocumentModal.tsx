@@ -48,7 +48,7 @@ export const NewTaskDocumentModal: React.FC<NewTaskDocumentModalProps> = ({
     const cleanName = docName.trim() || 'TASKS.md';
     const finalPath = formatDocumentPath(cleanFolder, cleanName);
 
-    const starterContent = `# ${cleanName}${cleanFolder ? ` - ${cleanFolder}` : ''}\n\n## General\n- [ ] Tarea inicial\n  id: task_1\n  priority: P1\n`;
+    const starterContent = `# ${cleanName}${cleanFolder ? ` - ${cleanFolder}` : ''}\n\n## General\n- [ ] Tarea inicial\n  id: task_1\n  priority: P3\n`;
 
     const newDoc = createTaskDocument(cleanName, starterContent, cleanFolder);
 

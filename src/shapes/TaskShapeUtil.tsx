@@ -2542,7 +2542,7 @@ export function populateCanvasWithGroups(
           h: taskH,
           title: task.title,
           completed: task.completed,
-          priority: task.priority || 'P1',
+          priority: task.priority || 'P3',
           taskId: resolvedTaskId,
           status: task.status,
           description: task.description,

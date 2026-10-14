@@ -165,7 +165,7 @@ export function isTaskMatchingFilters(
 
     // Priority Filter
     if (filters.priority && filters.priority !== 'all') {
-      const p = (task.priority || 'P1').toUpperCase();
+      const p = (task.priority || 'P3').toUpperCase();
       if (p !== filters.priority.toUpperCase()) return false;
     }
 

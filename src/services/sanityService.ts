@@ -820,7 +820,7 @@ export async function syncAllTasksToSanity(
     for (const t of tasks) {
       const result = await saveSanityDocument({ _id: buildSanityTaskDocId(t.id, cleanWs, documentKey), _type: 'task',
         taskId: t.id, workspaceId: cleanWs, documentKey, title: t.title, completed: t.completed,
-        status: t.status || (t.completed ? 'done' : 'todo'), priority: t.priority || 'P1',
+        status: t.status || (t.completed ? 'done' : 'todo'), priority: t.priority || 'P3',
         groupTitle: t.groupTitle || 'General', blockedBy: t.blockedBy || '', tags: t.tags || [],
         ...(t.subtasks !== undefined ? { subtasks: t.subtasks } : {}),
         ...(t.description !== undefined ? { description: t.description } : {}) }, config);

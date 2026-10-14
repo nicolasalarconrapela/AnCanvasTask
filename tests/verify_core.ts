@@ -258,6 +258,14 @@ const reParsedApplied = parseTasksMarkdown(appliedRemoteMd)[0].tasks.find((t) =>
 assert.strictEqual(reParsedApplied?.description, 'Descripción importada de Sanity Cloud', 'applyTaskToMarkdown debe aplicar description');
 console.log('   ✓ Campo Description opcional, actualización, eliminación y sincronización con Sanity verificados.');
 
+// Verificación de fallback P3 al parsear tareas markdown sin prioridad explícita
+const noPriorityMd = `## General\n- [ ] Tarea sin prioridad explícita\n  id: task_no_prio\n`;
+const noPrioParsed = parseTasksMarkdown(noPriorityMd)[0].tasks[0];
+assert.strictEqual(noPrioParsed.priority, 'P3', 'Una tarea en markdown sin prioridad debe interpretarse por defecto como P3');
+const noPrioFields = taskFields(noPriorityMd)[0];
+assert.strictEqual(noPrioFields.priority, 'P3', 'taskFields debe asignar prioridad P3 por defecto si no está especificada');
+console.log('   ✓ Fallback de prioridad P3 por defecto en Markdown verificado.');
+
 // 5. Workspaces and Local Recovery without GitHub dependency
 console.log('5. Verificando estructura de Workspaces local y desacoplamiento de GitHub...');
 const initialWorkspaces = getInitialDefaultWorkspaces();

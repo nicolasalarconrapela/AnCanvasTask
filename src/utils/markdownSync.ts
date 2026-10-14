@@ -527,7 +527,7 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
         taskTitle: block.detectedTitle,
         groupTitle: block.groupTitle,
         lineIndex: block.taskLineIndex,
-        details: 'Valores válidos: P0 (crítica), P1 (alta), P2 (media), P3 (baja). Se usará P1 en el canvas.',
+        details: 'Valores válidos: P0 (crítica), P1 (alta), P2 (media), P3 (baja). Se usará P3 en el canvas.',
       });
     }
   });
