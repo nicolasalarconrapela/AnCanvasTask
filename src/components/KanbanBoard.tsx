@@ -612,7 +612,7 @@ export function KanbanBoard({
                     <button
                       id={`btn-kanban-add-task-${col.id}`}
                       type="button"
-                      onClick={() => onOpenNewTaskModalWithGroup?.(col.label)}
+                      onClick={() => onOpenNewTaskModalWithGroup?.(col.id)}
                       className="btn-m3-icon w-6 h-6 cursor-pointer hover:text-[var(--primary)]"
                       title={i18n._(msg`Añadir tarea a ${col.label}`)}
                     >
@@ -628,7 +628,7 @@ export function KanbanBoard({
                         <button
                           id={`btn-kanban-empty-add-task-${col.id}`}
                           type="button"
-                          onClick={() => onOpenNewTaskModalWithGroup?.(col.label)}
+                          onClick={() => onOpenNewTaskModalWithGroup?.(col.id)}
                           className="text-[11px] font-medium text-[var(--primary)] hover:underline cursor-pointer flex items-center gap-0.5"
                         >
                           <span className="material-symbols-outlined text-[12px]">add</span>

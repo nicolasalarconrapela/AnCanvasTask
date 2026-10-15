@@ -11,6 +11,8 @@ import {
 import { getSyncSession } from '../services/syncSessionService';
 import { SanitySdkExplorer } from './SanitySdkExplorer';
 import { SanityStudioEmbed } from './SanityStudioEmbed';
+import { slugify } from '../utils/markdownSync';
+import { TaskStatus } from '../shapes/TaskShapeUtil';
 
 export interface SanityStudioProps {
   onOpenSanityConfig: () => void;
@@ -68,6 +70,10 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
 
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState<boolean>(false);
   const [newTaskTitleInput, setNewTaskTitleInput] = useState<string>('');
+  const [newTaskDescriptionInput, setNewTaskDescriptionInput] = useState<string>('');
+  const [newTaskIdInput, setNewTaskIdInput] = useState<string>('');
+  const [isCustomIdInput, setIsCustomIdInput] = useState<boolean>(false);
+  const [newTaskStatusInput, setNewTaskStatusInput] = useState<TaskStatus>('backlog');
   const [newTaskPriorityInput, setNewTaskPriorityInput] = useState<'P0' | 'P1' | 'P2' | 'P3'>('P3');
   const [newTaskWorkspaceId, setNewTaskWorkspaceId] = useState<string>('');
   const [newTaskSectionInput, setNewTaskSectionInput] = useState<string>('General');
@@ -335,10 +341,17 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
     }
   };
 
-  const handleOpenCreateTaskModal = (defaultWsId?: string) => {
-    setNewTaskTitleInput('Nueva tarea de Sanity');
+  const handleOpenCreateTaskModal = (defaultWsId?: string, defaultGroup?: string, defaultStatus?: TaskStatus) => {
+    setNewTaskTitleInput('');
+    setNewTaskDescriptionInput('');
+    setNewTaskIdInput('');
+    setIsCustomIdInput(false);
+    setNewTaskStatusInput(defaultStatus || 'backlog');
     setNewTaskPriorityInput('P3');
     setNewTaskWorkspaceId(defaultWsId || (formState._type === 'workspace' ? (formState.workspaceId || formState._id) : ''));
+    if (defaultGroup) {
+      setNewTaskSectionInput(defaultGroup);
+    }
     setIsCreateTaskOpen(true);
   };
 
@@ -368,13 +381,17 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
       const targetBranch = selectedWs?.branches?.find((b: any) => b.name === selectedWs.activeBranchName) || selectedWs?.branches?.[0];
       const targetDoc = targetBranch?.taskDocuments?.find((d: any) => d.id === targetBranch.activeDocumentId) || targetBranch?.taskDocuments?.[0];
       if (selectedWs && !targetDoc) throw new Error('El workspace no contiene un documento de tareas');
+
+      const finalTaskId = newTaskIdInput.trim() || (slugify(newTaskTitleInput.trim()) || ('task-' + Date.now().toString(36)));
       const res = await writeTestingTaskToSanity(config, {
         documentKey: targetDoc ? `${targetBranch.name}::${targetDoc.id}` : undefined,
         branchName: targetBranch?.name, documentPath: targetDoc?.path,
         title: newTaskTitleInput.trim(),
-        taskId: 'task-' + Date.now().toString(36),
+        taskId: finalTaskId,
+        description: newTaskDescriptionInput.trim() || undefined,
         priority: newTaskPriorityInput,
-        status: 'todo',
+        status: newTaskStatusInput,
+        completed: newTaskStatusInput === 'done',
         groupTitle: finalGroupTitle,
         workspaceId: selectedWs ? (selectedWs.workspaceId || selectedWs._id.replace(/^workspace-/, '')) : undefined,
         workspace: selectedWs ? { _type: 'reference', _ref: selectedWs._id } : undefined,
@@ -1932,14 +1949,103 @@ export const SanityStudio: React.FC<SanityStudioProps> = ({
                   Título de la tarea
                 </label>
                 <input
+                  id="input-sanity-studio-task-title"
                   type="text"
                   required
                   autoFocus={!isCustomTaskSectionInput}
                   value={newTaskTitleInput}
-                  onChange={(e) => setNewTaskTitleInput(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewTaskTitleInput(val);
+                    if (!isCustomIdInput) {
+                      setNewTaskIdInput(val.trim() ? slugify(val) : '');
+                    }
+                  }}
                   placeholder="ej. Implementar OAuth..."
                   className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs text-[var(--on-surface)] focus:outline-none"
                 />
+              </div>
+
+              {/* Description Input */}
+              <div id="div-sanitystudio-new-task-description" className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-[var(--on-surface)] flex items-center justify-between">
+                  <span>Descripción</span>
+                  <span className="text-[10px] text-[var(--on-surface-variant)] font-normal">opcional</span>
+                </label>
+                <textarea
+                  id="textarea-sanity-studio-task-description"
+                  rows={2}
+                  value={newTaskDescriptionInput}
+                  onChange={(e) => setNewTaskDescriptionInput(e.target.value)}
+                  placeholder="Notas o descripción de la tarea..."
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs text-[var(--on-surface)] focus:outline-none resize-none"
+                />
+              </div>
+
+              {/* ID Input */}
+              <div id="div-sanitystudio-new-task-id" className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-[var(--on-surface)] flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">tag</span>
+                    <span>ID de la tarea</span>
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    {isCustomIdInput && (
+                      <button
+                        id="btn-sanity-studio-reset-id"
+                        type="button"
+                        onClick={() => {
+                          setIsCustomIdInput(false);
+                          setNewTaskIdInput(newTaskTitleInput.trim() ? slugify(newTaskTitleInput) : '');
+                        }}
+                        className="text-[10px] text-[var(--primary)] hover:underline cursor-pointer flex items-center gap-0.5"
+                        title="Restablecer a ID automático basado en el título"
+                      >
+                        <span className="material-symbols-outlined text-[12px]">refresh</span>
+                        <span>Auto</span>
+                      </button>
+                    )}
+                    <span className="text-[10px] text-[var(--on-surface-variant)]">
+                      {isCustomIdInput ? 'personalizado' : 'autogenerado'}
+                    </span>
+                  </div>
+                </div>
+                <input
+                  id="input-sanity-studio-task-id"
+                  type="text"
+                  value={newTaskIdInput}
+                  onChange={(e) => {
+                    setIsCustomIdInput(true);
+                    setNewTaskIdInput(e.target.value);
+                  }}
+                  placeholder={newTaskTitleInput.trim() ? slugify(newTaskTitleInput) : 'ej. mi-tarea (se autogenera del título)'}
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-mono text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+
+              {/* Status Selection */}
+              <div id="div-sanitystudio-new-task-status" className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-[var(--on-surface)] flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">pending_actions</span>
+                  <span>Estado</span>
+                </label>
+                <div className="relative">
+                  <select
+                    id="select-sanity-studio-task-status"
+                    value={newTaskStatusInput}
+                    onChange={(e) => setNewTaskStatusInput(e.target.value as TaskStatus)}
+                    className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs text-[var(--on-surface)] focus:outline-none cursor-pointer appearance-none pr-8"
+                  >
+                    <option value="backlog">📦 Backlog (Predeterminado)</option>
+                    <option value="todo">⏳ Todo (Por hacer)</option>
+                    <option value="in_progress">⚡ In Progress (En progreso)</option>
+                    <option value="review">👀 Review (En revisión)</option>
+                    <option value="done">✅ Done (Completado)</option>
+                  </select>
+                  <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-[16px] text-[var(--on-surface-variant)] pointer-events-none">
+                    expand_more
+                  </span>
+                </div>
               </div>
 
               <div id="div-sanitystudio-117" className="flex flex-col gap-1">

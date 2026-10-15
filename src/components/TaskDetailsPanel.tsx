@@ -198,7 +198,8 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
     if (!task) return;
     const completedMark = task.completed ? 'x' : ' ';
     const tagsStr = task.tags && task.tags.length > 0 ? ` #${task.tags.join(' #')}` : '';
-    const line = `- [${completedMark}] ${task.title}${tagsStr}\n  id: ${task.taskId}\n  priority: ${task.priority}\n  status: ${task.status}`;
+    const descLine = task.description ? `\n  - Description: ${task.description.trim()}` : '';
+    const line = `- [${completedMark}] ${task.title}${tagsStr}${descLine}\n  - ID: ${task.taskId}\n  - Status: ${task.status}\n  - Priority: ${task.priority}`;
     navigator.clipboard.writeText(line);
     setIsMenuOpen(false);
   };

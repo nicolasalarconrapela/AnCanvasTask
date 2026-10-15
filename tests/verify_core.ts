@@ -987,5 +987,47 @@ assert.strictEqual(snippetText, null, 'No debe generar snippet para texto normal
 
 console.log('   ✓ Snippet canónico al pulsar Enter verificado correctamente.');
 
+// 24. Verificando creación de tarea mediante addTaskToMarkdown sincronizado con Description/ID/Status/Priority
+console.log('24. Verificando addTaskToMarkdown sincronizado con orden canónico Description/ID/Status/Priority...');
+{
+  const baseSampleMd = `# Documento de prueba\n\n## Pruebas\n`;
+  const { updatedMarkdown: addedTaskMd, taskId: createdId } = addTaskToMarkdown(baseSampleMd, {
+    title: 'Implementar autenticación 2FA',
+    groupTitle: 'Pruebas',
+    customId: 'auth-2fa',
+    description: 'Requiere TOTP y código de recuperación',
+    status: 'in_progress',
+    priority: 'P1',
+  });
+
+  assert.strictEqual(createdId, 'auth-2fa', 'El taskId debe ser auth-2fa');
+  assert(addedTaskMd.includes('- [ ] Implementar autenticación 2FA'), 'Debe incluir checkbox no marcado');
+  assert(addedTaskMd.includes('  - Description: Requiere TOTP y código de recuperación'), 'Debe incluir Description');
+  assert(addedTaskMd.includes('  - ID: auth-2fa'), 'Debe incluir ID');
+  assert(addedTaskMd.includes('  - Status: in_progress'), 'Debe incluir Status');
+  assert(addedTaskMd.includes('  - Priority: P1'), 'Debe incluir Priority');
+
+  // Comprobar orden canónico relativo
+  const dIdx = addedTaskMd.indexOf('  - Description:');
+  const iIdx = addedTaskMd.indexOf('  - ID:');
+  const sIdx = addedTaskMd.indexOf('  - Status:');
+  const pIdx = addedTaskMd.indexOf('  - Priority:');
+  assert(dIdx < iIdx, 'Description debe ir antes de ID');
+  assert(iIdx < sIdx, 'ID debe ir antes de Status');
+  assert(sIdx < pIdx, 'Status debe ir antes de Priority');
+
+  // Probar creación con status: done
+  const { updatedMarkdown: doneTaskMd } = addTaskToMarkdown(baseSampleMd, {
+    title: 'Tarea completada',
+    groupTitle: 'Pruebas',
+    status: 'done',
+    priority: 'P3',
+  });
+  assert(doneTaskMd.includes('- [x] Tarea completada'), 'Tarea creada con status done debe tener [x]');
+  assert(doneTaskMd.includes('  - Status: done'), 'Debe reflejar status: done');
+}
+
+console.log('   ✓ addTaskToMarkdown sincronizado con Description/ID/Status/Priority verificado correctamente.');
+
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 process.exit(0);

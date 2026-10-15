@@ -126,6 +126,7 @@ import {
 import { analyzeSyncDifferences } from './services/syncEngineService';
 import {
   addTaskToMarkdown,
+  generateUniqueTaskId,
   assignTaskIdToTask,
   autoAssignAllMissingTaskIds,
   autoAssignAllMissingTaskStatuses,
@@ -970,6 +971,9 @@ export default function App() {
   // New task form state
   const [newTaskTitle, setNewTaskTitle] = useState<string>('');
   const [newTaskDescription, setNewTaskDescription] = useState<string>('');
+  const [newTaskId, setNewTaskId] = useState<string>('');
+  const [isCustomTaskId, setIsCustomTaskId] = useState<boolean>(false);
+  const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus>('backlog');
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('P3');
   const [newTaskGroup, setNewTaskGroup] = useState<string>('General');
   const [customGroupInput, setCustomGroupInput] = useState<string>('');
@@ -2857,12 +2861,46 @@ export default function App() {
   }, [markdownInput]);
 
   const handleOpenNewTaskModal = useCallback(
-    (defaultGroup?: string) => {
+    (
+      defaultGroupOrStatus?: string | { group?: string; status?: TaskStatus },
+      explicitStatus?: TaskStatus
+    ) => {
       setNewTaskTitle('');
       setNewTaskDescription('');
+      setNewTaskId('');
+      setIsCustomTaskId(false);
       setNewTaskPriority('P3');
-      if (defaultGroup && defaultGroup.trim()) {
-        const trimmed = defaultGroup.trim();
+
+      let targetGroup: string | undefined;
+      let targetStatus: TaskStatus = explicitStatus || 'backlog';
+
+      if (typeof defaultGroupOrStatus === 'object' && defaultGroupOrStatus !== null) {
+        targetGroup = defaultGroupOrStatus.group;
+        if (defaultGroupOrStatus.status) {
+          targetStatus = defaultGroupOrStatus.status;
+        }
+      } else if (typeof defaultGroupOrStatus === 'string') {
+        const raw = defaultGroupOrStatus.trim();
+        const lower = raw.toLowerCase();
+        if (['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked'].includes(lower)) {
+          targetStatus = lower as TaskStatus;
+        } else if (lower === 'por hacer') {
+          targetStatus = 'todo';
+        } else if (lower === 'en progreso') {
+          targetStatus = 'in_progress';
+        } else if (lower === 'hecho' || lower === 'completado') {
+          targetStatus = 'done';
+        } else if (lower === 'en revisión' || lower === 'revision' || lower === 'revisión') {
+          targetStatus = 'review';
+        } else {
+          targetGroup = raw;
+        }
+      }
+
+      setNewTaskStatus(targetStatus);
+
+      if (targetGroup && targetGroup.trim()) {
+        const trimmed = targetGroup.trim();
         if (existingSections.includes(trimmed)) {
           setNewTaskGroup(trimmed);
           setIsCustomGroup(false);
@@ -3770,11 +3808,14 @@ export default function App() {
       ? (customGroupInput.trim() || 'General')
       : (newTaskGroup.trim() || (existingSections.length > 0 ? existingSections[0] : 'General'));
 
+    const finalId = newTaskId.trim() || undefined;
+
     const { updatedMarkdown, taskId } = addTaskToMarkdown(markdownInput, {
       title: newTaskTitle.trim(),
       priority: newTaskPriority,
-      status: 'backlog',
+      status: newTaskStatus,
       groupTitle,
+      customId: finalId,
       description: newTaskDescription.trim() || undefined,
     });
 
@@ -3893,9 +3934,9 @@ export default function App() {
           w: 320,
           h: 110 + (newTaskDescription.trim() ? 24 : 0),
           title: newTaskTitle.trim(),
-          completed: false,
+          completed: newTaskStatus === 'done',
           priority: newTaskPriority,
-          status: 'backlog',
+          status: newTaskStatus,
           description: newTaskDescription.trim() || undefined,
           taskId,
           groupTitle,
@@ -3909,6 +3950,9 @@ export default function App() {
 
     setNewTaskTitle('');
     setNewTaskDescription('');
+    setNewTaskId('');
+    setIsCustomTaskId(false);
+    setNewTaskStatus('backlog');
     setNewTaskPriority('P3');
     setIsNewTaskModalOpen(false);
     showToast(
@@ -4091,7 +4135,9 @@ export default function App() {
       const { updatedMarkdown, taskId } = addTaskToMarkdown(markdownInput, {
         title: taskDoc.title,
         priority: taskDoc.priority || 'P3',
+        status: taskDoc.status || 'backlog',
         groupTitle,
+        customId: taskDoc.taskId,
         blockedBy: taskDoc.blockedBy,
         tags: taskDoc.tags,
         subtasks: taskDoc.subtasks,
@@ -6935,20 +6981,27 @@ export default function App() {
               <div id="div-app-68" className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-[var(--on-surface)]">{i18n._(msg`Título`)}</label>
                 <input
+                  id="input-new-task-title"
                   type="text"
                   autoFocus={!isCustomGroup}
                   value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewTaskTitle(val);
+                    if (!isCustomTaskId) {
+                      setNewTaskId(val.trim() ? generateUniqueTaskId(val, markdownInput) : '');
+                    }
+                  }}
                   placeholder={i18n._(msg`ej. Crear recuperación de contraseña`)}
                   className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none"
                 />
               </div>
 
-              {/* Description Input (Optional / Sanity) */}
+              {/* Description Input (Canonical: Description -> ID -> Status -> Priority) */}
               <div id="div-app-new-task-description" className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-[var(--on-surface)] flex items-center justify-between">
                   <span>{i18n._(msg`Descripción`)}</span>
-                  <span className="text-[10px] text-[var(--on-surface-variant)] font-normal">{i18n._(msg`opcional / Sanity`)}</span>
+                  <span className="text-[10px] text-[var(--on-surface-variant)] font-normal">{i18n._(msg`opcional`)}</span>
                 </label>
                 <textarea
                   id="textarea-new-task-description"
@@ -6958,6 +7011,72 @@ export default function App() {
                   placeholder={i18n._(msg`Notas o descripción de la tarea...`)}
                   className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none resize-none"
                 />
+              </div>
+
+              {/* ID Input */}
+              <div id="div-app-new-task-id" className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-[var(--on-surface)] flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">tag</span>
+                    <span>{i18n._(msg`ID de tarea`)}</span>
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    {isCustomTaskId && (
+                      <button
+                        id="btn-new-task-reset-id"
+                        type="button"
+                        onClick={() => {
+                          setIsCustomTaskId(false);
+                          setNewTaskId(newTaskTitle.trim() ? generateUniqueTaskId(newTaskTitle, markdownInput) : '');
+                        }}
+                        className="text-[10px] text-[var(--primary)] hover:underline cursor-pointer flex items-center gap-0.5"
+                        title={i18n._(msg`Restablecer a ID automático basado en el título`)}
+                      >
+                        <span className="material-symbols-outlined text-[12px]">refresh</span>
+                        <span>{i18n._(msg`Auto`)}</span>
+                      </button>
+                    )}
+                    <span className="text-[10px] text-[var(--on-surface-variant)]">
+                      {isCustomTaskId ? i18n._(msg`personalizado`) : i18n._(msg`autogenerado`)}
+                    </span>
+                  </div>
+                </div>
+                <input
+                  id="input-new-task-id"
+                  type="text"
+                  value={newTaskId}
+                  onChange={(e) => {
+                    setIsCustomTaskId(true);
+                    setNewTaskId(e.target.value);
+                  }}
+                  placeholder={newTaskTitle.trim() ? generateUniqueTaskId(newTaskTitle, markdownInput) : i18n._(msg`ej. mi-tarea (se autogenera del título)`)}
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-mono text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+
+              {/* Status Selection */}
+              <div id="div-app-new-task-status" className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--on-surface)] flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">pending_actions</span>
+                  <span>{i18n._(msg`Estado`)}</span>
+                </label>
+                <div className="relative">
+                  <select
+                    id="select-new-task-status"
+                    value={newTaskStatus}
+                    onChange={(e) => setNewTaskStatus(e.target.value as TaskStatus)}
+                    className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none cursor-pointer appearance-none pr-8"
+                  >
+                    <option value="backlog">📦 Backlog ({i18n._(msg`Predeterminado`)})</option>
+                    <option value="todo">⏳ Todo ({i18n._(msg`Por hacer`)})</option>
+                    <option value="in_progress">⚡ In Progress ({i18n._(msg`En progreso`)})</option>
+                    <option value="review">👀 Review ({i18n._(msg`En revisión`)})</option>
+                    <option value="done">✅ Done ({i18n._(msg`Completado`)})</option>
+                  </select>
+                  <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-[16px] text-[var(--on-surface-variant)] pointer-events-none">
+                    expand_more
+                  </span>
+                </div>
               </div>
 
               {/* Priority Selection */}

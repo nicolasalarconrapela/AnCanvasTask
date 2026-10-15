@@ -13,6 +13,7 @@ import {
   type DocumentEvent,
 } from '@sanity/sdk-react';
 import { getSanityConfig, SanityConfig, sanitizeSanityDocId } from '../services/sanityService';
+import { slugify } from '../utils/markdownSync';
 import {
   Database,
   Search,
@@ -519,9 +520,12 @@ function SdkDocumentCreator({
   onShowToast: (msg: string, type?: any) => void;
 }) {
   const createTask = useCreateDocument<any>({ documentType: 'task' });
-  const [title, setTitle] = useState<string>('');
-  const [priority, setPriority] = useState<string>('P3');
   const [groupTitle, setGroupTitle] = useState<string>('Desarrollo SDK');
+  const [title, setTitle] = useState<string>('');
+  const [description, setDescription] = useState<string>('');
+  const [customId, setCustomId] = useState<string>('');
+  const [status, setStatus] = useState<string>('backlog');
+  const [priority, setPriority] = useState<string>('P3');
   const [isCreating, setIsCreating] = useState<boolean>(false);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -537,16 +541,16 @@ function SdkDocumentCreator({
       const cleanWorkspaceId = activeWorkspaceId
         ? sanitizeSanityDocId(activeWorkspaceId.replace(/^workspace-/, ''))
         : 'default';
-      const rawTaskId = 'sdk-' + Date.now().toString(36);
+      const rawTaskId = customId.trim() || ('sdk-' + (slugify(title.trim()) || Date.now().toString(36)));
       const newHandle = await createTask({
         taskId: rawTaskId,
         title: title.trim(),
-        completed: false,
-        status: 'todo',
+        completed: status === 'done',
+        status: status,
         priority: priority as any,
-        groupTitle: groupTitle.trim(),
+        groupTitle: groupTitle.trim() || 'General',
         tags: ['sanity-app-sdk', 'reactive'],
-        description: `Creada en tiempo real con @sanity/sdk-react useCreateDocument a las ${new Date().toLocaleTimeString()}.`,
+        description: description.trim() || `Creada en tiempo real con @sanity/sdk-react useCreateDocument a las ${new Date().toLocaleTimeString()}.`,
         workspaceId: cleanWorkspaceId,
         workspace: {
           _type: 'reference',
@@ -557,6 +561,8 @@ function SdkDocumentCreator({
 
       onShowToast('Documento creado exitosamente mediante Sanity App SDK', 'success');
       setTitle('');
+      setDescription('');
+      setCustomId('');
       if (newHandle) {
         onCreated(newHandle);
       }
@@ -574,18 +580,75 @@ function SdkDocumentCreator({
         <span>Crear tarea con useCreateDocument</span>
       </div>
 
-      <div id="div-sanitysdkexplorer-26" className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div id="div-sanitysdkexplorer-27" className="md:col-span-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="text-[11px] font-mono uppercase text-neutral-400 block mb-1">
+            Sección / Grupo
+          </label>
+          <input
+            type="text"
+            value={groupTitle}
+            onChange={(e) => setGroupTitle(e.target.value)}
+            placeholder="ej: Backend, Desarrollo SDK..."
+            className="w-full bg-neutral-950 border border-neutral-800 px-3 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 font-mono"
+          />
+        </div>
+        <div>
           <label className="text-[11px] font-mono uppercase text-neutral-400 block mb-1">
             Título de la tarea
           </label>
           <input
             type="text"
+            required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="ej: Implementar mutaciones en tiempo real"
             className="w-full bg-neutral-950 border border-neutral-800 px-3 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 font-mono"
           />
+        </div>
+      </div>
+
+      <div>
+        <label className="text-[11px] font-mono uppercase text-neutral-400 block mb-1">
+          Descripción (opcional)
+        </label>
+        <textarea
+          rows={2}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Notas o descripción técnica..."
+          className="w-full bg-neutral-950 border border-neutral-800 px-3 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 font-mono resize-none"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label className="text-[11px] font-mono uppercase text-neutral-400 block mb-1">
+            ID de la tarea
+          </label>
+          <input
+            type="text"
+            value={customId}
+            onChange={(e) => setCustomId(e.target.value)}
+            placeholder={title.trim() ? ('sdk-' + slugify(title)) : 'ej: sdk-realtime-mutations'}
+            className="w-full bg-neutral-950 border border-neutral-800 px-3 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 font-mono"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] font-mono uppercase text-neutral-400 block mb-1">
+            Estado
+          </label>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="w-full bg-neutral-950 border border-neutral-800 px-3 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 font-mono"
+          >
+            <option value="backlog">📦 Backlog</option>
+            <option value="todo">⏳ Todo (Por hacer)</option>
+            <option value="in_progress">⚡ In Progress</option>
+            <option value="review">👀 Review</option>
+            <option value="done">✅ Done (Completado)</option>
+          </select>
         </div>
         <div id="div-sanity-sdk-creator-priority-group">
           <label className="text-[11px] font-mono uppercase text-neutral-400 block mb-1">

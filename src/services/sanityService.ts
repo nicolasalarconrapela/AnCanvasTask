@@ -3,6 +3,7 @@ import { getSyncSession, assertSyncSession, getStorageScope, invalidateSyncSessi
 import { createClient } from '@sanity/client';
 import type { Editor } from 'tldraw';
 import { scanTaskBlocks, restoreTaskFromMarkdown } from '../utils/markdownSync';
+import type { TaskStatus } from '../shapes/TaskShapeUtil';
 
 export interface TaskVisualState {
   taskId: string;
@@ -790,7 +791,7 @@ export interface SanityTestingTaskDocument {
   taskId: string;
   title: string;
   completed: boolean;
-  status: 'todo' | 'in_progress' | 'blocked' | 'done';
+  status: TaskStatus;
   priority: 'P0' | 'P1' | 'P2' | 'P3';
   groupTitle: string;
   workspaceId?: string;

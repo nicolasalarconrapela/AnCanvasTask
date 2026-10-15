@@ -957,8 +957,9 @@ export function addTaskToMarkdown(
   const lines = markdown.split(/\r?\n/);
   const { groupHeadings, parentHeadings } = scanTaskBlocks(markdown);
 
+  const isDone = status === 'done';
   const taskLines: string[] = [
-    `- [ ] ${cleanTitle}`,
+    `- [${isDone ? 'x' : ' '}] ${cleanTitle}`,
   ];
 
   if (payload.description && payload.description.trim()) {
