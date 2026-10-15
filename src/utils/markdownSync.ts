@@ -1782,3 +1782,44 @@ export function sanitizeTaskMetadataOrder(markdown: string): {
     reorderedCount,
   };
 }
+
+export interface TaskEnterSnippet {
+  snippetText: string;
+  cursorOffset: number;
+}
+
+/**
+ * Builds the canonical metadata snippet (Description / ID / Status / Priority)
+ * when pressing Enter on a task line in Live Markdown.
+ */
+export function buildTaskEnterSnippet(
+  taskLineText: string,
+  fullMarkdown: string
+): TaskEnterSnippet | null {
+  const taskMatch = taskLineText.match(/^(\s*)[-*+]\s*\[([ xX])\]\s*(.*)$/);
+  if (!taskMatch) return null;
+
+  const indent = taskMatch[1] || '';
+  const isCompleted = taskMatch[2].toLowerCase() === 'x';
+  const rawTitle = taskMatch[3].trim();
+  const subIndent = `${indent}  `;
+
+  const candidateId = generateUniqueTaskId(rawTitle, fullMarkdown);
+  const statusValue = isCompleted ? 'done' : 'backlog';
+
+  // Canonical order: Description -> ID -> Status -> Priority
+  const lines = [
+    `${subIndent}- Description: `,
+    `${subIndent}- ID: ${candidateId}`,
+    `${subIndent}- Status: ${statusValue}`,
+    `${subIndent}- Priority: P3`,
+  ];
+
+  const snippetText = '\n' + lines.join('\n');
+  const cursorOffset = 1 + subIndent.length + '- Description: '.length;
+
+  return {
+    snippetText,
+    cursorOffset,
+  };
+}

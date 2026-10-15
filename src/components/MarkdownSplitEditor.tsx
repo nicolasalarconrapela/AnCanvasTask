@@ -3,8 +3,8 @@ import CodeMirror, { ReactCodeMirrorRef, ExternalChange, Transaction } from '@ui
 import { diffChars } from 'diff';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { EditorView, Decoration, DecorationSet } from '@codemirror/view';
-import { RangeSetBuilder, StateField, EditorState } from '@codemirror/state';
+import { EditorView, Decoration, DecorationSet, keymap } from '@codemirror/view';
+import { RangeSetBuilder, StateField, EditorState, Prec, Extension } from '@codemirror/state';
 import { useLingui } from '@lingui/react';
 import { msg, plural } from '@lingui/core/macro';
 import {
@@ -15,6 +15,7 @@ import {
   isTaskIdLine,
   stripTaskIdsFromMarkdown,
   sanitizeTaskMetadataOrder,
+  buildTaskEnterSnippet,
 } from '../utils/markdownSync';
 import { SafeMarkdownNormalizerModal } from './SafeMarkdownNormalizerModal';
 
@@ -43,6 +44,60 @@ const hideTaskIdsExtension = StateField.define<DecorationSet>({
   },
   provide: (field) => EditorView.decorations.from(field),
 });
+
+function createEnterTaskSnippetExtension(): Extension {
+  return Prec.highest(
+    keymap.of([
+      {
+        key: 'Enter',
+        run(view: EditorView): boolean {
+          const selection = view.state.selection.main;
+          if (!selection.empty) return false;
+
+          const pos = selection.head;
+          const line = view.state.doc.lineAt(pos);
+          const lineText = line.text;
+
+          // Check if line contains a task checkbox
+          const checkboxIndex = lineText.indexOf(']');
+          if (checkboxIndex === -1) return false;
+
+          const col = pos - line.from;
+          // Only trigger if cursor is after the checkbox
+          if (col <= checkboxIndex) return false;
+
+          // Only trigger if cursor is at the end of the line (or only whitespace remains after cursor)
+          const afterCursor = lineText.slice(col);
+          if (afterCursor.trim().length > 0) return false;
+
+          // Prevent duplicate snippet if next line already starts with metadata
+          if (line.number < view.state.doc.lines) {
+            const nextLineText = view.state.doc.line(line.number + 1).text.trim();
+            if (
+              /^(?:[-*]\s*)?(?:Description|Descripci[oó]n|Desc|ID|Status|Priority|Blocked|Tags?|Progress)\s*:/i.test(
+                nextLineText
+              )
+            ) {
+              return false;
+            }
+          }
+
+          const result = buildTaskEnterSnippet(lineText, view.state.doc.toString());
+          if (!result) return false;
+
+          const insertPos = line.to;
+          view.dispatch({
+            changes: { from: insertPos, to: insertPos, insert: result.snippetText },
+            selection: { anchor: insertPos + result.cursorOffset },
+            scrollIntoView: true,
+          });
+
+          return true;
+        },
+      },
+    ])
+  );
+}
 
 interface MarkdownSplitEditorProps {
   value: string;
@@ -242,8 +297,11 @@ export function MarkdownSplitEditor({
     });
   }, []);
 
+  const enterTaskSnippetExt = useMemo(() => createEnterTaskSnippetExtension(), []);
+
   const extensions = useMemo(() => {
     const exts = [
+      enterTaskSnippetExt,
       markdown(),
       cursorTrackerPlugin,
       EditorView.lineWrapping,
@@ -252,7 +310,7 @@ export function MarkdownSplitEditor({
       exts.push(hideTaskIdsExtension);
     }
     return exts;
-  }, [cursorTrackerPlugin, showTaskIds]);
+  }, [enterTaskSnippetExt, cursorTrackerPlugin, showTaskIds]);
 
   return (
     <aside
@@ -433,7 +491,10 @@ export function MarkdownSplitEditor({
           <button
             id="btn-markdown-insert-task"
             type="button"
-            onClick={() => insertText('\n- [ ] Nueva tarea\n  - Status: backlog\n  - Priority: P3\n')}
+            onClick={() => {
+              const snippet = '\n- [ ] Nueva tarea\n  - Description: \n  - ID: nueva-tarea\n  - Status: backlog\n  - Priority: P3\n';
+              insertText(snippet, '\n- [ ] Nueva tarea\n  - Description: '.length);
+            }}
             className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-[var(--on-surface)] flex items-center gap-1 cursor-pointer transition-colors"
             title={i18n._(msg`Insertar nueva tarea pendiente (- [ ])`)}
           >
@@ -444,7 +505,10 @@ export function MarkdownSplitEditor({
           <button
             id="btn-markdown-insert-section"
             type="button"
-            onClick={() => insertText('\n## Nueva Sección\n\n- [ ] Tarea inicial\n  - Status: backlog\n  - Priority: P3\n')}
+            onClick={() => {
+              const snippet = '\n## Nueva Sección\n\n- [ ] Tarea inicial\n  - Description: \n  - ID: tarea-inicial\n  - Status: backlog\n  - Priority: P3\n';
+              insertText(snippet, '\n## Nueva Sección\n\n- [ ] Tarea inicial\n  - Description: '.length);
+            }}
             className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-[var(--on-surface)] flex items-center gap-1 cursor-pointer transition-colors"
             title={i18n._(msg`Insertar nueva sección (## Sección)`)}
           >

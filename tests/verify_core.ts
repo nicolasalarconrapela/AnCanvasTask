@@ -18,6 +18,7 @@ import {
   scanNotesFromMarkdown,
   syncNotesToMarkdown,
   maskHtmlComments,
+  buildTaskEnterSnippet,
 } from '../src/utils/markdownSync';
 import { CustomNoteShapeUtil } from '../src/shapes/TaskShapeUtil';
 import {
@@ -927,6 +928,59 @@ assert(
 );
 
 console.log('   ✓ CustomNoteShapeUtil y soporte completo de comentarios verificado.');
+
+// 23. Verificando creación de snippet Description/ID/Status/Priority al pulsar Enter en Live Markdown
+console.log('23. Verificando creación de snippet Description/ID/Status/Priority al pulsar Enter...');
+const enterSampleDoc = `# Proyecto
+## Backend
+- [ ] Tarea existente
+  - ID: tarea-existente
+`;
+
+// Test pending task line
+const snippet1 = buildTaskEnterSnippet('- [ ] Nueva funcionalidad', enterSampleDoc);
+assert(snippet1 !== null, 'buildTaskEnterSnippet debe devolver un snippet para tarea');
+assert(snippet1.snippetText.includes('- Description: '), 'Debe incluir Description:');
+assert(snippet1.snippetText.includes('- ID: nueva-funcionalidad'), 'Debe generar ID derivado del título');
+assert(snippet1.snippetText.includes('- Status: backlog'), 'Debe asignar status backlog para - [ ]');
+assert(snippet1.snippetText.includes('- Priority: P3'), 'Debe asignar prioridad P3 por defecto');
+
+// Test canonical order: Description -> ID -> Status -> Priority
+const enterDescIdx = snippet1.snippetText.indexOf('Description:');
+const enterIdIdx = snippet1.snippetText.indexOf('ID:');
+const enterStatusIdx = snippet1.snippetText.indexOf('Status:');
+const enterPrioIdx = snippet1.snippetText.indexOf('Priority:');
+assert(enterDescIdx < enterIdIdx, 'Description debe ir antes de ID');
+assert(enterIdIdx < enterStatusIdx, 'ID debe ir antes de Status');
+assert(enterStatusIdx < enterPrioIdx, 'Status debe ir antes de Priority');
+
+// Test cursor offset landing right after '- Description: '
+const textUpToCursor = snippet1.snippetText.slice(0, snippet1.cursorOffset);
+assert(textUpToCursor.endsWith('- Description: '), 'Cursor debe colocarse justo después de "- Description: "');
+
+// Test completed task [x]
+const snippetDone = buildTaskEnterSnippet('- [x] Tarea finalizada', enterSampleDoc);
+assert(snippetDone !== null);
+assert(snippetDone.snippetText.includes('- Status: done'), 'Tarea completada debe tener status: done');
+
+// Test indented subtask
+const snippetSub = buildTaskEnterSnippet('  - [ ] Subtarea 1', enterSampleDoc);
+assert(snippetSub !== null);
+assert(snippetSub.snippetText.includes('    - Description: '), 'Subtarea debe conservar indentación relativa');
+assert(snippetSub.snippetText.includes('    - ID: subtarea-1'), 'Subtarea debe tener ID indentado');
+
+// Test duplicate ID deduplication
+const snippetDup = buildTaskEnterSnippet('- [ ] Tarea existente', enterSampleDoc);
+assert(snippetDup !== null);
+assert(snippetDup.snippetText.includes('- ID: tarea-existente-2'), 'ID duplicado debe ser desambiguado');
+
+// Test non-task line returns null
+const snippetHeading = buildTaskEnterSnippet('## Sección', enterSampleDoc);
+assert.strictEqual(snippetHeading, null, 'No debe generar snippet para un encabezado');
+const snippetText = buildTaskEnterSnippet('Texto normal', enterSampleDoc);
+assert.strictEqual(snippetText, null, 'No debe generar snippet para texto normal');
+
+console.log('   ✓ Snippet canónico al pulsar Enter verificado correctamente.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 process.exit(0);
