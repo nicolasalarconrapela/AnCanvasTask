@@ -24,6 +24,7 @@ import { getSyncSession, assertSyncSession } from './syncSessionService';
 import {
   deleteTaskFromMarkdown,
   restoreTaskFromMarkdown,
+  isTaskCommentedOut,
 } from '../utils/markdownSync';
 
 export type SyncDifferenceType =
@@ -454,6 +455,7 @@ export async function analyzeSyncDifferences(
       d.workspaceId === item.workspaceId && d.taskId === item.localData?.taskId &&
       (d.documentKey === `${item.branchName}::${localDoc?.id}` || d.branchName === item.branchName && d.documentPath === item.documentPath));
     if (deletedTask) item.remoteData = deletedTask;
+
     const deleted = remoteSanityDocs.some(d => d.syncDeleted && (item.entityType === 'workspace'
       ? d.workspaceId === item.workspaceId
       : d === deletedTask));
@@ -461,7 +463,7 @@ export async function analyzeSyncDifferences(
     item.requiresRestoration ||= deleted || (item.entityType === 'workspace' && !!base &&
       (item.diffType === 'only_local' || item.diffType === 'only_remote')) ||
       (item.entityType === 'task' && (item.diffType === 'only_local' || item.diffType === 'only_remote') &&
-        !!baseTask && taskFields(baseTask.content).some(t => t.taskId === (item.localData?.taskId || item.remoteData?.taskId)));
+        !!baseTask && taskFields(baseTask.content, false).some(t => t.taskId === (item.localData?.taskId || item.remoteData?.taskId)));
   }
   for (const item of items.filter(i => i.entityType === 'workspace')) {
     item.requiresRestoration ||= items.some(i => i.workspaceId === item.workspaceId && i.requiresRestoration);
@@ -506,8 +508,11 @@ export async function resolveSyncItem(
   const session = getSyncSession(config);
   if (!session || workspaceStore.scope !== session.scope) throw new Error('La cuenta de sincronizacion ha cambiado');
   assertSyncSession(session);
-  if (item.requiresRestoration && !manual) throw new SyncConflict('La restauración requiere una acción manual');
-  const push = (document: any) => manual && item.requiresRestoration
+  const remoteDocument = item.remoteWorkspace?.branches.find(b => b.name === item.branchName)?.taskDocuments.find(d => d.path === item.documentPath);
+  const requiresRestoration = item.requiresRestoration || manual && item.entityType === 'task' && !!remoteDocument &&
+    isTaskCommentedOut(remoteDocument.content, item.localData?.taskId || item.remoteData?.taskId, item.localData?.title || item.remoteData?.title);
+  if (requiresRestoration && !manual) throw new SyncConflict('La restauración requiere una acción manual');
+  const push = (document: any) => manual && requiresRestoration
     ? documentSync.restore(document, config, item.entityType === 'task' ? item.remoteData || null : item.remoteWorkspaceDocument || null) : documentSync.write(document, config);
   const pendingBefore = documentSync.pendingKeys(session);
   const discardAfterSuccess: string[] = [];
@@ -527,7 +532,7 @@ export async function resolveSyncItem(
       const intention = buildWorkspaceSyncDocument(local);
       const document = strategy === 'merge'
         ? await documentSync.write({ ...intention, _rev: item.localData._rev }, config)
-        : manual && !item.requiresRestoration
+        : manual && !requiresRestoration
           ? await documentSync.resolve(intention, config, item.remoteWorkspaceDocument || workspaceStore.remoteDocuments?.find(d => d._id === id) || null)
           : await push(intention);
       resolved = normalizeSanityWorkspaceDoc(document);
@@ -571,12 +576,12 @@ export async function resolveSyncItem(
         workspaceId: ws.id, documentKey, branchName: branch.name, documentPath: doc.path };
       task = strategy === 'merge'
         ? await documentSync.write({ ...mergeSyncValue(base, intention, item.remoteData), _rev: base._rev }, config, base)
-        : manual && !item.requiresRestoration
+        : manual && !requiresRestoration
           ? await documentSync.write({ ...intention, _rev: item.remoteData?._rev }, config, item.remoteData || null)
           : await push(intention);
     }
     resolved = { ...ws, branches: ws.branches.map(b => b.name === branch.name ? { ...b,
-      taskDocuments: b.taskDocuments.map(d => d.id === doc.id ? { ...d, content: applyTaskToMarkdown(d.content, task) } : d) } : b) };
+      taskDocuments: b.taskDocuments.map(d => d.id === doc.id ? { ...d, content: applyTaskToMarkdown(d.content, task, manual && !!requiresRestoration) } : d) } : b) };
     const parent = documentSync.base(ws._id || `workspace-${ws.id}`, session);
     if (strategy !== 'keep_remote' && parent?._rev) { baseline = normalizeSanityWorkspaceDoc(parent); }
   } else if (item.entityType === 'task_document') {
@@ -636,12 +641,12 @@ export async function resolveSyncItem(
       const originalBase = workspaceStore.remoteDocuments?.find(d => d._id === id) || documentSync.base(id, session);
       const cloud = buildWorkspaceSyncDocument(updatedWs);
       const chosenCloudDocument = cloud.branches.find((b: any) => b.name === branchName)?.taskDocuments.find((d: any) => d.id === finalDoc.id) || finalDoc;
-      const intention = item.requiresRestoration ? cloud
+      const intention = requiresRestoration ? cloud
         : { ...originalBase, _id: id, _type: 'workspace', _rev: ws._rev,
           branches: (originalBase?.branches || updatedWs.branches).map((b: any) => b.name !== branchName ? b : { ...b,
             taskDocuments: [...b.taskDocuments.filter((d: any) => d.id !== finalDoc.id), chosenCloudDocument] }) };
       let selectedBase = workspaceStore.remoteDocuments?.find(d => d._id === id) || documentSync.base(id, session);
-      if (manual && !item.requiresRestoration && selectedBase) {
+      if (manual && !requiresRestoration && selectedBase) {
         selectedBase = structuredClone(selectedBase);
         const selectedBranch = selectedBase.branches.find((b: any) => b.name === branchName);
         if (selectedBranch) {
@@ -649,7 +654,7 @@ export async function resolveSyncItem(
           if (item.remoteData) selectedBranch.taskDocuments.push(structuredClone(item.remoteData));
         }
       }
-      const document = item.requiresRestoration ? await push(intention)
+      const document = requiresRestoration ? await push(intention)
         : await documentSync.write(intention, config, selectedBase || null);
       baseline = normalizeSanityWorkspaceDoc(document);
       resolved = { ...updatedWs, _rev: baseline._rev };

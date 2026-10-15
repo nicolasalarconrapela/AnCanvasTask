@@ -698,7 +698,10 @@ export default function App() {
 
   const handleAutoAssignAllTaskIds = useCallback(() => {
     setMarkdownInput((curr) => {
-      const { updatedMarkdown, assignedCount } = autoAssignAllMissingTaskIds(curr);
+      const store = workspaceStoreRef.current;
+      const ws = getActiveWorkspace(store), branch = getActiveBranch(ws), doc = getActiveDocument(branch);
+      const base = store.remoteBase?.find(w => w.id === ws.id)?.branches.find(b => b.name === branch.name)?.taskDocuments.find(d => d.id === doc.id);
+      const { updatedMarkdown, assignedCount } = autoAssignAllMissingTaskIds(curr, base?.content);
       if (assignedCount > 0) {
         pushToast(i18n._(msg`Se asignaron IDs automáticos a ${assignedCount} tareas`), 'success');
       } else {
@@ -1048,6 +1051,42 @@ export default function App() {
   const blockedWorkspaceIdsRef = useRef(new Set<string>());
   const refreshRemoteRef = useRef<() => Promise<void>>(async () => {});
 
+  const acknowledgeWorkspaceSave = useCallback((sent: Workspace, document: any, session: NonNullable<ReturnType<typeof getSyncSession>>) => {
+    if (!document) return;
+    assertSyncSession(session);
+    const previous = workspaceStoreRef.current;
+    if (previous.scope !== session.scope) return;
+    const current = previous.workspaces.find(w => w.id === sent.id);
+    if (!current) return;
+    const local = { ...current, branches: current.branches.map(b => ({ ...b, taskDocuments: b.taskDocuments.map(d =>
+      `${current.id}::${b.name}::${d.id}` === activeDocKeyRef.current ? { ...d, content: markdownRef.current } : d) })) };
+    const remote = normalizeSanityWorkspaceDoc(document);
+    const masks = local.localOnlyDeletions || [];
+    const merged = mergeSyncValue(applyLocalDeletions(sent, masks), local, applyLocalDeletions(remote, masks), '/workspace') as Workspace;
+    const resolved = { ...merged,
+      activeBranchName: merged.branches.some(b => b.name === local.activeBranchName) ? local.activeBranchName : merged.activeBranchName,
+      branches: merged.branches.map(b => {
+        const selected = local.branches.find(branch => branch.name === b.name)?.activeDocumentId;
+        return { ...b, activeDocumentId: b.taskDocuments.some(d => d.id === selected) ? selected! : b.activeDocumentId };
+      }) };
+
+    const next = { ...previous, workspaces: previous.workspaces.map(w => w.id === sent.id ? resolved : w),
+      remoteBase: [...(previous.remoteBase || []).filter(w => w.id !== sent.id), remote],
+      remoteDocuments: [...(previous.remoteDocuments || []).filter(d => d._id !== document._id), document] };
+    const doc = resolved.branches.flatMap(b => b.taskDocuments.map(d => ({ key: `${resolved.id}::${b.name}::${d.id}`, doc: d })))
+      .find(value => value.key === activeDocKeyRef.current)?.doc;
+    if (doc) {
+      if (markdownStoreSyncDebounceRef.current) clearTimeout(markdownStoreSyncDebounceRef.current);
+      if (markdownEditorDebounceRef.current) clearTimeout(markdownEditorDebounceRef.current);
+      pendingMarkdownRef.current = null;
+      markdownRef.current = doc.content;
+      setMarkdownInput(doc.content);
+    }
+    workspaceStoreRef.current = next;
+    saveWorkspaceStore(next);
+    setWorkspaceStore(next);
+  }, []);
+
   // Dynamic profile / configuration sync listener (INV-02, INV-07)
   useEffect(() => {
     const handleConfigChange = (e: any) => {
@@ -1107,7 +1146,9 @@ export default function App() {
               assertSyncSession(session);
               syncReadyRef.current = false;
               setSyncReady(false);
-              if (session.config.token) await documentSync.flush(session).catch(error => {
+              if (session.config.token) await documentSync.flush(session, (sent, document) => {
+                if (document._type === 'workspace') acknowledgeWorkspaceSave(normalizeSanityWorkspaceDoc(sent), document, session);
+              }).catch(error => {
                 if (!(error instanceof SyncConflict)) throw error;
               });
               let docs = await fetchSanityDocumentsList(session.config, true, false, false);
@@ -1942,7 +1983,7 @@ export default function App() {
         void saveWorkspaceToSanity(updatedWs, session.config).then(res => {
           if (getSyncSession() !== session) return;
           if (!res.ok) pushToast(res.message, 'warning');
-          else void refreshRemoteRef.current();
+          else { acknowledgeWorkspaceSave(updatedWs, res.document, session); void refreshRemoteRef.current(); }
         });
       }
       pushToast(i18n._(msg`Workspace "${updatedWs.name}" actualizado`), 'success');
@@ -2360,7 +2401,7 @@ export default function App() {
       const session = getSyncSession(config);
       const res = await saveWorkspaceToSanity(ws, config);
       if (getSyncSession(config) !== session) return;
-      if (res.ok) void refreshRemoteRef.current();
+      if (res.ok && session) { acknowledgeWorkspaceSave(ws, res.document, session); void refreshRemoteRef.current(); }
       if (res.ok) {
         pushToast(res.message, 'success');
       } else {
@@ -3989,7 +4030,7 @@ export default function App() {
     const result = await saveWorkspaceToSanity(activeWorkspace, session.config);
     if (getSyncSession() !== session) return;
     pushToast(result.message, result.ok ? 'success' : 'error');
-    if (result.ok) await refreshRemoteRef.current();
+    if (result.ok) { acknowledgeWorkspaceSave(activeWorkspace, result.document, session); await refreshRemoteRef.current(); }
   }, [activeWorkspace, pushToast]);
 
   // Local state stays current; only hydrated sessions may publish after a pause.
@@ -4003,7 +4044,8 @@ export default function App() {
         if (!syncReadyRef.current || blockedWorkspaceIdsRef.current.has(activeWorkspace.id)) return;
         const baseWs = workspaceStore.remoteBase?.find(w => w.id === activeWorkspace.id);
         if (JSON.stringify(syncComparable(baseWs && applyLocalDeletions(baseWs, activeWorkspace.localOnlyDeletions))) === JSON.stringify(syncComparable(activeWorkspace))) return;
-        const normalized = autoAssignAllMissingTaskIds(markdownInput).updatedMarkdown;
+        const baseDocument = baseWs?.branches.find(b => b.name === activeBranch.name)?.taskDocuments.find(d => d.id === activeDocument.id);
+        const normalized = autoAssignAllMissingTaskIds(markdownInput, baseDocument?.content).updatedMarkdown;
         if (normalized !== markdownInput) { setMarkdownInput(normalized); return; }
         if (!baseWs && isEmptyWorkspacePlaceholder(activeWorkspace)) return;
         const snapshot = { ...activeWorkspace, branches: activeWorkspace.branches.map(b => b.name === activeBranch.name
@@ -4012,6 +4054,7 @@ export default function App() {
         const result = await saveWorkspaceToSanity(snapshot, session.config);
         assertSyncSession(session);
         if (!result.ok) throw result.conflict ? new SyncConflict(result.message) : new Error(result.message);
+        acknowledgeWorkspaceSave(snapshot, result.document, session);
         await refreshRemoteRef.current();
       } catch (error: any) {
         if (getSyncSession() === session) {

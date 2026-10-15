@@ -130,6 +130,20 @@ export function maskHtmlComments(markdown: string): string {
   });
 }
 
+// A commented task is deliberately inactive, including comments still being typed.
+export function isTaskCommentedOut(markdown: string, taskId: string, title?: string): boolean {
+  for (const comment of markdown.matchAll(/<!--([\s\S]*?)(?:-->|$)/g)) {
+    const entries = comment[1].split(/(?=^[ \t]*[-*][ \t]*\[[ xX]\])/m);
+    for (const entry of entries) {
+      const id = entry.match(/^\s*(?:[-*]\s*)?ID\s*:\s*(.+)$/im)?.[1].trim();
+      const commentedTitle = entry.match(/^[ \t]*[-*][ \t]*\[[ xX]\][ \t]*([^\r\n]*)/m)?.[1].trim();
+      if (id ? id === taskId : commentedTitle !== undefined &&
+        (commentedTitle === title?.trim() || slugify(commentedTitle) === taskId)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Parses all task blocks and their associated groups from a Markdown string,
  * detecting unknown metadata, headings, and lines without modifying the document.
@@ -173,7 +187,6 @@ export function scanTaskBlocks(markdown: string): {
     const headingMatch = trimmed.match(/^([#]{1,6})\s+(.+)$/);
     if (headingMatch) {
       if (currentBlock) {
-        currentBlock.endLineIndex = i - 1;
         taskBlocks.push(currentBlock);
         currentBlock = null;
       }
@@ -235,7 +248,6 @@ export function scanTaskBlocks(markdown: string): {
     const taskMatch = line.match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/);
     if (taskMatch && (!currentBlock || !isIndented) && !isMetadataLine) {
       if (currentBlock) {
-        currentBlock.endLineIndex = i - 1;
         taskBlocks.push(currentBlock);
       }
       taskCounter++;
@@ -821,15 +833,23 @@ export function updateTaskInMarkdown(markdown: string, taskId: string, updates: 
   if (!block) return markdown;
   const taskLine = lines[block.taskLineIndex].match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/)!;
   const completed = updates.completed ?? (updates.status !== undefined ? updates.status === 'done' : /[xX]/.test(taskLine[2]));
-  lines[block.taskLineIndex] = `${taskLine[1]}${completed ? 'x' : ' '}${taskLine[3]}${updates.title ?? taskLine[4]}`;
+  const inlineComments = taskLine[4].match(/<!--[\s\S]*?(?:-->|$)/g) || [];
+  const title = updates.title === undefined ? taskLine[4] : updates.title + (inlineComments.length ? ' ' + inlineComments.join(' ') : '');
+  lines[block.taskLineIndex] = `${taskLine[1]}${completed ? 'x' : ' '}${taskLine[3]}${title}`;
   const body = lines.slice(block.taskLineIndex + 1, block.endLineIndex + 1);
   const metadata = (pattern: RegExp, label: string, value: string | undefined, insert = true) => {
     if (value === undefined) return;
-    const index = body.findIndex(line => pattern.test(line));
+    const context = [...lines.slice(0, block.taskLineIndex + 1), ...body].join('\n');
+    const visibleBody = maskHtmlComments(context).split('\n').slice(block.taskLineIndex + 1);
+    const index = visibleBody.findIndex(line => pattern.test(line));
     if (index >= 0) {
       if (value) body[index] = body[index].replace(pattern, (_, prefix) => prefix + value);
       else body.splice(index, 1);
-    } else if (value && insert) body.unshift(`${block.indentation}  - ${label}: ${value}`);
+    } else if (value && insert) {
+      const firstVisible = visibleBody.findIndex(line => line.trim());
+      if (firstVisible >= 0 || maskHtmlComments(context + '\n__metadata__').endsWith('__metadata__'))
+        body.splice(firstVisible >= 0 ? firstVisible : body.length, 0, `${block.indentation}  - ${label}: ${value}`);
+    }
   };
   const statusToSet = updates.status !== undefined
     ? updates.status
@@ -847,9 +867,10 @@ export function updateTaskInMarkdown(markdown: string, taskId: string, updates: 
   metadata(/^(\s*(?:[-*]\s*)?ID\s*:\s*).*$/i, 'ID', updates.id?.trim());
 
   if (updates.subtasks?.items) {
+    const visibleBody = maskHtmlComments([...lines.slice(0, block.taskLineIndex + 1), ...body].join('\n')).split('\n').slice(block.taskLineIndex + 1);
     let subIdx = 0;
     for (let i = 0; i < body.length; i++) {
-      const bTrimmed = body[i].trim();
+      const bTrimmed = visibleBody[i].trim();
       const match = bTrimmed.match(/^([-*]\s*\[)([ xX])(\]\s*.*)$/);
       if (match && subIdx < updates.subtasks.items.length) {
         const targetSub = updates.subtasks.items[subIdx];
@@ -862,7 +883,7 @@ export function updateTaskInMarkdown(markdown: string, taskId: string, updates: 
 
   // Stable sort body lines according to canonical metadata order: Description -> ID -> Status -> Priority -> etc.
   const indexed = body.map((line, idx) => ({ line, idx, rank: getMetadataLineRank(line) }));
-  indexed.sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.idx - b.idx));
+  if (!lines.slice(block.taskLineIndex, block.endLineIndex + 1).join('\n').includes('<!--')) indexed.sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.idx - b.idx));
   const sortedBody = indexed.map((item) => item.line);
 
   lines.splice(block.taskLineIndex + 1, block.endLineIndex - block.taskLineIndex, ...sortedBody);
@@ -884,9 +905,10 @@ export function toggleSubtaskInMarkdown(
   const block = findMatchingTaskBlock(taskBlocks, taskId, taskTitle);
   if (!block) return markdown;
 
+  const visibleLines = maskHtmlComments(markdown).split(/\r?\n/);
   let currentSubtaskIdx = 0;
   for (let i = block.taskLineIndex + 1; i <= block.endLineIndex; i++) {
-    const line = lines[i];
+    const line = visibleLines[i];
     const trimmed = line.trim();
     const isSubLine = line.startsWith(' ') || line.startsWith('\t');
     if (isSubLine) {
@@ -1019,7 +1041,9 @@ export function deleteTaskFromMarkdown(
   }
 
   const countToRemove = targetBlock.endLineIndex - targetBlock.taskLineIndex + 1;
-  lines.splice(targetBlock.taskLineIndex, countToRemove);
+  const original = lines.slice(targetBlock.taskLineIndex, targetBlock.endLineIndex + 1);
+  const comments = original.join('\n').match(/<!--[\s\S]*?(?:-->|$)/g) || [];
+  lines.splice(targetBlock.taskLineIndex, countToRemove, ...comments);
 
   return lines.join('\n').replace(/\n{3,}/g, '\n\n');
 }
@@ -1198,13 +1222,16 @@ export function assignTaskIdToTask(
 /**
  * Automatically generates and assigns unique IDs to all tasks in Markdown that do not have an ID.
  */
-export function autoAssignAllMissingTaskIds(markdown: string): {
+export function autoAssignAllMissingTaskIds(markdown: string, baseMarkdown?: string): {
   updatedMarkdown: string;
   assignedCount: number;
   assignedTasks: Array<{ taskId: string; title: string }>;
 } {
   const { taskBlocks } = scanTaskBlocks(markdown);
   const missingBlocks = taskBlocks.filter((b) => !b.detectedId);
+  const baseBlocks = baseMarkdown === undefined ? [] : scanTaskBlocks(baseMarkdown).taskBlocks;
+  const sharedTitle = taskBlocks.length === 1 && baseBlocks.length === 1 && !baseBlocks[0].detectedId &&
+    taskBlocks[0].groupTitle === baseBlocks[0].groupTitle ? baseBlocks[0].detectedTitle : undefined;
 
   if (missingBlocks.length === 0) {
     return { updatedMarkdown: markdown, assignedCount: 0, assignedTasks: [] };
@@ -1222,7 +1249,7 @@ export function autoAssignAllMissingTaskIds(markdown: string): {
   const sortedBlocks = [...missingBlocks].sort((a, b) => b.taskLineIndex - a.taskLineIndex);
 
   for (const block of sortedBlocks) {
-    const baseSlug = slugify(block.detectedTitle);
+    const baseSlug = slugify(sharedTitle ?? block.detectedTitle);
     let candidate = baseSlug;
     let counter = 2;
     while (existingIdSet.has(candidate.toLowerCase())) {

@@ -22,6 +22,7 @@ independent._id = 'workspace-q'; independent.workspaceId = 'q'; independent.name
 documents.set(independent._id, independent);
 const listeners = new Set();
 let revision = 0, mutations = 0;
+let holdNextWorkspaceWrite = false, releaseWorkspaceWrite;
 const api = createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
   response.setHeader('Access-Control-Allow-Origin', request.headers.origin || '*');
@@ -53,6 +54,10 @@ const api = createServer(async (request, response) => {
   if (url.pathname.includes('/data/mutate')) {
     let raw = ''; for await (const chunk of request) raw += chunk;
     const body = JSON.parse(raw), transactionId = `test-${++revision}`;
+    if (holdNextWorkspaceWrite && body.mutations.some(mutation => mutation.patch?.id === 'workspace-w')) {
+      holdNextWorkspaceWrite = false;
+      await new Promise(resolve => { releaseWorkspaceWrite = resolve; });
+    }
     for (const mutation of body.mutations) {
       const old = documents.get(mutation.patch?.id || mutation.create?._id);
       if (mutation.create ? old : !old || old._rev !== mutation.patch.ifRevisionID) {
@@ -89,10 +94,13 @@ async function openBrowser(executable, port) {
   const processHandle = spawn(executable, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     '--disable-sync', '--disable-features=msImplicitSignin',
     `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
-  const browser = { processHandle, errors: [] }; browsers.push(browser);
   let pages;
   await waitUntil(async () => { try { pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); return pages.length; } catch { return false; } }, 'Browser did not start');
-  browser.socket = new WebSocket(pages.find(p => p.type === 'page').webSocketDebuggerUrl);
+  return attachPage(processHandle, pages.find(p => p.type === 'page'));
+}
+async function attachPage(processHandle, page, inheritedWriter) {
+  const browser = { processHandle, errors: [] }; browsers.push(browser);
+  browser.socket = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { browser.socket.onopen = resolve; browser.socket.onerror = reject; });
   let sequence = 0; const pending = new Map();
   browser.send = (method, params = {}) => new Promise((resolve, reject) => {
@@ -120,7 +128,7 @@ async function openBrowser(executable, port) {
   await browser.send('Runtime.enable'); await browser.send('Page.enable');
   await browser.send('Fetch.enable', { patterns: [{ urlPattern: '*sanity.io*' }] });
   const config = { projectId: 'mockproject', dataset: 'production', apiVersion: '2024-03-01', token: 'fake-a', useCdn: false };
-  await browser.send('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('antaskcanvas_sanity_config',${JSON.stringify(JSON.stringify(config))});localStorage.setItem('antask_welcome_dismissed','true');localStorage.setItem('antask_split_view','true');window.syncEvents=[];const originalInfo=console.info;console.info=function(...args){if(args[0]==='[sync]')window.syncEvents.push(args[1]);return originalInfo.apply(this,args)};` });
+  await browser.send('Page.addScriptToEvaluateOnNewDocument', { source: `${inheritedWriter ? `if(!sessionStorage.getItem('antask_sync_writer'))sessionStorage.setItem('antask_sync_writer',${JSON.stringify(inheritedWriter)});` : ''}localStorage.setItem('antaskcanvas_sanity_config',${JSON.stringify(JSON.stringify(config))});localStorage.setItem('antask_welcome_dismissed','true');localStorage.setItem('antask_split_view','true');window.syncEvents=[];const originalInfo=console.info;console.info=function(...args){if(args[0]==='[sync]')window.syncEvents.push(args[1]);return originalInfo.apply(this,args)};` });
   await browser.send('Page.navigate', { url: 'http://127.0.0.1:4189/' });
   await waitUntil(() => browser.evaluate("document.body?.innerText.includes('Write report')"), 'Shared task did not load');
   await browser.evaluate("if(!document.querySelector('.cm-content'))document.querySelector('#btn-toggle-split-view-top')?.click()");
@@ -137,6 +145,27 @@ try {
   const a = await openBrowser(edge, 9338), b = await openBrowser(chrome, 9339);
   await waitUntil(() => Promise.resolve(listeners.size >= 2), 'Both realtime streams did not connect');
   await pause(500);
+  const writer = await a.evaluate("sessionStorage.getItem('antask_sync_writer')");
+  const created = await a.send('Target.createTarget', { url: 'about:blank' });
+  const pages = await (await fetch('http://127.0.0.1:9338/json/list')).json();
+  const tab = await attachPage({ kill() {} }, pages.find(page => page.id === created.targetId), writer);
+  assert.notEqual(await tab.evaluate("sessionStorage.getItem('antask_sync_writer')"), writer, 'A new tab reused its inherited writer identity');
+  await Promise.all([a.edit('Write report', 'Draft Write report'), tab.edit('Write report', 'Write report today')]);
+  await waitUntil(async () => (await a.content()).includes('Draft Write report today') && await a.content() === await tab.content() &&
+    await a.content() === await b.content(), 'Same-profile tabs did not converge after compatible edits');
+  const tabWriter = await tab.evaluate("sessionStorage.getItem('antask_sync_writer')");
+  await tab.send('Page.reload');
+  await waitUntil(() => tab.evaluate("performance.getEntriesByType('navigation')[0]?.type==='reload' && !!document.querySelector('.cm-content')").catch(() => false), 'Reloaded tab did not load');
+  assert.equal(await tab.evaluate("sessionStorage.getItem('antask_sync_writer')"), tabWriter, 'Reload changed the offline journal writer');
+  await a.send('Target.closeTarget', { targetId: created.targetId });
+  browsers.splice(browsers.indexOf(tab), 1); tab.socket.close();
+  holdNextWorkspaceWrite = true;
+  await a.edit('Write report', 'Write report pending');
+  await waitUntil(() => Promise.resolve(!!releaseWorkspaceWrite), 'The delayed save did not start');
+  await a.edit('pending', 'pending complete');
+  releaseWorkspaceWrite();
+  await waitUntil(async () => await a.content() === await b.content() &&
+    (await a.content()).includes('Draft Write report pending complete today'), 'Typing during an acknowledged save duplicated or lost text');
   // A conflict in one workspace must preserve both versions and allow another workspace to pull.
   await a.edit('Write report', 'Alpha report'); await b.edit('Write report', 'Beta report');
   await waitUntil(async () => (await a.evaluate("window.syncEvents.some(e=>e.result==='conflict')")) ||
@@ -145,11 +174,16 @@ try {
   assert(conflictContents.some(content => content.includes('Alpha report')));
   assert(conflictContents.some(content => content.includes('Beta report')));
   const previous = documents.get('workspace-q'), updated = { ...previous, name: 'Independent remote rename', _rev: 'independent-new' };
+  const commented = '<!--\n' + previous.branches[0].taskDocuments[0].content + '\n-->';
+  updated.branches = structuredClone(previous.branches);
+  updated.branches[0].taskDocuments[0].content = commented;
+  documents.set('task-q-stale', { _id: 'task-q-stale', _type: 'task', _rev: 'stale-task', syncOwner: 'user-a',
+    workspaceId: 'q', documentKey: 'main::d', taskId: 'x', title: 'Write report', completed: false, priority: 'P1', groupTitle: 'General' });
   documents.set(updated._id, updated);
   for (const listener of listeners) listener.write(`event: mutation\ndata: ${JSON.stringify({
     type: 'mutation', documentId: updated._id, transition: 'update', result: updated, previous,
   })}\n\n`);
-  const independentPulled = browser => browser.evaluate("Object.entries(localStorage).filter(([key])=>key.startsWith('antask_workspaces_v2:')).flatMap(([,value])=>JSON.parse(value).workspaces).some(ws=>ws.id==='q'&&ws.name==='Independent remote rename')");
+  const independentPulled = browser => browser.evaluate(`Object.entries(localStorage).filter(([key])=>key.startsWith('antask_workspaces_v2:')).flatMap(([,value])=>JSON.parse(value).workspaces).some(ws=>ws.id==='q'&&ws.name==='Independent remote rename'&&ws.branches[0].taskDocuments[0].content===${JSON.stringify(commented)})`);
   await waitUntil(async () => await independentPulled(a) && await independentPulled(b), 'A conflicted workspace blocked an independent pull');
   const durableAtPagehide = [];
   for (const [browser, name] of [[a, 'Edge'], [b, 'Chrome']]) {
@@ -163,7 +197,7 @@ try {
         .flatMap(branch=>branch.taskDocuments).some(doc=>doc.content===${JSON.stringify(sentinel)});
     })()`));
   }
-  console.log(JSON.stringify({ browsers: ['Edge', 'Chrome'], realConflictPreserved: true, independentPullDuringConflict: true, durableAtPagehide }));
+  console.log(JSON.stringify({ browsers: ['Edge', 'Chrome'], typingDuringSave: true, commentedProjectionSuppressed: true, sameProfileTabs: true, inheritedWriterIsolated: true, reloadWriterPreserved: true, realConflictPreserved: true, independentPullDuringConflict: true, durableAtPagehide }));
   assert.deepEqual(durableAtPagehide, [true, true], 'Live editor input is absent from durable storage at pagehide');
 } catch(error) {
   for (const browser of browsers) {

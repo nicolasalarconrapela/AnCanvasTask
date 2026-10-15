@@ -1,6 +1,6 @@
 import { createClient } from '@sanity/client';
 import { diffLines, diffWordsWithSpace } from 'diff';
-import { scanTaskBlocks, addTaskToMarkdown, updateTaskInMarkdown, deleteTaskFromMarkdown, moveTaskToGroupInMarkdown } from '../utils/markdownSync';
+import { scanTaskBlocks, addTaskToMarkdown, updateTaskInMarkdown, deleteTaskFromMarkdown, moveTaskToGroupInMarkdown, isTaskCommentedOut } from '../utils/markdownSync';
 import type { SanityConfig } from './sanityService';
 import { assertSyncSession, getSyncSession, logSyncEvent, type SyncSession, type SyncLogEvent } from './syncSessionService';
 
@@ -11,7 +11,11 @@ let browserWriter: string | undefined;
 function writerIdentity(): string {
   if (browserWriter) return browserWriter;
   const key = 'antask_sync_writer';
-  browserWriter = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(key) || crypto.randomUUID() : crypto.randomUUID();
+  // A newly opened/duplicated tab may inherit sessionStorage from its opener.
+  const reload = typeof performance !== 'undefined' &&
+    (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type === 'reload';
+  browserWriter = reload && typeof sessionStorage !== 'undefined'
+    ? sessionStorage.getItem(key) || crypto.randomUUID() : crypto.randomUUID();
   if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(key, browserWriter);
   return browserWriter;
 }
@@ -45,9 +49,9 @@ function identityHash(value: string): string {
   return words.map(word => (word >>> 0).toString(16).padStart(8, '0')).join('');
 }
 
-export function taskFields(markdown: string): any[] {
+export function taskFields(markdown: string, requireIds = true): any[] {
   const ids = new Set<string>();
-  return scanTaskBlocks(markdown).taskBlocks.map(b => {
+  return scanTaskBlocks(markdown).taskBlocks.filter(b => requireIds || b.detectedId).map(b => {
     if (!b.detectedId) throw new SyncConflict('Asigna un ID estable a cada tarea antes de sincronizar');
     if (ids.has(b.detectedId)) throw new SyncConflict(`ID de tarea duplicado: ${b.detectedId}`);
     ids.add(b.detectedId);
@@ -59,9 +63,10 @@ export function taskFields(markdown: string): any[] {
   });
 }
 
-export function applyTaskToMarkdown(markdown: string, task: any): string {
+export function applyTaskToMarkdown(markdown: string, task: any, restoreCommented = false): string {
   if (task.syncDeleted) return deleteTaskFromMarkdown(markdown, task.taskId);
   if (!scanTaskBlocks(markdown).taskBlocks.some(b => b.detectedId === task.taskId)) {
+    if (!restoreCommented && isTaskCommentedOut(markdown, task.taskId, task.title)) return markdown;
     markdown = addTaskToMarkdown(markdown, { title: task.title, customId: task.taskId,
       priority: task.priority, groupTitle: task.groupTitle || 'General',
       description: task.description }).updatedMarkdown;
@@ -131,7 +136,18 @@ export function mergeText(base: string, local: string, remote: string): string {
         break;
       }
       if (existing.start === existing.end && incoming.start === incoming.end && existing.start === incoming.start) {
-        existing.pieces = [existing.pieces.join(''), incoming.pieces.join('')].sort();
+        const fragments = [existing.pieces.join(''), incoming.pieces.join('')];
+        const lines = fragments.flatMap(fragment => fragment.split('\n').filter(line => line.trim()));
+        const metadata = lines.map(line => line.match(/^\s*(?:[-*]\s*)?(ID|Status|Priority|Description|Tags|Blocked by)\s*:\s*(.*)$/i));
+        if (metadata.length && metadata.every(Boolean)) {
+          const fields = new Map<string, { value: string; line: string }>();
+          metadata.forEach((match, index) => {
+            const key = match![1].toLowerCase(), value = match![2].trim();
+            if (fields.has(key) && fields.get(key)!.value !== value) throw new SyncConflict(`Conflicto en ${key}`);
+            if (!fields.has(key)) fields.set(key, { value, line: lines[index] });
+          });
+          existing.pieces = [[...fields.values()].map(field => field.line).join('\n') + '\n'];
+        } else existing.pieces = fragments.sort();
         duplicate = true;
         break;
       }
@@ -340,7 +356,7 @@ export class DocumentSync {
       const restored = structuredClone({ ...remote, ...document, syncOwner: session.owner, syncDeleted: false });
       const writes: Array<{ document: Document; remote: Document | null }> = [{ document: restored, remote }];
       if (restored._type === 'workspace') await this.projectWorkspace(restored, remote, client, session, writes, true);
-      if (restored._type === 'task') await this.projectTask(restored, remote, client, session, writes);
+      if (restored._type === 'task') await this.projectTask(restored, remote, client, session, writes, true);
       const restorationId = crypto.randomUUID();
       for (const write of [...writes]) {
         const id = deletionMarkerId(write.document._id);
@@ -527,7 +543,7 @@ export class DocumentSync {
     // deterministic IDs of projections whose creation is not indexed yet.
     const ids = new Set(indexedTasks.map(task => task._id));
     for (const branch of [...(remote?.branches || []), ...(workspace.branches || [])]) {
-      for (const doc of branch.taskDocuments || []) for (const task of taskFields(doc.content)) {
+      for (const doc of branch.taskDocuments || []) for (const task of taskFields(doc.content, false)) {
         ids.add(buildTaskDocumentId(task.taskId, workspace.workspaceId, `${branch.name}::${doc.id}`));
       }
     }
@@ -538,7 +554,7 @@ export class DocumentSync {
     for (const branch of workspace.syncDeleted ? [] : workspace.branches || []) for (const doc of branch.taskDocuments || []) {
       const documentKey = `${branch.name}::${doc.id}`;
       const baseContent = remote?.branches?.find((b: any) => b.name === branch.name)?.taskDocuments?.find((d: any) => d.id === doc.id)?.content || '';
-      const baseline = taskFields(baseContent);
+      const baseline = taskFields(baseContent, false);
       for (const fields of taskFields(doc.content)) {
         let contexts = (remote?.branches || []).flatMap((b: any) =>
           (b.taskDocuments || []).filter((d: any) => scanTaskBlocks(d.content).taskBlocks.some(t => t.detectedId === fields.taskId)));
@@ -579,7 +595,7 @@ export class DocumentSync {
       // A deletion conflicts with an independently edited task. Compare the
       // original workspace fields before retaining a durable tombstone.
       const baseDoc = remote?.branches?.find((b: any) => b.name === task.branchName)?.taskDocuments?.find((d: any) => d.path === task.documentPath);
-      const before = baseDoc && taskFields(baseDoc.content).find(t => t.taskId === task.taskId);
+      const before = baseDoc && taskFields(baseDoc.content, false).find(t => t.taskId === task.taskId);
       if (!before && !workspace.syncDeleted) continue;
       if (before && !equal(before, Object.fromEntries(Object.keys(before).map(k => [k, task[k]])))) {
         throw new SyncConflict(`La tarea ${task.taskId} fue editada mientras se eliminaba`);
@@ -589,7 +605,7 @@ export class DocumentSync {
   }
 
   private async projectTask(task: Document, base: Document | null, client: any, session: SyncSession,
-    writes: Array<{ document: Document; remote: Document | null }>): Promise<void> {
+    writes: Array<{ document: Document; remote: Document | null }>, restoreCommented = false): Promise<void> {
     if (!task.workspaceId) return;
     const indexedWorkspace = await client.fetch('*[_type == "workspace" && workspaceId == $id && syncOwner == $owner][0]',
       { id: task.workspaceId, owner: session.owner }, { signal: session.controller.signal });
@@ -616,7 +632,10 @@ export class DocumentSync {
     for (const branch of next.branches || []) for (const doc of branch.taskDocuments || []) {
       if (`${branch.name}::${doc.id}` === task.documentKey) {
         matched = true;
-        const current = taskFields(doc.content).find(t => t.taskId === task.taskId);
+        const current = taskFields(doc.content, false).find(t => t.taskId === task.taskId);
+        if (!current && !task.syncDeleted && !restoreCommented &&
+          (isTaskCommentedOut(doc.content, task.taskId, task.title) || base && isTaskCommentedOut(doc.content, task.taskId, base.title)))
+          throw new SyncConflict('La tarea esta comentada en el documento');
         if (base && current) {
           const select = (value: any) => Object.fromEntries(Object.keys(current).map(k => [k, value[k] ?? current[k]]));
           if (task.syncDeleted && !equal(select(base), current)) throw new SyncConflict('La tarea fue editada en Markdown mientras se eliminaba');
@@ -624,7 +643,7 @@ export class DocumentSync {
         } else if (!base && current && !equal(current, Object.fromEntries(Object.keys(current).map(k => [k, task[k] ?? current[k]])))) {
           throw new SyncConflict('El Markdown ya contiene otra version de la tarea');
         }
-        doc.content = applyTaskToMarkdown(doc.content, task);
+        doc.content = applyTaskToMarkdown(doc.content, task, restoreCommented);
       }
     }
     if (!matched) {
@@ -634,7 +653,7 @@ export class DocumentSync {
     writes.push({ document: next, remote: workspace });
   }
 
-  async flush(session: SyncSession): Promise<void> {
+  async flush(session: SyncSession, onAcknowledged?: (sent: Document, document: Document) => void): Promise<void> {
     const prefix = this.pendingPrefix(session);
     const entries = Object.keys(localStorage).filter(k => k.startsWith(prefix)).sort((a, b) =>
       JSON.parse(localStorage.getItem(a)!).createdAt - JSON.parse(localStorage.getItem(b)!).createdAt);
@@ -650,7 +669,10 @@ export class DocumentSync {
         const previous = this.tails.get(documentKey) || Promise.resolve();
         const work = previous.catch(() => {}).then(() => localStorage.getItem(key) ? this.commit(pending, key, session) : undefined);
         this.tails.set(documentKey, work);
-        try { await work; } catch (error) { failure ||= error; blocked.add(documentKey); } finally { if (this.tails.get(documentKey) === work) this.tails.delete(documentKey); }
+        try {
+          const document = await work;
+          if (document && pending.writer === this.writer) onAcknowledged?.(pending.document, document);
+        } catch (error) { failure ||= error; blocked.add(documentKey); } finally { if (this.tails.get(documentKey) === work) this.tails.delete(documentKey); }
       }
     }
     if (failure) throw failure;
