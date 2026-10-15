@@ -115,6 +115,22 @@ export interface ParentHeadingInfo {
 }
 
 /**
+ * Replaces the content of HTML comments (<!-- ... -->) with spaces/newlines,
+ * preserving exact line numbers and column offsets, except for heading color directives (<!-- color: ... -->).
+ * Also safely masks unclosed comments until EOF so typing in LiveMarkdown never generates partial/corrupted tasks.
+ */
+export function maskHtmlComments(markdown: string): string {
+  if (!markdown) return '';
+  return markdown.replace(/<!--([\s\S]*?)(?:-->|$)/g, (fullMatch, commentBody) => {
+    if (/^\s*color:\s*[a-zA-Z0-9_-]+\s*$/i.test(commentBody)) {
+      return fullMatch; // Keep color annotations on headings
+    }
+    // Replace all non-newline characters with spaces to preserve line breaks and character positions
+    return fullMatch.replace(/[^\r\n]/g, ' ');
+  });
+}
+
+/**
  * Parses all task blocks and their associated groups from a Markdown string,
  * detecting unknown metadata, headings, and lines without modifying the document.
  */
@@ -123,7 +139,9 @@ export function scanTaskBlocks(markdown: string): {
   groupHeadings: GroupHeadingInfo[];
   parentHeadings: ParentHeadingInfo[];
 } {
-  const lines = markdown.split(/\r?\n/);
+  const maskedMarkdown = maskHtmlComments(markdown);
+  const lines = maskedMarkdown.split(/\r?\n/);
+  const originalLines = (markdown || '').split(/\r?\n/);
   const taskBlocks: TaskBlockInfo[] = [];
   const groupHeadings: GroupHeadingInfo[] = [];
   const parentHeadings: ParentHeadingInfo[] = [];
@@ -224,9 +242,9 @@ export function scanTaskBlocks(markdown: string): {
       currentBlock = {
         taskLineIndex: i,
         endLineIndex: i,
-        rawTaskLine: line,
+        rawTaskLine: originalLines[i] !== undefined ? originalLines[i] : line,
         temporaryId: `temp-task-${taskCounter}`,
-        detectedTitle: taskMatch[4].trim(),
+        detectedTitle: (taskMatch[4] || '').trim(),
         unknownMetadata: [],
         headingId: currentHeading ? currentHeading.id : undefined,
         headingLineIndex: currentHeading ? currentHeading.lineIndex : undefined,
@@ -339,7 +357,7 @@ export function scanTaskBlocks(markdown: string): {
           if (genericMetaMatch) {
             currentBlock.unknownMetadata.push({
               key: genericMetaMatch[1],
-              rawLine: line,
+              rawLine: originalLines[i] !== undefined ? originalLines[i] : line,
             });
             currentBlock.endLineIndex = i;
             continue;
@@ -1468,10 +1486,12 @@ export function resolveSingleDuplicateTaskId(
 
 /**
  * Scans note and comment items from the "## Notas", "## Notes", "## Comentarios" or "## Comments" section of the Markdown.
+ * Completely ignores content inside HTML comments (<!-- ... -->).
  */
 export function scanNotesFromMarkdown(markdown: string): string[] {
   if (!markdown) return [];
-  const lines = markdown.split(/\r?\n/);
+  const maskedMarkdown = maskHtmlComments(markdown);
+  const lines = maskedMarkdown.split(/\r?\n/);
   let inNotesSection = false;
   const notes: string[] = [];
   let currentNoteLines: string[] = [];
@@ -1520,6 +1540,7 @@ export function scanNotesFromMarkdown(markdown: string): string[] {
 
 /**
  * Synchronizes canvas notes into the Markdown document under the "## Notas" or "## Comentarios" section.
+ * Preserves any HTML comments (<!-- ... -->) present within the section.
  */
 export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
   const validNotes = notes.map((n) => n.trim()).filter(Boolean);
@@ -1548,8 +1569,18 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
     }
   }
 
+  // Extract any existing HTML comments from the notes section
+  let existingComments: string[] = [];
+  if (sectionStart !== -1) {
+    const sectionText = lines.slice(sectionStart + 1, sectionEnd).join('\n');
+    const commentMatches = sectionText.match(/<!--[\s\S]*?(?:-->|$)/g);
+    if (commentMatches) {
+      existingComments = commentMatches.map((c) => c.trim()).filter(Boolean);
+    }
+  }
+
   const newNotesLines: string[] = [];
-  if (validNotes.length > 0) {
+  if (validNotes.length > 0 || existingComments.length > 0) {
     newNotesLines.push(headerLine);
     for (const note of validNotes) {
       const noteLines = note.split(/\r?\n/);
@@ -1558,11 +1589,19 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
         newNotesLines.push(`  ${noteLines[j]}`);
       }
     }
+    if (existingComments.length > 0) {
+      if (validNotes.length > 0) {
+        newNotesLines.push('');
+      }
+      for (const comment of existingComments) {
+        newNotesLines.push(comment);
+      }
+    }
   }
 
   if (sectionStart !== -1) {
-    if (validNotes.length === 0) {
-      // Remove empty section
+    if (validNotes.length === 0 && existingComments.length === 0) {
+      // Remove empty section only if there are no notes AND no comments
       lines.splice(sectionStart, sectionEnd - sectionStart);
       return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
     } else {
@@ -1570,7 +1609,7 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
       return lines.join('\n');
     }
   } else {
-    if (validNotes.length === 0) {
+    if (validNotes.length === 0 && existingComments.length === 0) {
       return markdown;
     }
     const trimmedMd = markdown.trimEnd();

@@ -17,6 +17,7 @@ import {
   sanitizeTaskMetadataOrder,
   scanNotesFromMarkdown,
   syncNotesToMarkdown,
+  maskHtmlComments,
 } from '../src/utils/markdownSync';
 import { CustomNoteShapeUtil } from '../src/shapes/TaskShapeUtil';
 import {
@@ -874,6 +875,57 @@ assert.strictEqual(unknownMeta.length, 0, 'Comentario HTML no debe marcarse como
 // 15.6 syncNotesToMarkdown preserva el encabezado ## Comentarios si existía
 const syncedBack = syncNotesToMarkdown(mdWithComments, ['Comentario actualizado 1', 'Comentario actualizado 2']);
 assert(syncedBack.includes('## Comentarios'), 'syncNotesToMarkdown debe respetar el encabezado ## Comentarios original');
+
+// 15.7 Bloques de comentarios HTML multilínea con sintaxis de tareas bajo ## Notas
+const userSnippet = `## Notas
+
+<!--
+  - [ ] 
+    - ID: task-4
+  - [ ] Ocultar campos 
+  - [ ] Ocultar campos ID/
+  - [ ] Ocultar campos ID/stati
+  - [ ] Ocultar campos ID/status/
+  - [ ] Ocultar campos ID/status/priority -->
+`;
+
+const userNotesScanned = scanNotesFromMarkdown(userSnippet);
+assert.strictEqual(
+  userNotesScanned.length,
+  0,
+  'scanNotesFromMarkdown debe ignorar completamente las tareas comentadas en <!-- ... -->'
+);
+
+const userTaskBlocks = scanTaskBlocks(userSnippet).taskBlocks;
+assert.strictEqual(
+  userTaskBlocks.length,
+  0,
+  'scanTaskBlocks no debe crear ninguna tarea a partir de bloques comentados en <!-- ... -->'
+);
+
+const userValidation = validateMarkdownDocument(userSnippet);
+assert.strictEqual(
+  userValidation.issues.length,
+  0,
+  'validateMarkdownDocument no debe generar ningún error ni advertencia para tareas en comentarios HTML'
+);
+
+const userSyncedEmpty = syncNotesToMarkdown(userSnippet, []);
+assert(
+  userSyncedEmpty.includes('<!--') && userSyncedEmpty.includes('-->'),
+  'syncNotesToMarkdown debe preservar el bloque de comentarios HTML aunque el canvas tenga 0 notas'
+);
+assert(
+  userSyncedEmpty.includes('## Notas'),
+  'syncNotesToMarkdown no debe eliminar la sección ## Notas si contiene comentarios HTML'
+);
+
+const userSyncedWithNotes = syncNotesToMarkdown(userSnippet, ['Nota de prueba']);
+assert(
+  userSyncedWithNotes.includes('- Nota de prueba') && userSyncedWithNotes.includes('<!--') && userSyncedWithNotes.includes('-->'),
+  'syncNotesToMarkdown debe agregar la nueva nota y preservar el bloque de comentarios HTML'
+);
+
 console.log('   ✓ CustomNoteShapeUtil y soporte completo de comentarios verificado.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
