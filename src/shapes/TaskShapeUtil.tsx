@@ -45,9 +45,46 @@ export const NOTE_COLOR_OPTIONS = [
  */
 export class CustomNoteShapeUtil extends NoteShapeUtil {
   static override type = 'note' as const;
-  override options: any = {
-    resizeMode: 'scale' as const,
-  };
+
+  constructor(editor: any) {
+    super(editor);
+    const existingOptions = (this as any).options || {};
+    (this as any).options = {
+      ...existingOptions,
+      resizeMode: 'scale' as const,
+    };
+    if (typeof (this as any).options.getDefaultDisplayValues !== 'function') {
+      (this as any).options.getDefaultDisplayValues = (
+        _editor: any,
+        shape: TLNoteShape,
+        theme: any,
+        colorMode: 'dark' | 'light'
+      ) => {
+        const { color = 'yellow', labelColor = 'black' } = shape?.props || {};
+        const colors = theme?.colors?.[colorMode] || {};
+        return {
+          noteWidth: 200,
+          noteHeight: 200,
+          noteBackgroundColor: colors[color] || '#fef08a',
+          borderColor: colors.noteBorder || '#ca8a04',
+          borderWidth: 2,
+          labelColor: labelColor === 'black' ? (colors[color] || '#000000') : '#000000',
+          labelFontFamily: 'sans-serif',
+          labelFontSize: 16,
+          labelLineHeight: 1.3,
+          labelFontWeight: 'normal',
+          labelFontVariant: 'normal',
+          labelFontStyle: 'normal',
+          labelPadding: 16,
+          labelHorizontalAlign: 'center' as const,
+          labelVerticalAlign: 'middle' as const,
+        };
+      };
+    }
+    if (typeof (this as any).options.getCustomDisplayValues !== 'function') {
+      (this as any).options.getCustomDisplayValues = () => ({});
+    }
+  }
 
   override hideResizeHandles(_shape: TLNoteShape): boolean {
     return false;
@@ -2754,17 +2791,22 @@ export function populateCanvasWithGroups(
     (editor.createBindings as any)(bindingsToCreate);
   }
 
-  // Populate note shapes from Markdown "## Notas" section if needed
+  // Populate note shapes from Markdown "## Notas" or "## Comentarios" section if needed
   if (rawMarkdown) {
     const existingNotes = editor
       .getCurrentPageShapes()
       .filter((s) => (s as any).type === 'note' || (s as any).type === 'text');
 
-    if (existingNotes.length === 0 || options?.clearNotes) {
-      if (options?.clearNotes && existingNotes.length > 0) {
-        editor.deleteShapes(existingNotes.map((s) => s.id));
+    const scannedNotes = scanNotesFromMarkdown(rawMarkdown);
+
+    if (options?.clearNotes) {
+      if (existingNotes.length > 0) {
+        try {
+          editor.deleteShapes(existingNotes.map((s) => s.id));
+        } catch {
+          // ignore
+        }
       }
-      const scannedNotes = scanNotesFromMarkdown(rawMarkdown);
       if (scannedNotes.length > 0) {
         let maxRight = 40;
         for (const g of groupShapesToCreate) {
@@ -2784,7 +2826,60 @@ export function populateCanvasWithGroups(
           },
         }));
 
+        try {
+          (editor.createShapes as any)(noteShapesToCreate);
+        } catch (err) {
+          console.error('[TaskShapeUtil] Failed to create note shapes from markdown:', err);
+        }
+      }
+    } else if (existingNotes.length === 0 && scannedNotes.length > 0) {
+      let maxRight = 40;
+      for (const g of groupShapesToCreate) {
+        const right = (g.x || 0) + (g.props?.w || 360);
+        if (right > maxRight) maxRight = right;
+      }
+
+      const noteShapesToCreate = scannedNotes.map((noteText, idx) => ({
+        id: createShapeId(),
+        type: 'note' as const,
+        x: maxRight + 40,
+        y: 40 + idx * 220,
+        props: {
+          richText: toRichTextHelper(noteText),
+          color: 'yellow',
+          size: 'm',
+        },
+      }));
+
+      try {
         (editor.createShapes as any)(noteShapesToCreate);
+      } catch (err) {
+        console.error('[TaskShapeUtil] Failed to create note shapes from markdown:', err);
+      }
+    } else if (existingNotes.length > 0 && scannedNotes.length > existingNotes.length) {
+      // Append newly added notes from markdown
+      let maxRight = 40;
+      for (const g of groupShapesToCreate) {
+        const right = (g.x || 0) + (g.props?.w || 360);
+        if (right > maxRight) maxRight = right;
+      }
+      const extraNotes = scannedNotes.slice(existingNotes.length);
+      const newShapes = extraNotes.map((noteText, idx) => ({
+        id: createShapeId(),
+        type: 'note' as const,
+        x: maxRight + 40,
+        y: 40 + (existingNotes.length + idx) * 220,
+        props: {
+          richText: toRichTextHelper(noteText),
+          color: 'yellow',
+          size: 'm',
+        },
+      }));
+
+      try {
+        (editor.createShapes as any)(newShapes);
+      } catch (err) {
+        console.error('[TaskShapeUtil] Failed to append note shapes from markdown:', err);
       }
     }
   }

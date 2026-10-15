@@ -334,14 +334,16 @@ export function scanTaskBlocks(markdown: string): {
         }
 
         // Unknown metadata line (e.g. "Owner: Nicolas", "Estimate: 2h")
-        const genericMetaMatch = trimmed.match(/^(?:[-*]\s*)?([a-zA-Z0-9_-]+)\s*:\s*(.+)$/);
-        if (genericMetaMatch) {
-          currentBlock.unknownMetadata.push({
-            key: genericMetaMatch[1],
-            rawLine: line,
-          });
-          currentBlock.endLineIndex = i;
-          continue;
+        if (!trimmed.startsWith('<!--') && !trimmed.startsWith('//')) {
+          const genericMetaMatch = trimmed.match(/^(?:[-*]\s*)?([a-zA-Z0-9_-]+)\s*:\s*(.+)$/);
+          if (genericMetaMatch) {
+            currentBlock.unknownMetadata.push({
+              key: genericMetaMatch[1],
+              rawLine: line,
+            });
+            currentBlock.endLineIndex = i;
+            continue;
+          }
         }
       }
 
@@ -601,6 +603,10 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
 
   // 7. Check for Empty Headings
   groupHeadings.forEach((gh, idx) => {
+    const lowerTitle = gh.title.trim().toLowerCase();
+    if (['notas', 'notes', 'comentarios', 'comments'].includes(lowerTitle)) {
+      return;
+    }
     const tasksInHeading = taskBlocks.filter((b) =>
       b.headingId ? b.headingId === gh.id : b.groupTitle.toLowerCase() === gh.title.toLowerCase()
     );
@@ -1461,7 +1467,7 @@ export function resolveSingleDuplicateTaskId(
 }
 
 /**
- * Scans note items from the "## Notas" or "## Notes" section of the Markdown.
+ * Scans note and comment items from the "## Notas", "## Notes", "## Comentarios" or "## Comments" section of the Markdown.
  */
 export function scanNotesFromMarkdown(markdown: string): string[] {
   if (!markdown) return [];
@@ -1484,11 +1490,11 @@ export function scanNotesFromMarkdown(markdown: string): string[] {
     const line = lines[i];
     const trimmed = line.trim();
 
-    if (/^##\s+(?:Notas|Notes)\b/i.test(trimmed)) {
+    if (/^[#]{1,6}\s+(?:Notas|Notes|Comentarios|Comments)\b/i.test(trimmed)) {
       flushCurrent();
       inNotesSection = true;
       continue;
-    } else if (trimmed.startsWith('## ') && inNotesSection) {
+    } else if (trimmed.startsWith('#') && inNotesSection) {
       flushCurrent();
       inNotesSection = false;
       continue;
@@ -1513,7 +1519,7 @@ export function scanNotesFromMarkdown(markdown: string): string[] {
 }
 
 /**
- * Synchronizes canvas notes into the Markdown document under the "## Notas" section.
+ * Synchronizes canvas notes into the Markdown document under the "## Notas" or "## Comentarios" section.
  */
 export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
   const validNotes = notes.map((n) => n.trim()).filter(Boolean);
@@ -1521,11 +1527,13 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
 
   let sectionStart = -1;
   let sectionEnd = -1;
+  let headerLine = '## Notas';
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
-    if (/^##\s+(?:Notas|Notes)\b/i.test(trimmed)) {
+    if (/^[#]{1,6}\s+(?:Notas|Notes|Comentarios|Comments)\b/i.test(trimmed)) {
       sectionStart = i;
+      headerLine = lines[i].trim();
       break;
     }
   }
@@ -1533,7 +1541,7 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
   if (sectionStart !== -1) {
     sectionEnd = lines.length;
     for (let i = sectionStart + 1; i < lines.length; i++) {
-      if (lines[i].trim().startsWith('## ')) {
+      if (lines[i].trim().startsWith('#')) {
         sectionEnd = i;
         break;
       }
@@ -1542,7 +1550,7 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
 
   const newNotesLines: string[] = [];
   if (validNotes.length > 0) {
-    newNotesLines.push('## Notas');
+    newNotesLines.push(headerLine);
     for (const note of validNotes) {
       const noteLines = note.split(/\r?\n/);
       newNotesLines.push(`- ${noteLines[0]}`);

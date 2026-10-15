@@ -452,6 +452,17 @@ export function MarkdownSplitEditor({
             <span>{i18n._(msg`Sección`)}</span>
           </button>
 
+          <button
+            id="btn-markdown-insert-comment"
+            type="button"
+            onClick={() => insertText('\n## Comentarios\n- ')}
+            className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-amber-300 flex items-center gap-1 cursor-pointer transition-colors"
+            title={i18n._(msg`Insertar sección de comentarios / notas adhesivas (## Comentarios)`)}
+          >
+            <span className="material-symbols-outlined text-[13px]">sticky_note_2</span>
+            <span>{i18n._(msg`Comentario`)}</span>
+          </button>
+
           <div id="div-markdownspliteditor-9" className="w-px h-3.5 bg-[var(--outline)] mx-1" />
 
           {/* Quick Priorities */}

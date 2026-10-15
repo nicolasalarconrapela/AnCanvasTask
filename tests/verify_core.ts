@@ -15,7 +15,10 @@ import {
   validateMarkdownDocument,
   updateSectionColorInMarkdown,
   sanitizeTaskMetadataOrder,
+  scanNotesFromMarkdown,
+  syncNotesToMarkdown,
 } from '../src/utils/markdownSync';
+import { CustomNoteShapeUtil } from '../src/shapes/TaskShapeUtil';
 import {
   getInitialDefaultWorkspaces,
 } from '../src/services/workspaceService';
@@ -804,6 +807,74 @@ assert(
 );
 
 console.log('   ✓ Auto-layout verificado: 0 solapamientos, límites respetados y estricta pertenencia por sección.');
+
+// 15. Comentarios y Notas en LiveMarkdown (evitando TypeError: util.options.getDefaultDisplayValues is not a function)
+console.log('15. Verificando CustomNoteShapeUtil y soporte de comentarios/notas en LiveMarkdown...');
+
+// 15.1 CustomNoteShapeUtil preserves options.getDefaultDisplayValues
+const dummyEditor: any = {};
+const customNoteUtil = new CustomNoteShapeUtil(dummyEditor);
+assert.strictEqual(
+  typeof (customNoteUtil as any).options?.getDefaultDisplayValues,
+  'function',
+  'CustomNoteShapeUtil.options.getDefaultDisplayValues debe ser una función (evita crash en getDisplayValues)'
+);
+assert.strictEqual(
+  (customNoteUtil as any).options?.resizeMode,
+  'scale',
+  'CustomNoteShapeUtil.options.resizeMode debe ser scale'
+);
+
+// 15.2 scanNotesFromMarkdown reconoce ## Comentarios, ## Notas, ## Notes, ## Comments
+const mdWithComments = `# Proyecto
+## Frontend
+- [ ] Tarea 1
+  - ID: t-1
+  - Status: todo
+  - Priority: P3
+
+## Comentarios
+- Este es el primer comentario en LiveMarkdown
+- Segundo comentario con detalle
+  línea adicional del segundo comentario
+
+## Notas
+- Otra nota adhesiva
+`;
+
+const scanned = scanNotesFromMarkdown(mdWithComments);
+assert.strictEqual(scanned.length, 3, 'Debe escanear 3 notas/comentarios');
+assert(scanned[0].includes('primer comentario'), 'Primer comentario correcto');
+assert(scanned[1].includes('Segundo comentario con detalle'), 'Segundo comentario con detalle correcto');
+assert(scanned[2].includes('Otra nota adhesiva'), 'Tercera nota correcta');
+
+// 15.3 parseTasksMarkdown no debe crear grupos de tareas para ## Comentarios
+const groupsWithComments = parseTasksMarkdown(mdWithComments);
+assert.strictEqual(groupsWithComments.length, 1, 'Solo debe haber 1 grupo de tareas (Frontend), no Comentarios ni Notas');
+assert.strictEqual(groupsWithComments[0].title, 'Frontend');
+
+// 15.4 validateMarkdownDocument no debe reportar empty_heading para ## Comentarios ni Notas
+const validationWithComments = validateMarkdownDocument(mdWithComments);
+const emptyHeadingIssues = validationWithComments.issues.filter((i) => i.type === 'empty_heading');
+assert.strictEqual(emptyHeadingIssues.length, 0, 'No debe reportar empty_heading para secciones de comentarios o notas');
+
+// 15.5 HTML comments en tareas no deben registrarse como metadatos desconocidos
+const mdWithHtmlComments = `# Test
+## Sec
+- [ ] Tarea con comentario HTML
+  - ID: t-html
+  <!-- comentario explicativo de la tarea -->
+  - Status: backlog
+  - Priority: P2
+`;
+const reportHtmlComments = validateMarkdownDocument(mdWithHtmlComments);
+const unknownMeta = reportHtmlComments.issues.filter((i) => i.type === 'unknown_metadata');
+assert.strictEqual(unknownMeta.length, 0, 'Comentario HTML no debe marcarse como metadato desconocido');
+
+// 15.6 syncNotesToMarkdown preserva el encabezado ## Comentarios si existía
+const syncedBack = syncNotesToMarkdown(mdWithComments, ['Comentario actualizado 1', 'Comentario actualizado 2']);
+assert(syncedBack.includes('## Comentarios'), 'syncNotesToMarkdown debe respetar el encabezado ## Comentarios original');
+console.log('   ✓ CustomNoteShapeUtil y soporte completo de comentarios verificado.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 process.exit(0);
