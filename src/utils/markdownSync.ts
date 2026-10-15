@@ -1816,7 +1816,11 @@ export function buildTaskEnterSnippet(
   ];
 
   const snippetText = '\n' + lines.join('\n');
-  const cursorOffset = 1 + subIndent.length + '- Description: '.length;
+  // If task title is empty, keep cursor right behind '[ ] ' so the user can type the title immediately;
+  // otherwise place cursor right after '- Description: '
+  const cursorOffset = rawTitle.length > 0
+    ? 1 + subIndent.length + '- Description: '.length
+    : 0;
 
   return {
     snippetText,

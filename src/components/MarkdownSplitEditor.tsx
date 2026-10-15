@@ -3,7 +3,7 @@ import CodeMirror, { ReactCodeMirrorRef, ExternalChange, Transaction } from '@ui
 import { diffChars } from 'diff';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { EditorView, Decoration, DecorationSet, keymap } from '@codemirror/view';
+import { EditorView, Decoration, DecorationSet, keymap, WidgetType } from '@codemirror/view';
 import { RangeSetBuilder, StateField, EditorState, Prec, Extension } from '@codemirror/state';
 import { useLingui } from '@lingui/react';
 import { msg, plural } from '@lingui/core/macro';
@@ -16,14 +16,56 @@ import {
   stripTaskIdsFromMarkdown,
   sanitizeTaskMetadataOrder,
   buildTaskEnterSnippet,
+  generateUniqueTaskId,
 } from '../utils/markdownSync';
 import { SafeMarkdownNormalizerModal } from './SafeMarkdownNormalizerModal';
+
+class HiddenIdBadgeWidget extends WidgetType {
+  constructor(readonly taskId: string) {
+    super();
+  }
+  toDOM(): HTMLElement {
+    const span = document.createElement('span');
+    span.className =
+      'cm-hidden-id-badge ml-2 px-1 py-0.2 rounded text-[10px] font-mono font-medium text-amber-400/80 bg-amber-950/40 border border-amber-800/40 select-none cursor-default inline-flex items-center gap-0.5';
+    span.textContent = `#${this.taskId}`;
+    span.title = `ID: ${this.taskId} (Oculto en Markdown)`;
+    return span;
+  }
+  eq(other: HiddenIdBadgeWidget) {
+    return this.taskId === other.taskId;
+  }
+}
 
 function buildHideTaskIdsDeco(state: EditorState): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (let l = 1; l <= state.doc.lines; l++) {
     const line = state.doc.line(l);
-    if (isTaskIdLine(line.text)) {
+    // If line is a task root, check if it has a hidden ID line in its metadata block
+    if (/^(\s*)[-*+]\s*\[([ xX])\]/.test(line.text)) {
+      for (let k = l + 1; k <= state.doc.lines; k++) {
+        const nextLine = state.doc.line(k);
+        if (
+          nextLine.text.trim().length === 0 ||
+          /^(\s*)[-*+]\s*\[([ xX])\]/.test(nextLine.text) ||
+          nextLine.text.startsWith('#')
+        ) {
+          break;
+        }
+        if (isTaskIdLine(nextLine.text)) {
+          const match = nextLine.text.match(/ID\s*:\s*(.+)$/i);
+          const taskId = match ? match[1].trim() : '';
+          if (taskId) {
+            builder.add(
+              line.to,
+              line.to,
+              Decoration.widget({ widget: new HiddenIdBadgeWidget(taskId), side: 1 })
+            );
+          }
+          break;
+        }
+      }
+    } else if (isTaskIdLine(line.text)) {
       const lFrom = line.from;
       const lTo = l < state.doc.lines ? line.to + 1 : line.to;
       builder.add(lFrom, lTo, Decoration.replace({ block: true }));
@@ -45,7 +87,151 @@ const hideTaskIdsExtension = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
-function createEnterTaskSnippetExtension(): Extension {
+interface TaskFieldRange {
+  line: number;
+  from: number;
+  to: number;
+}
+
+function navigateTaskFields(view: EditorView, direction: 'next' | 'prev', showTaskIds?: boolean): boolean {
+  const selection = view.state.selection.main;
+  const pos = selection.head;
+  const curLine = view.state.doc.lineAt(pos);
+
+  const isTaskRoot = /^(\s*)[-*+]\s*\[([ xX])\]/.test(curLine.text);
+  const isMetadata = /^\s*[-*]?\s*(?:Description|Descripci[oó]n|Desc|ID|Status|Priority|Blocked|Tags?|Progress)\s*:/i.test(curLine.text);
+
+  if (!isTaskRoot && !isMetadata) return false;
+
+  // Find task root line
+  let taskLineNumber = curLine.number;
+  if (!isTaskRoot) {
+    let found = false;
+    for (let k = curLine.number - 1; k >= Math.max(1, curLine.number - 25); k--) {
+      const prevLine = view.state.doc.line(k);
+      if (/^(\s*)[-*+]\s*\[([ xX])\]/.test(prevLine.text)) {
+        taskLineNumber = k;
+        found = true;
+        break;
+      }
+      if (prevLine.text.startsWith('#') || (prevLine.text.trim().length === 0 && k < curLine.number - 1)) {
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+
+  const taskLine = view.state.doc.line(taskLineNumber);
+  const fields: TaskFieldRange[] = [];
+
+  // 1. Task root title field
+  const checkIdx = taskLine.text.indexOf(']');
+  if (checkIdx !== -1) {
+    let valStart = checkIdx + 1;
+    while (valStart < taskLine.text.length && taskLine.text[valStart] === ' ') valStart++;
+    fields.push({
+      line: taskLine.number,
+      from: taskLine.from + valStart,
+      to: taskLine.to,
+    });
+  }
+
+  // 2. Metadata lines under task
+  for (let k = taskLineNumber + 1; k <= view.state.doc.lines; k++) {
+    const subLine = view.state.doc.line(k);
+    if (subLine.text.trim().length === 0 || /^(\s*)[-*+]\s*\[([ xX])\]/.test(subLine.text) || subLine.text.startsWith('#')) {
+      break;
+    }
+    if (showTaskIds === false && isTaskIdLine(subLine.text)) {
+      continue;
+    }
+    const colonIdx = subLine.text.indexOf(':');
+    if (colonIdx !== -1 && /^\s*[-*]?\s*[a-zA-Z]/i.test(subLine.text)) {
+      let valStart = colonIdx + 1;
+      while (valStart < subLine.text.length && subLine.text[valStart] === ' ') valStart++;
+      fields.push({
+        line: subLine.number,
+        from: subLine.from + valStart,
+        to: subLine.to,
+      });
+    }
+  }
+
+  if (fields.length === 0) return false;
+
+  const curFieldIdx = fields.findIndex((f) => f.line === curLine.number);
+
+  let targetField: TaskFieldRange | null = null;
+  if (direction === 'next') {
+    if (curFieldIdx >= 0 && curFieldIdx < fields.length - 1) {
+      targetField = fields[curFieldIdx + 1];
+    } else if (curFieldIdx === fields.length - 1) {
+      // Look for next task in document
+      for (let m = curLine.number + 1; m <= view.state.doc.lines; m++) {
+        const nextTaskLine = view.state.doc.line(m);
+        if (/^(\s*)[-*+]\s*\[([ xX])\]/.test(nextTaskLine.text)) {
+          const cIdx = nextTaskLine.text.indexOf(']');
+          let vStart = cIdx + 1;
+          while (vStart < nextTaskLine.text.length && nextTaskLine.text[vStart] === ' ') vStart++;
+          targetField = {
+            line: nextTaskLine.number,
+            from: nextTaskLine.from + vStart,
+            to: nextTaskLine.to,
+          };
+          break;
+        }
+      }
+    }
+  } else {
+    // direction === 'prev'
+    if (curFieldIdx > 0) {
+      targetField = fields[curFieldIdx - 1];
+    } else if (curFieldIdx === 0) {
+      // Look for previous task in document
+      for (let m = taskLineNumber - 1; m >= 1; m--) {
+        const prevTaskLine = view.state.doc.line(m);
+        if (/^(\s*)[-*+]\s*\[([ xX])\]/.test(prevTaskLine.text)) {
+          let lastF: TaskFieldRange = {
+            line: prevTaskLine.number,
+            from: prevTaskLine.from + (prevTaskLine.text.indexOf(']') + 2),
+            to: prevTaskLine.to,
+          };
+          for (let p = m + 1; p < taskLineNumber; p++) {
+            const pLine = view.state.doc.line(p);
+            if (pLine.text.trim().length === 0 || pLine.text.startsWith('#')) break;
+            if (showTaskIds === false && isTaskIdLine(pLine.text)) continue;
+            const cIdx = pLine.text.indexOf(':');
+            if (cIdx !== -1) {
+              let vStart = cIdx + 1;
+              while (vStart < pLine.text.length && pLine.text[vStart] === ' ') vStart++;
+              lastF = { line: pLine.number, from: pLine.from + vStart, to: pLine.to };
+            }
+          }
+          targetField = lastF;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!targetField) return false;
+
+  if (targetField.from < targetField.to) {
+    view.dispatch({
+      selection: { anchor: targetField.from, head: targetField.to },
+      scrollIntoView: true,
+    });
+  } else {
+    view.dispatch({
+      selection: { anchor: targetField.from },
+      scrollIntoView: true,
+    });
+  }
+
+  return true;
+}
+
+function createEnterTaskSnippetExtension(showTaskIds?: boolean): Extension {
   return Prec.highest(
     keymap.of([
       {
@@ -93,6 +279,15 @@ function createEnterTaskSnippetExtension(): Extension {
           });
 
           return true;
+        },
+      },
+      {
+        key: 'Tab',
+        run(view: EditorView): boolean {
+          return navigateTaskFields(view, 'next', showTaskIds);
+        },
+        shift(view: EditorView): boolean {
+          return navigateTaskFields(view, 'prev', showTaskIds);
         },
       },
     ])
@@ -297,7 +492,10 @@ export function MarkdownSplitEditor({
     });
   }, []);
 
-  const enterTaskSnippetExt = useMemo(() => createEnterTaskSnippetExtension(), []);
+  const enterTaskSnippetExt = useMemo(
+    () => createEnterTaskSnippetExtension(showTaskIds),
+    [showTaskIds]
+  );
 
   const extensions = useMemo(() => {
     const exts = [
@@ -492,8 +690,9 @@ export function MarkdownSplitEditor({
             id="btn-markdown-insert-task"
             type="button"
             onClick={() => {
-              const snippet = '\n- [ ] Nueva tarea\n  - Description: \n  - ID: nueva-tarea\n  - Status: backlog\n  - Priority: P3\n';
-              insertText(snippet, '\n- [ ] Nueva tarea\n  - Description: '.length);
+              const nextId = generateUniqueTaskId('', value);
+              const snippet = `\n- [ ] \n  - Description: \n  - ID: ${nextId}\n  - Status: backlog\n  - Priority: P3\n`;
+              insertText(snippet, '\n- [ ] '.length);
             }}
             className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-[var(--on-surface)] flex items-center gap-1 cursor-pointer transition-colors"
             title={i18n._(msg`Insertar nueva tarea pendiente (- [ ])`)}
@@ -506,8 +705,9 @@ export function MarkdownSplitEditor({
             id="btn-markdown-insert-section"
             type="button"
             onClick={() => {
-              const snippet = '\n## Nueva Sección\n\n- [ ] Tarea inicial\n  - Description: \n  - ID: tarea-inicial\n  - Status: backlog\n  - Priority: P3\n';
-              insertText(snippet, '\n## Nueva Sección\n\n- [ ] Tarea inicial\n  - Description: '.length);
+              const nextId = generateUniqueTaskId('', value);
+              const snippet = `\n## Nueva Sección\n\n- [ ] \n  - Description: \n  - ID: ${nextId}\n  - Status: backlog\n  - Priority: P3\n`;
+              insertText(snippet, '\n## Nueva Sección\n\n- [ ] '.length);
             }}
             className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-[var(--on-surface)] flex items-center gap-1 cursor-pointer transition-colors"
             title={i18n._(msg`Insertar nueva sección (## Sección)`)}

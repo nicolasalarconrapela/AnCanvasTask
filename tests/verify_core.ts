@@ -974,6 +974,11 @@ const snippetDup = buildTaskEnterSnippet('- [ ] Tarea existente', enterSampleDoc
 assert(snippetDup !== null);
 assert(snippetDup.snippetText.includes('- ID: tarea-existente-2'), 'ID duplicado debe ser desambiguado');
 
+// Test empty title cursor offset (right behind '[ ] ')
+const snippetEmpty = buildTaskEnterSnippet('- [ ] ', enterSampleDoc);
+assert(snippetEmpty !== null);
+assert.strictEqual(snippetEmpty.cursorOffset, 0, 'Si el título está vacío, el cursor debe permanecer tras [ ]');
+
 // Test non-task line returns null
 const snippetHeading = buildTaskEnterSnippet('## Sección', enterSampleDoc);
 assert.strictEqual(snippetHeading, null, 'No debe generar snippet para un encabezado');
