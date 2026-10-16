@@ -25,72 +25,80 @@ import {
 } from '../utils/markdownSync';
 import { SafeMarkdownNormalizerModal } from './SafeMarkdownNormalizerModal';
 
-export class HiddenItemWidget extends WidgetType {
+export interface HiddenTaskItemInfo {
+  type: 'id' | 'status' | 'priority' | 'metadata';
+  label: string;
+  rawText: string;
+}
+
+export class InlineHiddenTaskLabelsWidget extends WidgetType {
   constructor(
-    readonly labelText: string,
-    readonly itemType: 'id' | 'status' | 'priority' | 'metadata',
-    readonly indentSpaces: number,
+    readonly items: HiddenTaskItemInfo[],
     readonly onToggleLabels?: () => void
   ) {
     super();
   }
 
   toDOM(): HTMLElement {
-    const wrap = document.createElement('div');
-    wrap.className = 'cm-hidden-item-line select-none flex items-center leading-normal my-0.5 pointer-events-auto';
-    wrap.style.paddingLeft = `${Math.max(16, this.indentSpaces * 8)}px`;
+    const wrap = document.createElement('span');
+    wrap.className =
+      'cm-inline-task-labels inline-flex items-center gap-1.5 ml-2.5 align-middle select-none pointer-events-auto';
 
-    const badge = document.createElement('span');
-    badge.className =
-      'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-medium border shadow-xs transition-colors ' +
-      (this.itemType === 'id'
-        ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80'
-        : this.itemType === 'status'
-        ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-800/80'
-        : this.itemType === 'priority'
-        ? 'bg-rose-500/10 text-rose-400 border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80'
-        : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)]');
+    for (const item of this.items) {
+      const badge = document.createElement('span');
+      badge.className =
+        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono leading-none border transition-colors ' +
+        (item.type === 'id'
+          ? 'bg-amber-100/50 text-amber-900 border-amber-200/80 dark:bg-amber-950/30 dark:text-amber-200/90 dark:border-amber-700/40'
+          : item.type === 'status'
+          ? 'bg-sky-100/50 text-sky-900 border-sky-200/80 dark:bg-sky-950/30 dark:text-sky-200/90 dark:border-sky-700/40'
+          : item.type === 'priority'
+          ? 'bg-rose-100/50 text-rose-900 border-rose-200/80 dark:bg-rose-950/30 dark:text-rose-200/90 dark:border-rose-700/40'
+          : 'bg-stone-100/60 text-stone-700 border-stone-200 dark:bg-stone-900/40 dark:text-stone-300 dark:border-stone-800');
 
-    // Icon
-    const icon = document.createElement('span');
-    icon.className = 'material-symbols-outlined text-[12px] opacity-85 shrink-0';
-    icon.textContent =
-      this.itemType === 'id'
-        ? 'tag'
-        : this.itemType === 'status'
-        ? 'check_circle'
-        : this.itemType === 'priority'
-        ? 'flag'
-        : 'label';
-    badge.appendChild(icon);
+      // Subtle Icon
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-outlined text-[11px] opacity-70 shrink-0';
+      icon.textContent =
+        item.type === 'id'
+          ? 'tag'
+          : item.type === 'status'
+          ? 'check_circle'
+          : item.type === 'priority'
+          ? 'flag'
+          : 'label';
+      badge.appendChild(icon);
 
-    // Label text
-    const text = document.createElement('span');
-    text.className = 'font-semibold tracking-tight cursor-pointer hover:underline';
-    text.textContent = this.labelText;
-    text.title = 'Clic para mostrar este campo en Markdown';
-    text.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (this.itemType === 'id') {
-        window.dispatchEvent(new CustomEvent('antask:toggle-show-ids'));
-      } else if (this.itemType === 'status') {
-        window.dispatchEvent(new CustomEvent('antask:toggle-show-status'));
-      } else if (this.itemType === 'priority') {
-        window.dispatchEvent(new CustomEvent('antask:toggle-show-priority'));
-      }
-    });
-    badge.appendChild(text);
+      // Label Text: e.g. "ID: auth-01", "Status: todo", "Priority: P1"
+      const text = document.createElement('span');
+      text.className = 'font-medium cursor-pointer hover:underline tracking-tight';
+      text.textContent = item.label;
+      text.title = 'Clic para mostrar este campo en Markdown';
+      text.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (item.type === 'id') {
+          window.dispatchEvent(new CustomEvent('antask:toggle-show-ids'));
+        } else if (item.type === 'status') {
+          window.dispatchEvent(new CustomEvent('antask:toggle-show-status'));
+        } else if (item.type === 'priority') {
+          window.dispatchEvent(new CustomEvent('antask:toggle-show-priority'));
+        }
+      });
+      badge.appendChild(text);
 
-    // Button to toggle/hide this visual label
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className =
-      'ml-0.5 text-[11px] opacity-60 hover:opacity-100 hover:text-[var(--on-surface)] transition-opacity cursor-pointer flex items-center leading-none px-0.5';
-    closeBtn.title = 'Ocultar etiquetas de items ocultos';
-    closeBtn.setAttribute('aria-label', 'Ocultar etiqueta');
-    closeBtn.textContent = '×';
-    closeBtn.addEventListener('mousedown', (e) => {
+      wrap.appendChild(badge);
+    }
+
+    // Gentle button to hide visual labels
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className =
+      'text-[10px] opacity-40 hover:opacity-100 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-opacity cursor-pointer flex items-center leading-none px-0.5 ml-0.5';
+    toggleBtn.title = 'Ocultar estas etiquetas visuales';
+    toggleBtn.setAttribute('aria-label', 'Ocultar etiquetas');
+    toggleBtn.textContent = '×';
+    toggleBtn.addEventListener('mousedown', (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (this.onToggleLabels) {
@@ -99,20 +107,21 @@ export class HiddenItemWidget extends WidgetType {
         window.dispatchEvent(new CustomEvent('antask:toggle-show-hidden-labels'));
       }
     });
-    badge.appendChild(closeBtn);
+    wrap.appendChild(toggleBtn);
 
-    wrap.appendChild(badge);
     return wrap;
   }
 
-  eq(other: HiddenItemWidget): boolean {
-    return (
-      this.labelText === other.labelText &&
-      this.itemType === other.itemType &&
-      this.indentSpaces === other.indentSpaces
+  eq(other: InlineHiddenTaskLabelsWidget): boolean {
+    if (this.items.length !== other.items.length) return false;
+    return this.items.every(
+      (it, i) => it.label === other.items[i].label && it.type === other.items[i].type
     );
   }
 }
+
+// Backwards compatibility alias
+export const HiddenItemWidget = InlineHiddenTaskLabelsWidget;
 
 export interface HideTaskMetadataOptions {
   hideIds: boolean;
@@ -127,38 +136,67 @@ export function buildHideTaskMetadataDeco(
   opts: HideTaskMetadataOptions
 ): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  for (let l = 1; l <= state.doc.lines; l++) {
+  let l = 1;
+  while (l <= state.doc.lines) {
     const line = state.doc.line(l);
-    let isHidden = false;
-    let itemType: 'id' | 'status' | 'priority' | 'metadata' = 'metadata';
-    if (opts.hideIds && isTaskIdLine(line.text)) {
-      isHidden = true;
-      itemType = 'id';
-    } else if (opts.hideStatus && isTaskStatusLine(line.text)) {
-      isHidden = true;
-      itemType = 'status';
-    } else if (opts.hidePriority && isTaskPriorityLine(line.text)) {
-      isHidden = true;
-      itemType = 'priority';
-    }
-    if (isHidden) {
-      const lFrom = line.from;
-      const lTo = l < state.doc.lines ? line.to + 1 : line.to;
-      if (opts.showLabels) {
-        const cleanLabel = line.text.trim().replace(/^[-*]\s*/, '');
-        const indentMatch = line.text.match(/^(\s*)/);
-        const indent = indentMatch ? indentMatch[1].length : 2;
+    const isTaskRoot = /^(\s*)[-*+]\s*\[([ xX])\]/.test(line.text);
+    if (isTaskRoot) {
+      const taskLine = line;
+      const hiddenItems: HiddenTaskItemInfo[] = [];
+      const hiddenRanges: Array<{ from: number; to: number }> = [];
+      let subL = l + 1;
+      while (subL <= state.doc.lines) {
+        const subLine = state.doc.line(subL);
+        const subText = subLine.text;
+        if (
+          subText.trim().length === 0 ||
+          /^(\s*)[-*+]\s*\[([ xX])\]/.test(subText) ||
+          subText.startsWith('#')
+        ) {
+          break;
+        }
+        let type: 'id' | 'status' | 'priority' | null = null;
+        if (opts.hideIds && isTaskIdLine(subText)) type = 'id';
+        else if (opts.hideStatus && isTaskStatusLine(subText)) type = 'status';
+        else if (opts.hidePriority && isTaskPriorityLine(subText)) type = 'priority';
+
+        if (type) {
+          const cleanLabel = subText.trim().replace(/^[-*]\s*/, '');
+          hiddenItems.push({ type, label: cleanLabel, rawText: subText });
+          const lFrom = subLine.from;
+          const lTo = subL < state.doc.lines ? subLine.to + 1 : subLine.to;
+          hiddenRanges.push({ from: lFrom, to: lTo });
+        }
+        subL++;
+      }
+
+      if (opts.showLabels && hiddenItems.length > 0) {
         builder.add(
-          lFrom,
-          lTo,
-          Decoration.replace({
-            block: true,
-            widget: new HiddenItemWidget(cleanLabel, itemType, indent, opts.onToggleLabels),
+          taskLine.to,
+          taskLine.to,
+          Decoration.widget({
+            widget: new InlineHiddenTaskLabelsWidget(hiddenItems, opts.onToggleLabels),
+            side: 1,
           })
         );
-      } else {
+      }
+
+      for (const r of hiddenRanges) {
+        builder.add(r.from, r.to, Decoration.replace({ block: true }));
+      }
+
+      l = subL;
+    } else {
+      let type: 'id' | 'status' | 'priority' | null = null;
+      if (opts.hideIds && isTaskIdLine(line.text)) type = 'id';
+      else if (opts.hideStatus && isTaskStatusLine(line.text)) type = 'status';
+      else if (opts.hidePriority && isTaskPriorityLine(line.text)) type = 'priority';
+      if (type) {
+        const lFrom = line.from;
+        const lTo = l < state.doc.lines ? line.to + 1 : line.to;
         builder.add(lFrom, lTo, Decoration.replace({ block: true }));
       }
+      l++;
     }
   }
   return builder.finish();
