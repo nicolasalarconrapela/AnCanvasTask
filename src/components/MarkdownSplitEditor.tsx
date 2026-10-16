@@ -42,12 +42,12 @@ export class InlineHiddenTaskLabelsWidget extends WidgetType {
   toDOM(): HTMLElement {
     const wrap = document.createElement('span');
     wrap.className =
-      'cm-inline-task-labels inline-flex items-center gap-1.5 ml-2.5 align-middle select-none pointer-events-auto';
+      'cm-inline-task-labels inline-flex items-center gap-1 ml-1.5 align-middle select-none pointer-events-auto';
 
     for (const item of this.items) {
       const badge = document.createElement('span');
       badge.className =
-        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono leading-none border transition-colors ' +
+        'inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none border transition-colors ' +
         (item.type === 'id'
           ? 'bg-amber-100/50 text-amber-900 border-amber-200/80 dark:bg-amber-950/30 dark:text-amber-200/90 dark:border-amber-700/40'
           : item.type === 'status'
@@ -55,10 +55,16 @@ export class InlineHiddenTaskLabelsWidget extends WidgetType {
           : item.type === 'priority'
           ? 'bg-rose-100/50 text-rose-900 border-rose-200/80 dark:bg-rose-950/30 dark:text-rose-200/90 dark:border-rose-700/40'
           : 'bg-stone-100/60 text-stone-700 border-stone-200 dark:bg-stone-900/40 dark:text-stone-300 dark:border-stone-800');
+      badge.style.fontSize = '8px';
+      badge.style.padding = '1px 3px';
+      badge.style.lineHeight = '1';
+      badge.style.borderRadius = '3px';
 
       // Subtle Icon
       const icon = document.createElement('span');
-      icon.className = 'material-symbols-outlined text-[11px] opacity-70 shrink-0';
+      icon.className = 'material-symbols-outlined text-[8.5px] opacity-70 shrink-0';
+      icon.style.fontSize = '8.5px';
+      icon.style.lineHeight = '1';
       icon.textContent =
         item.type === 'id'
           ? 'tag'
@@ -72,6 +78,8 @@ export class InlineHiddenTaskLabelsWidget extends WidgetType {
       // Label Text: e.g. "ID: auth-01", "Status: todo", "Priority: P1"
       const text = document.createElement('span');
       text.className = 'font-medium cursor-pointer hover:underline tracking-tight';
+      text.style.fontSize = '8px';
+      text.style.lineHeight = '1';
       text.textContent = item.label;
       text.title = 'Clic para mostrar este campo en Markdown';
       text.addEventListener('mousedown', (e) => {
@@ -94,7 +102,9 @@ export class InlineHiddenTaskLabelsWidget extends WidgetType {
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
     toggleBtn.className =
-      'text-[10px] opacity-40 hover:opacity-100 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-opacity cursor-pointer flex items-center leading-none px-0.5 ml-0.5';
+      'text-[8px] opacity-40 hover:opacity-100 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-opacity cursor-pointer flex items-center leading-none px-0.5 ml-0.5';
+    toggleBtn.style.fontSize = '8px';
+    toggleBtn.style.lineHeight = '1';
     toggleBtn.title = 'Ocultar estas etiquetas visuales';
     toggleBtn.setAttribute('aria-label', 'Ocultar etiquetas');
     toggleBtn.textContent = '×';
