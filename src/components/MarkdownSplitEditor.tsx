@@ -25,6 +25,160 @@ import {
 } from '../utils/markdownSync';
 import { SafeMarkdownNormalizerModal } from './SafeMarkdownNormalizerModal';
 
+export class HiddenItemWidget extends WidgetType {
+  constructor(
+    readonly labelText: string,
+    readonly itemType: 'id' | 'status' | 'priority' | 'metadata',
+    readonly indentSpaces: number,
+    readonly onToggleLabels?: () => void
+  ) {
+    super();
+  }
+
+  toDOM(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'cm-hidden-item-line select-none flex items-center leading-normal my-0.5 pointer-events-auto';
+    wrap.style.paddingLeft = `${Math.max(16, this.indentSpaces * 8)}px`;
+
+    const badge = document.createElement('span');
+    badge.className =
+      'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-medium border shadow-xs transition-colors ' +
+      (this.itemType === 'id'
+        ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80'
+        : this.itemType === 'status'
+        ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-800/80'
+        : this.itemType === 'priority'
+        ? 'bg-rose-500/10 text-rose-400 border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80'
+        : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)]');
+
+    // Icon
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined text-[12px] opacity-85 shrink-0';
+    icon.textContent =
+      this.itemType === 'id'
+        ? 'tag'
+        : this.itemType === 'status'
+        ? 'check_circle'
+        : this.itemType === 'priority'
+        ? 'flag'
+        : 'label';
+    badge.appendChild(icon);
+
+    // Label text
+    const text = document.createElement('span');
+    text.className = 'font-semibold tracking-tight cursor-pointer hover:underline';
+    text.textContent = this.labelText;
+    text.title = 'Clic para mostrar este campo en Markdown';
+    text.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.itemType === 'id') {
+        window.dispatchEvent(new CustomEvent('antask:toggle-show-ids'));
+      } else if (this.itemType === 'status') {
+        window.dispatchEvent(new CustomEvent('antask:toggle-show-status'));
+      } else if (this.itemType === 'priority') {
+        window.dispatchEvent(new CustomEvent('antask:toggle-show-priority'));
+      }
+    });
+    badge.appendChild(text);
+
+    // Button to toggle/hide this visual label
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className =
+      'ml-0.5 text-[11px] opacity-60 hover:opacity-100 hover:text-[var(--on-surface)] transition-opacity cursor-pointer flex items-center leading-none px-0.5';
+    closeBtn.title = 'Ocultar etiquetas de items ocultos';
+    closeBtn.setAttribute('aria-label', 'Ocultar etiqueta');
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.onToggleLabels) {
+        this.onToggleLabels();
+      } else {
+        window.dispatchEvent(new CustomEvent('antask:toggle-show-hidden-labels'));
+      }
+    });
+    badge.appendChild(closeBtn);
+
+    wrap.appendChild(badge);
+    return wrap;
+  }
+
+  eq(other: HiddenItemWidget): boolean {
+    return (
+      this.labelText === other.labelText &&
+      this.itemType === other.itemType &&
+      this.indentSpaces === other.indentSpaces
+    );
+  }
+}
+
+export interface HideTaskMetadataOptions {
+  hideIds: boolean;
+  hideStatus: boolean;
+  hidePriority: boolean;
+  showLabels: boolean;
+  onToggleLabels?: () => void;
+}
+
+export function buildHideTaskMetadataDeco(
+  state: EditorState,
+  opts: HideTaskMetadataOptions
+): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  for (let l = 1; l <= state.doc.lines; l++) {
+    const line = state.doc.line(l);
+    let isHidden = false;
+    let itemType: 'id' | 'status' | 'priority' | 'metadata' = 'metadata';
+    if (opts.hideIds && isTaskIdLine(line.text)) {
+      isHidden = true;
+      itemType = 'id';
+    } else if (opts.hideStatus && isTaskStatusLine(line.text)) {
+      isHidden = true;
+      itemType = 'status';
+    } else if (opts.hidePriority && isTaskPriorityLine(line.text)) {
+      isHidden = true;
+      itemType = 'priority';
+    }
+    if (isHidden) {
+      const lFrom = line.from;
+      const lTo = l < state.doc.lines ? line.to + 1 : line.to;
+      if (opts.showLabels) {
+        const cleanLabel = line.text.trim().replace(/^[-*]\s*/, '');
+        const indentMatch = line.text.match(/^(\s*)/);
+        const indent = indentMatch ? indentMatch[1].length : 2;
+        builder.add(
+          lFrom,
+          lTo,
+          Decoration.replace({
+            block: true,
+            widget: new HiddenItemWidget(cleanLabel, itemType, indent, opts.onToggleLabels),
+          })
+        );
+      } else {
+        builder.add(lFrom, lTo, Decoration.replace({ block: true }));
+      }
+    }
+  }
+  return builder.finish();
+}
+
+export function createHideTaskMetadataExtension(opts: HideTaskMetadataOptions): Extension {
+  return StateField.define<DecorationSet>({
+    create(state) {
+      return buildHideTaskMetadataDeco(state, opts);
+    },
+    update(decorations, tr) {
+      if (tr.docChanged) {
+        return buildHideTaskMetadataDeco(tr.state, opts);
+      }
+      return decorations.map(tr.changes);
+    },
+    provide: (field) => EditorView.decorations.from(field),
+  });
+}
+
 function buildHideTaskIdsDeco(state: EditorState): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (let l = 1; l <= state.doc.lines; l++) {
@@ -345,6 +499,8 @@ interface MarkdownSplitEditorProps {
   onToggleShowTaskStatus?: () => void;
   showTaskPriority?: boolean;
   onToggleShowTaskPriority?: () => void;
+  showHiddenItemLabels?: boolean;
+  onToggleShowHiddenItemLabels?: () => void;
 }
 
 export function MarkdownSplitEditor({
@@ -364,6 +520,8 @@ export function MarkdownSplitEditor({
   onToggleShowTaskStatus,
   showTaskPriority,
   onToggleShowTaskPriority,
+  showHiddenItemLabels,
+  onToggleShowHiddenItemLabels,
 }: MarkdownSplitEditorProps) {
   const { i18n } = useLingui();
   const editorRef = useRef<ReactCodeMirrorRef>(null);
@@ -373,6 +531,16 @@ export function MarkdownSplitEditor({
   const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
   const [isTyping, setIsTyping] = useState(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [localShowHiddenLabels, setLocalShowHiddenLabels] = useState(true);
+  const showHiddenLabels = showHiddenItemLabels !== undefined ? showHiddenItemLabels : localShowHiddenLabels;
+  const handleToggleHiddenLabels = useCallback(() => {
+    if (onToggleShowHiddenItemLabels) {
+      onToggleShowHiddenItemLabels();
+    } else {
+      setLocalShowHiddenLabels((prev) => !prev);
+    }
+  }, [onToggleShowHiddenItemLabels]);
 
   // Apply remote changes before the controlled editor replaces its whole value.
   // CodeMirror maps the cursor through these edits and excludes them from undo.
@@ -552,17 +720,28 @@ export function MarkdownSplitEditor({
       cursorTrackerPlugin,
       EditorView.lineWrapping,
     ];
-    if (showTaskIds === false) {
-      exts.push(hideTaskIdsExtension);
-    }
-    if (showTaskStatus === false) {
-      exts.push(hideTaskStatusExtension);
-    }
-    if (showTaskPriority === false) {
-      exts.push(hideTaskPriorityExtension);
+    const hasHiddenFields = showTaskIds === false || showTaskStatus === false || showTaskPriority === false;
+    if (hasHiddenFields) {
+      exts.push(
+        createHideTaskMetadataExtension({
+          hideIds: showTaskIds === false,
+          hideStatus: showTaskStatus === false,
+          hidePriority: showTaskPriority === false,
+          showLabels: showHiddenLabels !== false,
+          onToggleLabels: handleToggleHiddenLabels,
+        })
+      );
     }
     return exts;
-  }, [enterTaskSnippetExt, cursorTrackerPlugin, showTaskIds, showTaskStatus, showTaskPriority]);
+  }, [
+    enterTaskSnippetExt,
+    cursorTrackerPlugin,
+    showTaskIds,
+    showTaskStatus,
+    showTaskPriority,
+    showHiddenLabels,
+    handleToggleHiddenLabels,
+  ]);
 
   return (
     <aside
@@ -751,6 +930,38 @@ export function MarkdownSplitEditor({
               <span className="font-mono text-[10px] font-bold">#Prio</span>
               <span className="hidden 2xl:inline text-[10px]">
                 {showTaskPriority !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
+              </span>
+            </button>
+          )}
+
+          {/* Toggle Show/Hide Visual Labels for Hidden Items */}
+          {(showTaskIds === false || showTaskStatus === false || showTaskPriority === false) && (
+            <button
+              id="btn-markdown-toggle-hidden-labels"
+              type="button"
+              onClick={handleToggleHiddenLabels}
+              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
+                showHiddenLabels !== false
+                  ? 'bg-sky-950/40 text-sky-300 border-sky-800/80 hover:bg-sky-900/60'
+                  : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+              }`}
+              title={
+                showHiddenLabels !== false
+                  ? i18n._(msg`Ocultar etiquetas de items ocultos en el editor Markdown`)
+                  : i18n._(msg`Mostrar etiquetas de items ocultos en el editor Markdown`)
+              }
+              aria-label={
+                showHiddenLabels !== false
+                  ? i18n._(msg`Ocultar etiquetas de items ocultos`)
+                  : i18n._(msg`Mostrar etiquetas de items ocultos`)
+              }
+            >
+              <span className="material-symbols-outlined text-[13px]">
+                {showHiddenLabels !== false ? 'visibility' : 'visibility_off'}
+              </span>
+              <span className="font-mono text-[10px] font-bold">Labels</span>
+              <span className="hidden 2xl:inline text-[10px]">
+                {showHiddenLabels !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
               </span>
             </button>
           )}

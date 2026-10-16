@@ -482,6 +482,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   />
                 </div>
 
+                {/* Show Hidden Item Labels in Markdown */}
+                <div id="div-settings-show-hidden-labels" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Mostrar etiquetas de items ocultos en Markdown`)}</span>
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Muestra una etiqueta visual con el contenido del item al ocultar ID, estado o prioridad`)}</span>
+                  </div>
+                  <input
+                    id="checkbox-settings-show-hidden-labels"
+                    type="checkbox"
+                    checked={settings.showHiddenItemLabels !== false}
+                    onChange={(e) => handleUpdate('showHiddenItemLabels', e.target.checked)}
+                    className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
+                  />
+                </div>
+
                 {/* tldraw SDK License */}
                 <div id="div-settings-tldraw-license" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
                   <div className="flex flex-col gap-0.5 min-w-0">
