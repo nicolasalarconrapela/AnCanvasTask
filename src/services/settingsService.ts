@@ -20,6 +20,9 @@ export interface AppUserSettings {
   canvasShowGrid: boolean;
   canvasSnapToGrid: boolean;
   canvasInitialZoom: number; // in percentage, e.g. 100
+  showTaskIds: boolean;
+  showTaskStatus: boolean;
+  showTaskPriority: boolean;
   workspaceShowSidebar: boolean;
   kanbanDefaultGroupBy: 'status' | 'section';
   kanbanShowTags: boolean;
@@ -40,6 +43,9 @@ export const DEFAULT_USER_SETTINGS: AppUserSettings = {
   canvasShowGrid: true,
   canvasSnapToGrid: false,
   canvasInitialZoom: 100,
+  showTaskIds: true,
+  showTaskStatus: true,
+  showTaskPriority: true,
   workspaceShowSidebar: true,
   kanbanDefaultGroupBy: 'status',
   kanbanShowTags: true,
@@ -61,6 +67,9 @@ export function loadUserSettings(): AppUserSettings {
     return {
       ...DEFAULT_USER_SETTINGS,
       ...parsed,
+      showTaskIds: parsed.showTaskIds !== undefined ? Boolean(parsed.showTaskIds) : DEFAULT_USER_SETTINGS.showTaskIds,
+      showTaskStatus: parsed.showTaskStatus !== undefined ? Boolean(parsed.showTaskStatus) : DEFAULT_USER_SETTINGS.showTaskStatus,
+      showTaskPriority: parsed.showTaskPriority !== undefined ? Boolean(parsed.showTaskPriority) : DEFAULT_USER_SETTINGS.showTaskPriority,
       recentFiles: Array.isArray(parsed.recentFiles) ? parsed.recentFiles : DEFAULT_USER_SETTINGS.recentFiles,
     };
   } catch (e) {

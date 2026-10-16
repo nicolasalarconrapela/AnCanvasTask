@@ -6,7 +6,7 @@ import { beginSyncSession, getSyncSession, invalidateSyncSession } from '../src/
 import { createEmptyWorkspace, createTaskDocument, createWorkspaceBranch, loadWorkspaceStore, saveWorkspaceStore, flushWorkspaceStoreSaves, sanitizeWorkspace } from '../src/services/workspaceService';
 import { analyzeSyncDifferences, classifySyncDifference, compareMarkdownDocuments, resolveSyncItem, executeBatchSync } from '../src/services/syncEngineService';
 import { applyRemoteTask, clearSanityConfig, deleteDocumentFromSanity, getSanityConfig, normalizeSanityWorkspaceDoc, workspacesFromSanityDocuments, subscribeToSanityLiveChanges } from '../src/services/sanityService';
-import { scanTaskBlocks, updateTaskInMarkdown } from '../src/utils/markdownSync';
+import { scanTaskBlocks, updateTaskInMarkdown, deleteTaskFromMarkdown, autoAssignAllMissingTaskIds, toggleSubtaskInMarkdown } from '../src/utils/markdownSync';
 
 class MemoryStorage implements Storage {
   [key: string]: any;
@@ -958,4 +958,197 @@ test('rejected offline replay retains its syncId and expected revision in logs',
   invalidateSyncSession();
   await assert.rejects(sync.write({ ...base, title: 'Old session' }, config), /sesión/);
   assert.equal(events.at(-1).result, 'rejected'); assert.equal(events.at(-1).session, null);
+});
+
+const commentedTasks = `<!--
+  - [ ]
+    - ID: task-4
+  - [ ] Ocultar campos
+  - [ ] Ocultar campos ID/
+  - [ ] Ocultar campos ID/stati
+  - [ ] Ocultar campos ID/status/
+  - [ ] Ocultar campos ID/status/priority -->`;
+
+test('commented task projections do not reappear as active tasks during hydration', () => {
+  const raw = workspace(); raw.branches[0].taskDocuments[0].content = '# Tareas\n\n' + commentedTasks;
+  const projection = { ...task(), taskId: 'task-4', title: '', workspaceId: 'w', documentKey: 'main::d' };
+  const titleProjection = { ...projection, _id: 'previous-auto-id', taskId: 'ocultar-campos', title: 'Ocultar campos' };
+  const result = workspacesFromSanityDocuments([raw, projection, titleProjection])[0];
+  assert.equal(result.branches[0].taskDocuments[0].content, raw.branches[0].taskDocuments[0].content);
+});
+
+test('editing an active task preserves adjacent commented IDs and priorities byte for byte', () => {
+  const source = markdown + '\n' + commentedTasks + '\n- [ ] Next\n  ID: next\n';
+  const result = updateTaskInMarkdown(source, 'x', { priority: 'P0', id: 'renamed-x' });
+  assert(result.includes(commentedTasks));
+  assert.deepEqual(scanTaskBlocks(result).taskBlocks.map(t => t.detectedId), ['renamed-x', 'next']);
+});
+
+test('deleting an active task preserves an adjacent HTML comment', () => {
+  const source = markdown + '\n' + commentedTasks + '\n- [ ] Next\n  ID: next\n';
+  assert(deleteTaskFromMarkdown(source, 'x').includes(commentedTasks));
+});
+
+test('automatic IDs leave closed and unfinished HTML comments untouched', () => {
+  for (const content of [commentedTasks, commentedTasks.replace('-->', '')]) {
+    assert.equal(autoAssignAllMissingTaskIds(content).updatedMarkdown, content);
+  }
+});
+
+test('concurrent generated ID lines are never concatenated into a duplicate identity', () => {
+  const base = '# Tareas\n- [ ] Report\n';
+  const local = autoAssignAllMissingTaskIds(base.replace('Report', 'Local report')).updatedMarkdown;
+  const remote = autoAssignAllMissingTaskIds(base.replace('Report', 'Remote report')).updatedMarkdown;
+  assert.throws(() => mergeMarkdown(base, local, remote), SyncConflict);
+});
+
+test('compatible concurrent first edits derive one ID from their shared task base', () => {
+  const base = '# Tareas\n- [ ] Report\n';
+  const local = autoAssignAllMissingTaskIds(base.replace('Report', 'Draft Report'), base).updatedMarkdown;
+  const remote = autoAssignAllMissingTaskIds(base.replace('Report', 'Report today'), base).updatedMarkdown;
+  const merged = mergeMarkdown(base, local, remote);
+  assert(merged.includes('Draft Report today'));
+  assert.equal(merged.match(/ID:/g)?.length, 1);
+  assert.equal(scanTaskBlocks(merged).taskBlocks[0].detectedId, 'report');
+});
+
+test('concurrent metadata insertion deduplicates IDs while preserving distinct fields', () => {
+  const base = '# Tareas\n- [ ] Report\n';
+  const local = base + '  - ID: fixed\n  - Priority: P0\n';
+  const remote = base + '  - ID: fixed\n  - Status: blocked\n';
+  const merged = mergeMarkdown(base, local, remote);
+  assert.equal(merged.match(/ID:/g)?.length, 1);
+  assert(merged.includes('Priority: P0')); assert(merged.includes('Status: blocked'));
+});
+
+test('commented task changes reject stale task writes instead of reactivating the task', async () => {
+  const raw = workspace(); server.documents.set(raw._id, raw); sync.observe(raw);
+  const saved = await sync.write(raw, config);
+  const task = [...server.documents.values()].find(d => d._type === 'task');
+  const commented = structuredClone(saved); commented._rev = 'commented-parent';
+  commented.branches[0].taskDocuments[0].content = '<!--\n' + markdown + '\n-->';
+  server.documents.set(raw._id, commented);
+  await assert.rejects(sync.write({ ...task, title: 'Stale tab edit' }, config), SyncConflict);
+  assert.equal(server.documents.get(raw._id).branches[0].taskDocuments[0].content, commented.branches[0].taskDocuments[0].content);
+});
+
+test('a workspace with anonymous remote tasks accepts automatic IDs without requiring IDs in its base', async () => {
+  const raw = workspace(); raw.branches[0].taskDocuments[0].content = '# Tareas\n\n## General\n- [ ] Report\n';
+  server.documents.set(raw._id, raw); sync.observe(raw);
+  const local = structuredClone(raw);
+  local.branches[0].taskDocuments[0].content = autoAssignAllMissingTaskIds(raw.branches[0].taskDocuments[0].content).updatedMarkdown;
+  const saved = await sync.write(local, config);
+  assert.equal(scanTaskBlocks(saved.branches[0].taskDocuments[0].content).taskBlocks[0].detectedId, 'report');
+});
+
+test('inline and spanning comments survive active task edits and deletions', () => {
+  for (const comment of ['<!-- hidden -->', '<!--\n- [ ] Hidden\n  ID: shadow\n-->']) {
+    const source = '- [ ] Active ' + comment + '\n  ID: active\n';
+    const updated = updateTaskInMarkdown(source, 'active', { title: 'Changed', priority: 'P0' });
+    assert(updated.includes(comment));
+    assert.equal(scanTaskBlocks(updated).taskBlocks[0].detectedId, 'active');
+    const deleted = deleteTaskFromMarkdown(source, 'active');
+    assert(deleted.includes(comment)); assert.equal(scanTaskBlocks(deleted).taskBlocks.length, 0);
+  }
+});
+
+test('two clients concurrently assign IDs and combine compatible edits of an anonymous task', async () => {
+  const raw = workspace(); const baseText = '# Tareas\n\n## General\n- [ ] Report\n';
+  raw.branches[0].taskDocuments[0].content = baseText;
+  server.documents.set(raw._id, raw); sync.observe(raw);
+  const other = new DocumentSync(server.client, 'other-tab'); other.observe(raw);
+  const first = structuredClone(raw), second = structuredClone(raw);
+  first.branches[0].taskDocuments[0].content = autoAssignAllMissingTaskIds(baseText.replace('Report', 'Draft Report'), baseText).updatedMarkdown;
+  second.branches[0].taskDocuments[0].content = autoAssignAllMissingTaskIds(baseText.replace('Report', 'Report today'), baseText).updatedMarkdown;
+  await sync.write(first, config);
+  const saved = await other.write(second, config);
+  const blocks = scanTaskBlocks(saved.branches[0].taskDocuments[0].content).taskBlocks;
+  assert.equal(blocks.length, 1); assert.equal(blocks[0].detectedId, 'report');
+  assert.equal(blocks[0].detectedTitle, 'Draft Report today');
+  assert.equal([...server.documents.values()].filter(d => d._type === 'task' && !d.syncDeleted).length, 1);
+});
+
+test('subtask updates skip checkboxes inside comments', () => {
+  const comment = '<!--\n  - [ ] Hidden child\n-->';
+  const source = '- [ ] Parent\n  ID: parent\n' + comment + '\n  - [ ] Visible child\n';
+  const toggled = toggleSubtaskInMarkdown(source, 'parent', 0, true);
+  assert(toggled.includes(comment)); assert(toggled.includes('- [x] Visible child'));
+  const updated = updateTaskInMarkdown(source, 'parent', { subtasks: { total: 1, completed: 1, items: [{ title: 'Visible child', completed: true }] } });
+  assert(updated.includes(comment)); assert(updated.includes('- [x] Visible child'));
+});
+
+test('manual restoration can reactivate one commented task while retaining the archived comment', async () => {
+  const raw = workspace(); server.documents.set(raw._id, raw); sync.observe(raw);
+  const saved = await sync.write(raw, config);
+  const task = [...server.documents.values()].find(d => d._type === 'task');
+  const parent = structuredClone(saved); parent._rev = 'commented';
+  const comment = '<!--\n' + markdown + '\n-->';
+  parent.branches[0].taskDocuments[0].content = comment; server.documents.set(raw._id, parent);
+  await sync.restore(task, config);
+  const content = server.documents.get(raw._id).branches[0].taskDocuments[0].content;
+  assert(content.includes(comment)); assert.equal(scanTaskBlocks(content).taskBlocks.length, 1);
+  assert.equal(scanTaskBlocks(content).taskBlocks[0].detectedId, 'x');
+});
+
+test('renamed stale projections cannot reactivate commented tasks with automatic IDs', () => {
+  const source = '<!--\n- [ ] Old title\n-->';
+  assert.equal(applyRemoteTask(source, { taskId: 'old-title', title: 'New remote title' }), source);
+});
+
+test('smart sync may pull a remote comment without restoring its formerly active task', async () => {
+  const raw = workspace(); documentSync.forget(); documentSync.observe(raw);
+  const local = normalizeSanityWorkspaceDoc(raw);
+  const remote = structuredClone(local); remote._rev = 'commented-remote';
+  remote.branches[0].taskDocuments[0].content = '<!--\n' + markdown + '\n-->';
+  const item: any = { id: 'w', entityType: 'workspace', workspaceId: 'w', diffType: 'remote_override',
+    resolutionStrategy: 'keep_remote', localData: local, remoteData: remote };
+  const store = { scope: getSyncSession()!.scope, workspaces: [local], remoteBase: [structuredClone(local)], activeWorkspaceId: 'w' };
+  const result = await executeBatchSync([item], 'smart', store, config);
+  assert(result.success, result.message); assert.equal(result.resolvedCount, 1);
+  assert.equal(scanTaskBlocks(result.updatedStore.workspaces[0].branches[0].taskDocuments[0].content).taskBlocks.length, 0);
+  assert.equal(server.commits, 0);
+});
+
+test('offline replay reports only this tab acknowledgements with the original sent snapshot', async () => {
+  const a = task(), b = { ...task(), _id: 'other-task' };
+  server.documents.set(a._id, a); server.documents.set(b._id, b);
+  const own = new DocumentSync(server.client, 'own'), foreign = new DocumentSync(server.client, 'foreign');
+  own.observe(a); foreign.observe(b);
+  server.offline = true;
+  await assert.rejects(own.write({ ...a, title: 'Own pending edit' }, config));
+  await assert.rejects(foreign.write({ ...b, title: 'Other tab edit' }, config));
+  server.offline = false;
+  const acknowledgements: any[] = [];
+  await own.flush(getSyncSession()!, (sent, document) => acknowledgements.push({ sent, document }));
+  assert.equal(acknowledgements.length, 1);
+  assert.equal(acknowledgements[0].sent.title, 'Own pending edit');
+  assert.equal(acknowledgements[0].sent._rev, a._rev);
+  assert.equal(acknowledgements[0].document._rev, server.documents.get(a._id)._rev);
+  assert.equal(server.documents.get(b._id).title, 'Other tab edit');
+});
+
+test('editing an identified task preserves an anonymous sibling in its remote parent', async () => {
+  const raw = workspace(); server.documents.set(raw._id, raw); sync.observe(raw);
+  const saved = await sync.write(raw, config);
+  const existing = [...server.documents.values()].find(d => d._type === 'task');
+  const parent = structuredClone(saved); parent._rev = 'anonymous-sibling';
+  parent.branches[0].taskDocuments[0].content += '\n- [ ] Still being written\n';
+  server.documents.set(raw._id, parent);
+  await sync.write({ ...existing, completed: true, status: 'done' }, config);
+  const content = server.documents.get(raw._id).branches[0].taskDocuments[0].content;
+  assert(content.includes('- [ ] Still being written')); assert(content.includes('- [x] A'));
+});
+
+test('explicit remote selection restores a commented task locally without mutating the cloud', async () => {
+  const raw = workspace(); raw.branches[0].taskDocuments[0].content = '<!--\n' + markdown + '\n-->';
+  documentSync.forget(); documentSync.observe(raw);
+  const local = normalizeSanityWorkspaceDoc(raw);
+  const remoteTask = { ...task(), taskId: 'x', workspaceId: 'w', documentKey: 'main::d' };
+  const item: any = { entityType: 'task', workspaceId: 'w', branchName: 'main', documentPath: 'TASKS.md',
+    remoteData: remoteTask, remoteWorkspace: structuredClone(local), remoteWorkspaceDocument: raw };
+  const store = { scope: getSyncSession()!.scope, workspaces: [local], remoteBase: [structuredClone(local)], activeWorkspaceId: 'w' };
+  const result = await resolveSyncItem(item, 'keep_remote', store, config, true);
+  assert(result.success, result.message);
+  assert.equal(scanTaskBlocks(result.updatedStore!.workspaces[0].branches[0].taskDocuments[0].content).taskBlocks.length, 1);
+  assert.equal(server.commits, 0);
 });

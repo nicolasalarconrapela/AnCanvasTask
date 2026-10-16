@@ -896,9 +896,9 @@ export const SyncOverrideModal: React.FC<SyncOverrideModalProps> = ({
         },
         {
           label: i18n._(msg`Prioridad`),
-          local: local.priority || 'P1',
-          remote: remote.priority || 'P1',
-          isDiff: (local.priority || 'P1') !== (remote.priority || 'P1'),
+          local: local.priority || 'P3',
+          remote: remote.priority || 'P3',
+          isDiff: (local.priority || 'P3') !== (remote.priority || 'P3'),
         },
         {
           label: i18n._(msg`Sección`),

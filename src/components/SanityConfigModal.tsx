@@ -405,7 +405,7 @@ export const taskSchema = {
       title: 'Prioridad',
       type: 'string',
       options: { list: ['P0', 'P1', 'P2', 'P3'] },
-      initialValue: 'P1',
+      initialValue: 'P3',
     },
     { name: 'groupTitle', title: 'Sección / Grupo', type: 'string', initialValue: 'General' },
     { name: 'blockedBy', title: 'Bloqueada Por (Task ID)', type: 'string' },

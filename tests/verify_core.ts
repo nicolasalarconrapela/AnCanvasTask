@@ -10,9 +10,22 @@ import {
   deleteSectionFromMarkdown,
   deleteTaskFromMarkdown,
   autoAssignAllMissingTaskIds,
+  autoAssignAllMissingTaskStatuses,
+  assignStatusToTask,
   validateMarkdownDocument,
   updateSectionColorInMarkdown,
+  sanitizeTaskMetadataOrder,
+  scanNotesFromMarkdown,
+  syncNotesToMarkdown,
+  maskHtmlComments,
+  buildTaskEnterSnippet,
+  isTaskStatusLine,
+  isTaskPriorityLine,
+  stripStatusFromMarkdown,
+  stripPriorityFromMarkdown,
+  stripMetadataFieldsFromMarkdown,
 } from '../src/utils/markdownSync';
+import { CustomNoteShapeUtil } from '../src/shapes/TaskShapeUtil';
 import {
   getInitialDefaultWorkspaces,
 } from '../src/services/workspaceService';
@@ -20,6 +33,14 @@ import {
   buildSanityTaskDocId,
   normalizeSanityWorkspaceDoc,
 } from '../src/services/sanityService';
+import {
+  computeAutoLayout,
+  isRectOverlapping,
+} from '../src/utils/autoLayout';
+import {
+  taskFields,
+  applyTaskToMarkdown,
+} from '../src/services/documentSyncService';
 
 console.log('--- Iniciando suite de pruebas de AnTaskCanvas (Core sin GitHub) ---');
 
@@ -118,7 +139,9 @@ const { updatedMarkdown: addedMd } = addTaskToMarkdown(updatedMd, {
 });
 const withAddedTasks = parseTasksMarkdown(addedMd).flatMap((g) => g.tasks);
 assert.strictEqual(withAddedTasks.length, 4, 'Debe haber 4 tareas tras añadir una');
-assert(withAddedTasks.some((t) => t.taskId === 'fe_test'), 'fe_test debe estar en el markdown');
+const feTestTask = withAddedTasks.find((t) => t.taskId === 'fe_test');
+assert(feTestTask, 'fe_test debe estar en el markdown');
+assert.strictEqual(feTestTask.status, 'backlog', 'La nueva tarea debe inicializarse con status: backlog');
 
 const deletedMd = deleteTaskFromMarkdown(addedMd, 'fe_test');
 const withDeletedTasks = parseTasksMarkdown(deletedMd).flatMap((g) => g.tasks);
@@ -147,6 +170,173 @@ assert.strictEqual(assignedCount, 2, 'Debe haber asignado 2 IDs automáticos');
 const postValidation = validateMarkdownDocument(normalizedMd);
 assert.strictEqual(postValidation.issues.filter((i) => i.type === 'missing_id').length, 0, 'No deben quedar tareas sin ID');
 console.log('   ✓ Saneado y normalización conservadora verificada.');
+
+// 4b. Mandatory Status validation and automatic resolution
+console.log('4b. Verificando obligatoriedad de Status y resolvedor automático...');
+const noStatusMd = `# Proyecto
+## Sprint
+- [ ] Tarea pendiente sin estado
+  id: task_pending
+- [x] Tarea terminada sin estado
+  id: task_completed
+- [ ] Tarea con estado inválido
+  id: task_invalid
+  status: random_unknown_status
+`;
+const statusVal = validateMarkdownDocument(noStatusMd);
+assert.strictEqual(statusVal.missingStatusTaskIds.size, 2, 'Debe registrar 2 tareas en missingStatusTaskIds');
+assert.strictEqual(statusVal.issues.filter((i) => i.type === 'missing_status').length, 2, 'Debe detectar 2 issues missing_status');
+assert.strictEqual(statusVal.issues.filter((i) => i.type === 'invalid_status').length, 1, 'Debe detectar 1 issue invalid_status');
+
+// Resolver automáticamente todas las tareas sin estado
+const { updatedMarkdown: resolvedStatusMd, assignedCount: statusCount, assignedTasks } = autoAssignAllMissingTaskStatuses(noStatusMd);
+assert.strictEqual(statusCount, 2, 'Debe asignar estado a las 2 tareas faltantes');
+assert.strictEqual(assignedTasks.find((t) => t.taskId === 'task_pending')?.status, 'backlog', 'Tarea pendiente debe inicializarse con backlog');
+assert.strictEqual(assignedTasks.find((t) => t.taskId === 'task_completed')?.status, 'done', 'Tarea con [x] debe inicializarse con done');
+
+// Validar que en el markdown generado se resolvieron los missing_status
+const postStatusVal = validateMarkdownDocument(resolvedStatusMd);
+assert.strictEqual(postStatusVal.missingStatusTaskIds.size, 0, 'No deben quedar tareas con status faltante');
+assert.strictEqual(postStatusVal.issues.filter((i) => i.type === 'missing_status').length, 0, 'No debe haber issues missing_status');
+
+// Resolver status individualmente
+const singleResolvedMd = assignStatusToTask(noStatusMd, 'task_invalid', 'in_progress');
+const postSingleVal = validateMarkdownDocument(singleResolvedMd);
+assert.strictEqual(postSingleVal.issues.filter((i) => i.type === 'invalid_status').length, 0, 'Estado inválido debe haberse corregido');
+console.log('   ✓ Obligatoriedad de Status y resolvedor automático/individual verificados con éxito.');
+
+// 4c. Optional Description field parsing, updating, stripping, and Sanity sync
+console.log('4c. Verificando campo opcional Description y sincronización con Sanity...');
+const descSampleMd = `# Proyecto
+## Backend
+- [ ] Tarea con notas detalladas
+  - ID: task_desc
+  - Priority: P1
+  - Status: backlog
+  - Description: Esta es una descripción técnica para Sanity
+- [ ] Tarea sin descripción
+  - ID: task_nodesc
+  - Priority: P2
+  - Status: todo
+`;
+
+const descParsed = parseTasksMarkdown(descSampleMd);
+const descTasks = descParsed[0].tasks;
+assert.strictEqual(descTasks[0].description, 'Esta es una descripción técnica para Sanity', 'Debe parsear la descripción opcional');
+assert.strictEqual(descTasks[1].description, undefined, 'Tarea sin descripción debe tener description undefined');
+
+// Sincronización con Sanity via taskFields
+const fieldsSanity = taskFields(descSampleMd);
+assert.strictEqual(fieldsSanity[0].description, 'Esta es una descripción técnica para Sanity', 'Sanity taskFields debe incluir description');
+assert.strictEqual(fieldsSanity[1].description, undefined, 'Sanity taskFields no debe incluir description cuando no está');
+
+// Actualizar descripción en Markdown
+const updatedDescMd = updateTaskInMarkdown(descSampleMd, 'task_desc', {
+  description: 'Nueva descripción actualizada',
+});
+const reParsedDesc = parseTasksMarkdown(updatedDescMd)[0].tasks[0];
+assert.strictEqual(reParsedDesc.description, 'Nueva descripción actualizada', 'Debe actualizar description en Markdown');
+
+// Eliminar descripción pasando string vacío
+const strippedDescMd = updateTaskInMarkdown(updatedDescMd, 'task_desc', {
+  description: '',
+});
+assert(!strippedDescMd.includes('Description:'), 'Al pasar description vacía debe eliminar la línea Description');
+const reParsedStripped = parseTasksMarkdown(strippedDescMd)[0].tasks[0];
+assert.strictEqual(reParsedStripped.description, undefined, 'Description debe ser undefined tras removerla');
+
+// Añadir nueva tarea con Description mediante addTaskToMarkdown
+const { updatedMarkdown: addedWithDescMd } = addTaskToMarkdown(descSampleMd, {
+  title: 'Nueva tarea con descripción',
+  groupTitle: 'Backend',
+  customId: 'task_new_desc',
+  description: 'Notas iniciales opcionales',
+});
+const reParsedAdded = parseTasksMarkdown(addedWithDescMd)[0].tasks.find((t) => t.taskId === 'task_new_desc');
+assert(reParsedAdded, 'Debe existir la nueva tarea añadida');
+assert.strictEqual(reParsedAdded.description, 'Notas iniciales opcionales', 'Debe guardar y parsear la descripción inicial');
+assert.strictEqual(reParsedAdded.priority, 'P3', 'La nueva tarea debe tener prioridad P3 por defecto');
+
+// Aplicar tarea remota de Sanity con Description a Markdown (applyTaskToMarkdown)
+const appliedRemoteMd = applyTaskToMarkdown(strippedDescMd, {
+  taskId: 'task_desc',
+  title: 'Tarea con notas detalladas',
+  description: 'Descripción importada de Sanity Cloud',
+  status: 'in_progress',
+  priority: 'P0',
+});
+const reParsedApplied = parseTasksMarkdown(appliedRemoteMd)[0].tasks.find((t) => t.taskId === 'task_desc');
+assert.strictEqual(reParsedApplied?.description, 'Descripción importada de Sanity Cloud', 'applyTaskToMarkdown debe aplicar description');
+console.log('   ✓ Campo Description opcional, actualización, eliminación y sincronización con Sanity verificados.');
+
+// Verificación de fallback P3 al parsear tareas markdown sin prioridad explícita
+const noPriorityMd = `## General\n- [ ] Tarea sin prioridad explícita\n  id: task_no_prio\n`;
+const noPrioParsed = parseTasksMarkdown(noPriorityMd)[0].tasks[0];
+assert.strictEqual(noPrioParsed.priority, 'P3', 'Una tarea en markdown sin prioridad debe interpretarse por defecto como P3');
+const noPrioFields = taskFields(noPriorityMd)[0];
+assert.strictEqual(noPrioFields.priority, 'P3', 'taskFields debe asignar prioridad P3 por defecto si no está especificada');
+console.log('   ✓ Fallback de prioridad P3 por defecto en Markdown verificado.');
+
+// Verificación de orden canónico de metadatos: Description -> ID -> Status -> Priority -> Blocked by -> Tags -> Subtasks
+console.log('4.b Verificando orden canónico Description/ID/Status/Priority y sanitización...');
+const unorderedMd = `## General
+- [ ] Tarea con orden caótico
+  - Tags: urgent, backend
+  - Priority: P0
+  - Blocked by: root
+  - Status: in_progress
+  - ID: task_chaotic
+  - Description: Descripción importante
+  - [ ] Subtarea 1
+  - [x] Subtarea 2
+`;
+
+const { updatedMarkdown: sanitizedMd, reorderedCount } = sanitizeTaskMetadataOrder(unorderedMd);
+assert.strictEqual(reorderedCount, 1, 'Debe haber reordenado 1 tarea');
+
+// Verificar que las líneas aparecen exactamente en el orden requerido
+const descIdx = sanitizedMd.indexOf('Description:');
+const idIdx = sanitizedMd.indexOf('ID:');
+const statusIdx = sanitizedMd.indexOf('Status:');
+const priorityIdx = sanitizedMd.indexOf('Priority:');
+const blockedByIdx = sanitizedMd.indexOf('Blocked by:');
+const tagsIdx = sanitizedMd.indexOf('Tags:');
+const subtask1Idx = sanitizedMd.indexOf('- [ ] Subtarea 1');
+const subtask2Idx = sanitizedMd.indexOf('- [x] Subtarea 2');
+
+assert(descIdx < idIdx, 'Description debe ir ANTES de ID');
+assert(idIdx < statusIdx, 'ID debe ir ANTES de Status');
+assert(statusIdx < priorityIdx, 'Status debe ir ANTES de Priority');
+assert(priorityIdx < blockedByIdx, 'Priority debe ir ANTES de Blocked by');
+assert(blockedByIdx < tagsIdx, 'Blocked by debe ir ANTES de Tags');
+assert(tagsIdx < subtask1Idx, 'Tags debe ir ANTES de Subtasks');
+assert(subtask1Idx < subtask2Idx, 'El orden relativo de subtareas debe preservarse');
+
+// Si se vuelve a ejecutar sobre el markdown ya sanitizado, reorderedCount debe ser 0
+const secondPass = sanitizeTaskMetadataOrder(sanitizedMd);
+assert.strictEqual(secondPass.reorderedCount, 0, 'No debe modificar markdown ya sanitizado');
+assert.strictEqual(secondPass.updatedMarkdown, sanitizedMd, 'El contenido debe permanecer idéntico');
+
+// Verificar que addTaskToMarkdown genera automáticamente el orden canónico
+const { updatedMarkdown: fromAddMd } = addTaskToMarkdown(`## General\n`, {
+  title: 'Tarea creada con addTask',
+  groupTitle: 'General',
+  description: 'Mi descripción',
+  customId: 'task_added_order',
+  status: 'backlog',
+  priority: 'P3',
+  blockedBy: 'dep1',
+  tags: ['front', 'ui'],
+});
+
+const addDescIdx = fromAddMd.indexOf('Description:');
+const addIdIdx = fromAddMd.indexOf('ID:');
+const addStatusIdx = fromAddMd.indexOf('Status:');
+const addPriorityIdx = fromAddMd.indexOf('Priority:');
+assert(addDescIdx < addIdIdx, 'En addTaskToMarkdown Description va antes de ID');
+assert(addIdIdx < addStatusIdx, 'En addTaskToMarkdown ID va antes de Status');
+assert(addStatusIdx < addPriorityIdx, 'En addTaskToMarkdown Status va antes de Priority');
+console.log('   ✓ Orden Description/ID/Status/Priority y sanitización verificados.');
 
 // 5. Workspaces and Local Recovery without GitHub dependency
 console.log('5. Verificando estructura de Workspaces local y desacoplamiento de GitHub...');
@@ -485,9 +675,410 @@ const parsedCleared = parseTasksMarkdown(mdCleared);
 const beNpmCleared = parsedCleared.find((g) => g.title === 'NPM' && g.branchTitle === 'Backend');
 assert.strictEqual(beNpmCleared?.color, undefined, 'Backend NPM debe no tener color tras restablecer');
 
-console.log('   ✓ Colores de fondo blur parseados, actualizados y sincronizados bidireccionalmente de forma segura.');
+// 14. Verificando reorganización autónoma del Canvas (Auto-Layout sin solapamientos)
+console.log('14. Verificando reorganización autónoma del Canvas (sin solapamientos, límites y estricta pertenencia)...');
+const complexNestedMd = `# Paco
+
+## Fronted
+
+### NPM
+- [ ] Tarea Fronted 1
+  id: fe-task-1
+  priority: P1
+
+#### Github
+- [ ] Tarea Github en Fronted
+  id: fe-gh-1
+  priority: P2
+
+---
+
+## Backend
+
+### NPM
+- [ ] Tarea Blocker
+  id: be-blocker
+  priority: P0
+- [ ] Tarea Dependiente
+  id: be-blocked
+  priority: P1
+  blockedBy: be-blocker
+
+#### NPM
+- [ ] Tarea Sub-NPM
+  id: be-sub-npm
+  priority: P1
+
+#### Github
+- [ ] Tarea Github en Backend
+  id: be-gh-1
+  priority: P1
+- [ ] Tarea nivel 4
+  id: be-l4-1
+  priority: P2
+`;
+
+const layoutResult = computeAutoLayout(complexNestedMd);
+assert(layoutResult.tasks.length > 0, 'Debe haber tareas en el layout computado');
+assert(layoutResult.groups.length > 0, 'Debe haber grupos en el layout computado');
+
+const leafCols = layoutResult.groups.filter((g) => !g.isContainer);
+const macroContainers = layoutResult.groups.filter((g) => g.isContainer);
+
+// Invariante 1: Ninguna columna hoja se solapa con otra columna hoja
+for (let i = 0; i < leafCols.length; i++) {
+  for (let j = i + 1; j < leafCols.length; j++) {
+    const colA = leafCols[i];
+    const colB = leafCols[j];
+    const overlaps = isRectOverlapping(colA, colB, 10);
+    assert(!overlaps, `Las columnas '${colA.title}' y '${colB.title}' no deben solaparse geométricamente`);
+  }
+}
+
+// Invariante 2: Ninguna tarea se solapa con otra dentro de la misma columna
+for (const col of leafCols) {
+  const colTasks = layoutResult.tasks.filter(
+    (t) => t.groupTitle === col.title && (t.branchTitle || '') === (col.branchTitle || '')
+  );
+  for (let i = 0; i < colTasks.length; i++) {
+    for (let j = i + 1; j < colTasks.length; j++) {
+      const tA = colTasks[i];
+      const tB = colTasks[j];
+      const taskOverlap = isRectOverlapping(tA, tB, 4);
+      assert(!taskOverlap, `Las tareas '${tA.title}' y '${tB.title}' en columna '${col.title}' no deben solaparse`);
+    }
+  }
+}
+
+// Invariante 3: Todas las tareas están estrictamente dentro de los límites de su columna de sección
+for (const task of layoutResult.tasks) {
+  const col = leafCols.find((c) =>
+    task.groupHeadingId
+      ? (c.headingId === task.groupHeadingId || c.id === task.groupHeadingId)
+      : (c.title === task.groupTitle && (c.branchTitle || '') === (task.branchTitle || ''))
+  );
+  assert(col, `Cada tarea debe tener su columna correspondiente encontrada: ${task.title}`);
+  assert(
+    task.x >= col.x,
+    `Tarea ${task.title} (x=${task.x}) debe estar a la derecha del borde izquierdo de columna (x=${col.x})`
+  );
+  assert(
+    task.x + task.w <= col.x + col.w + 0.1,
+    `Tarea ${task.title} (x+w=${task.x + task.w}) debe estar contenida en el ancho de columna (x+w=${col.x + col.w})`
+  );
+  assert(
+    task.y >= col.y,
+    `Tarea ${task.title} (y=${task.y}) debe estar debajo del borde superior de columna (y=${col.y})`
+  );
+  assert(
+    task.y + task.h <= col.y + col.h + 0.1,
+    `Tarea ${task.title} (y+h=${task.y + task.h}) debe estar dentro de la altura de la columna (y+h=${col.y + col.h})`
+  );
+}
+
+// Invariante 4: Los macro contenedores (## Fronted, ## Backend) contienen estrictamente sus columnas hijas
+const frontedMacro = macroContainers.find((m) => m.title === 'Fronted');
+const backendMacro = macroContainers.find((m) => m.title === 'Backend');
+assert(frontedMacro, 'Debe existir macro contenedor Fronted');
+assert(backendMacro, 'Debe existir macro contenedor Backend');
+
+const frontedLeaves = leafCols.filter((c) => c.branchTitle === 'Fronted');
+for (const leaf of frontedLeaves) {
+  assert(leaf.x >= frontedMacro.x, `Hoja ${leaf.title} debe estar dentro de Fronted en X`);
+  assert(leaf.x + leaf.w <= frontedMacro.x + frontedMacro.w + 0.1, `Hoja ${leaf.title} debe caber en Fronted en ancho`);
+  assert(leaf.y >= frontedMacro.y, `Hoja ${leaf.title} debe estar debajo del top de Fronted`);
+  assert(leaf.y + leaf.h <= frontedMacro.y + frontedMacro.h + 0.1, `Hoja ${leaf.title} debe caber en altura de Fronted`);
+}
+
+const backendLeaves = leafCols.filter((c) => c.branchTitle === 'Backend');
+for (const leaf of backendLeaves) {
+  assert(leaf.x >= backendMacro.x, `Hoja ${leaf.title} debe estar dentro de Backend en X`);
+  assert(leaf.x + leaf.w <= backendMacro.x + backendMacro.w + 0.1, `Hoja ${leaf.title} debe caber en Backend en ancho`);
+  assert(leaf.y >= backendMacro.y, `Hoja ${leaf.title} debe estar debajo del top de Backend`);
+  assert(leaf.y + leaf.h <= backendMacro.y + backendMacro.h + 0.1, `Hoja ${leaf.title} debe caber en altura de Backend`);
+}
+
+// Invariante 5: El macro contenedor # Paco contiene a todos sus hijos
+const pacoMacro = macroContainers.find((m) => m.title === 'Paco');
+assert(pacoMacro, 'Debe existir macro contenedor Paco');
+assert(pacoMacro.x <= frontedMacro.x, 'Paco debe contener a Fronted en X');
+assert(pacoMacro.x + pacoMacro.w >= backendMacro.x + backendMacro.w - 0.1, 'Paco debe contener a Backend en X');
+
+// Invariante 6: Ordenamiento topológico (blocker arriba de blocked)
+const blockerTask = layoutResult.tasks.find((t) => t.taskId === 'be-blocker');
+const blockedTask = layoutResult.tasks.find((t) => t.taskId === 'be-blocked');
+assert(blockerTask && blockedTask, 'Ambas tareas dependientes deben estar en el layout');
+assert(
+  blockerTask.y < blockedTask.y,
+  `La tarea bloqueadora (y=${blockerTask.y}) debe estar físicamente más arriba que la bloqueada (y=${blockedTask.y})`
+);
+
+console.log('   ✓ Auto-layout verificado: 0 solapamientos, límites respetados y estricta pertenencia por sección.');
+
+// 15. Comentarios y Notas en LiveMarkdown (evitando TypeError: util.options.getDefaultDisplayValues is not a function)
+console.log('15. Verificando CustomNoteShapeUtil y soporte de comentarios/notas en LiveMarkdown...');
+
+// 15.1 CustomNoteShapeUtil preserves options.getDefaultDisplayValues
+const dummyEditor: any = {};
+const customNoteUtil = new CustomNoteShapeUtil(dummyEditor);
+assert.strictEqual(
+  typeof (customNoteUtil as any).options?.getDefaultDisplayValues,
+  'function',
+  'CustomNoteShapeUtil.options.getDefaultDisplayValues debe ser una función (evita crash en getDisplayValues)'
+);
+assert.strictEqual(
+  (customNoteUtil as any).options?.resizeMode,
+  'scale',
+  'CustomNoteShapeUtil.options.resizeMode debe ser scale'
+);
+
+// 15.2 scanNotesFromMarkdown reconoce ## Comentarios, ## Notas, ## Notes, ## Comments
+const mdWithComments = `# Proyecto
+## Frontend
+- [ ] Tarea 1
+  - ID: t-1
+  - Status: todo
+  - Priority: P3
+
+## Comentarios
+- Este es el primer comentario en LiveMarkdown
+- Segundo comentario con detalle
+  línea adicional del segundo comentario
+
+## Notas
+- Otra nota adhesiva
+`;
+
+const scanned = scanNotesFromMarkdown(mdWithComments);
+assert.strictEqual(scanned.length, 3, 'Debe escanear 3 notas/comentarios');
+assert(scanned[0].includes('primer comentario'), 'Primer comentario correcto');
+assert(scanned[1].includes('Segundo comentario con detalle'), 'Segundo comentario con detalle correcto');
+assert(scanned[2].includes('Otra nota adhesiva'), 'Tercera nota correcta');
+
+// 15.3 parseTasksMarkdown no debe crear grupos de tareas para ## Comentarios
+const groupsWithComments = parseTasksMarkdown(mdWithComments);
+assert.strictEqual(groupsWithComments.length, 1, 'Solo debe haber 1 grupo de tareas (Frontend), no Comentarios ni Notas');
+assert.strictEqual(groupsWithComments[0].title, 'Frontend');
+
+// 15.4 validateMarkdownDocument no debe reportar empty_heading para ## Comentarios ni Notas
+const validationWithComments = validateMarkdownDocument(mdWithComments);
+const emptyHeadingIssues = validationWithComments.issues.filter((i) => i.type === 'empty_heading');
+assert.strictEqual(emptyHeadingIssues.length, 0, 'No debe reportar empty_heading para secciones de comentarios o notas');
+
+// 15.5 HTML comments en tareas no deben registrarse como metadatos desconocidos
+const mdWithHtmlComments = `# Test
+## Sec
+- [ ] Tarea con comentario HTML
+  - ID: t-html
+  <!-- comentario explicativo de la tarea -->
+  - Status: backlog
+  - Priority: P2
+`;
+const reportHtmlComments = validateMarkdownDocument(mdWithHtmlComments);
+const unknownMeta = reportHtmlComments.issues.filter((i) => i.type === 'unknown_metadata');
+assert.strictEqual(unknownMeta.length, 0, 'Comentario HTML no debe marcarse como metadato desconocido');
+
+// 15.6 syncNotesToMarkdown preserva el encabezado ## Comentarios si existía
+const syncedBack = syncNotesToMarkdown(mdWithComments, ['Comentario actualizado 1', 'Comentario actualizado 2']);
+assert(syncedBack.includes('## Comentarios'), 'syncNotesToMarkdown debe respetar el encabezado ## Comentarios original');
+
+// 15.7 Bloques de comentarios HTML multilínea con sintaxis de tareas bajo ## Notas
+const userSnippet = `## Notas
+
+<!--
+  - [ ] 
+    - ID: task-4
+  - [ ] Ocultar campos 
+  - [ ] Ocultar campos ID/
+  - [ ] Ocultar campos ID/stati
+  - [ ] Ocultar campos ID/status/
+  - [ ] Ocultar campos ID/status/priority -->
+`;
+
+const userNotesScanned = scanNotesFromMarkdown(userSnippet);
+assert.strictEqual(
+  userNotesScanned.length,
+  0,
+  'scanNotesFromMarkdown debe ignorar completamente las tareas comentadas en <!-- ... -->'
+);
+
+const userTaskBlocks = scanTaskBlocks(userSnippet).taskBlocks;
+assert.strictEqual(
+  userTaskBlocks.length,
+  0,
+  'scanTaskBlocks no debe crear ninguna tarea a partir de bloques comentados en <!-- ... -->'
+);
+
+const userValidation = validateMarkdownDocument(userSnippet);
+assert.strictEqual(
+  userValidation.issues.length,
+  0,
+  'validateMarkdownDocument no debe generar ningún error ni advertencia para tareas en comentarios HTML'
+);
+
+const userSyncedEmpty = syncNotesToMarkdown(userSnippet, []);
+assert(
+  userSyncedEmpty.includes('<!--') && userSyncedEmpty.includes('-->'),
+  'syncNotesToMarkdown debe preservar el bloque de comentarios HTML aunque el canvas tenga 0 notas'
+);
+assert(
+  userSyncedEmpty.includes('## Notas'),
+  'syncNotesToMarkdown no debe eliminar la sección ## Notas si contiene comentarios HTML'
+);
+
+const userSyncedWithNotes = syncNotesToMarkdown(userSnippet, ['Nota de prueba']);
+assert(
+  userSyncedWithNotes.includes('- Nota de prueba') && userSyncedWithNotes.includes('<!--') && userSyncedWithNotes.includes('-->'),
+  'syncNotesToMarkdown debe agregar la nueva nota y preservar el bloque de comentarios HTML'
+);
+
+console.log('   ✓ CustomNoteShapeUtil y soporte completo de comentarios verificado.');
+
+// 23. Verificando creación de snippet Description/ID/Status/Priority al pulsar Enter en Live Markdown
+console.log('23. Verificando creación de snippet Description/ID/Status/Priority al pulsar Enter...');
+const enterSampleDoc = `# Proyecto
+## Backend
+- [ ] Tarea existente
+  - ID: tarea-existente
+`;
+
+// Test pending task line
+const snippet1 = buildTaskEnterSnippet('- [ ] Nueva funcionalidad', enterSampleDoc);
+assert(snippet1 !== null, 'buildTaskEnterSnippet debe devolver un snippet para tarea');
+assert(snippet1.snippetText.includes('- Description: '), 'Debe incluir Description:');
+assert(snippet1.snippetText.includes('- ID: nueva-funcionalidad'), 'Debe generar ID derivado del título');
+assert(snippet1.snippetText.includes('- Status: backlog'), 'Debe asignar status backlog para - [ ]');
+assert(snippet1.snippetText.includes('- Priority: P3'), 'Debe asignar prioridad P3 por defecto');
+
+// Test canonical order: Description -> ID -> Status -> Priority
+const enterDescIdx = snippet1.snippetText.indexOf('Description:');
+const enterIdIdx = snippet1.snippetText.indexOf('ID:');
+const enterStatusIdx = snippet1.snippetText.indexOf('Status:');
+const enterPrioIdx = snippet1.snippetText.indexOf('Priority:');
+assert(enterDescIdx < enterIdIdx, 'Description debe ir antes de ID');
+assert(enterIdIdx < enterStatusIdx, 'ID debe ir antes de Status');
+assert(enterStatusIdx < enterPrioIdx, 'Status debe ir antes de Priority');
+
+// Test cursor offset landing right after '- Description: '
+const textUpToCursor = snippet1.snippetText.slice(0, snippet1.cursorOffset);
+assert(textUpToCursor.endsWith('- Description: '), 'Cursor debe colocarse justo después de "- Description: "');
+
+// Test completed task [x]
+const snippetDone = buildTaskEnterSnippet('- [x] Tarea finalizada', enterSampleDoc);
+assert(snippetDone !== null);
+assert(snippetDone.snippetText.includes('- Status: done'), 'Tarea completada debe tener status: done');
+
+// Test indented subtask
+const snippetSub = buildTaskEnterSnippet('  - [ ] Subtarea 1', enterSampleDoc);
+assert(snippetSub !== null);
+assert(snippetSub.snippetText.includes('    - Description: '), 'Subtarea debe conservar indentación relativa');
+assert(snippetSub.snippetText.includes('    - ID: subtarea-1'), 'Subtarea debe tener ID indentado');
+
+// Test duplicate ID deduplication
+const snippetDup = buildTaskEnterSnippet('- [ ] Tarea existente', enterSampleDoc);
+assert(snippetDup !== null);
+assert(snippetDup.snippetText.includes('- ID: tarea-existente-2'), 'ID duplicado debe ser desambiguado');
+
+// Test empty title cursor offset (right behind '[ ] ')
+const snippetEmpty = buildTaskEnterSnippet('- [ ] ', enterSampleDoc);
+assert(snippetEmpty !== null);
+assert.strictEqual(snippetEmpty.cursorOffset, 0, 'Si el título está vacío, el cursor debe permanecer tras [ ]');
+
+// Test non-task line returns null
+const snippetHeading = buildTaskEnterSnippet('## Sección', enterSampleDoc);
+assert.strictEqual(snippetHeading, null, 'No debe generar snippet para un encabezado');
+const snippetText = buildTaskEnterSnippet('Texto normal', enterSampleDoc);
+assert.strictEqual(snippetText, null, 'No debe generar snippet para texto normal');
+
+console.log('   ✓ Snippet canónico al pulsar Enter verificado correctamente.');
+
+// 24. Verificando creación de tarea mediante addTaskToMarkdown sincronizado con Description/ID/Status/Priority
+console.log('24. Verificando addTaskToMarkdown sincronizado con orden canónico Description/ID/Status/Priority...');
+{
+  const baseSampleMd = `# Documento de prueba\n\n## Pruebas\n`;
+  const { updatedMarkdown: addedTaskMd, taskId: createdId } = addTaskToMarkdown(baseSampleMd, {
+    title: 'Implementar autenticación 2FA',
+    groupTitle: 'Pruebas',
+    customId: 'auth-2fa',
+    description: 'Requiere TOTP y código de recuperación',
+    status: 'in_progress',
+    priority: 'P1',
+  });
+
+  assert.strictEqual(createdId, 'auth-2fa', 'El taskId debe ser auth-2fa');
+  assert(addedTaskMd.includes('- [ ] Implementar autenticación 2FA'), 'Debe incluir checkbox no marcado');
+  assert(addedTaskMd.includes('  - Description: Requiere TOTP y código de recuperación'), 'Debe incluir Description');
+  assert(addedTaskMd.includes('  - ID: auth-2fa'), 'Debe incluir ID');
+  assert(addedTaskMd.includes('  - Status: in_progress'), 'Debe incluir Status');
+  assert(addedTaskMd.includes('  - Priority: P1'), 'Debe incluir Priority');
+
+  // Comprobar orden canónico relativo
+  const dIdx = addedTaskMd.indexOf('  - Description:');
+  const iIdx = addedTaskMd.indexOf('  - ID:');
+  const sIdx = addedTaskMd.indexOf('  - Status:');
+  const pIdx = addedTaskMd.indexOf('  - Priority:');
+  assert(dIdx < iIdx, 'Description debe ir antes de ID');
+  assert(iIdx < sIdx, 'ID debe ir antes de Status');
+  assert(sIdx < pIdx, 'Status debe ir antes de Priority');
+
+  // Probar creación con status: done
+  const { updatedMarkdown: doneTaskMd } = addTaskToMarkdown(baseSampleMd, {
+    title: 'Tarea completada',
+    groupTitle: 'Pruebas',
+    status: 'done',
+    priority: 'P3',
+  });
+  assert(doneTaskMd.includes('- [x] Tarea completada'), 'Tarea creada con status done debe tener [x]');
+  assert(doneTaskMd.includes('  - Status: done'), 'Debe reflejar status: done');
+}
+
+console.log('   ✓ addTaskToMarkdown sincronizado con Description/ID/Status/Priority verificado correctamente.');
+
+// 25. Verificando detección y ocultamiento de Status y Priority en Markdown
+console.log('25. Verificando detección y ocultamiento de Status y Priority en Markdown...');
+{
+  assert(isTaskStatusLine('  - Status: backlog'), 'Debe detectar Status con guión e indentación');
+  assert(isTaskStatusLine('Status: done'), 'Debe detectar Status sin guión');
+  assert(isTaskStatusLine('  * status: in_progress'), 'Debe detectar status en minúscula con asterisco');
+  assert(!isTaskStatusLine('- [ ] Tarea con Status: backlog en el título'), 'No debe confundir un task root con status');
+
+  assert(isTaskPriorityLine('  - Priority: P1'), 'Debe detectar Priority con guión e indentación');
+  assert(isTaskPriorityLine('Priority: P0'), 'Debe detectar Priority sin guión');
+  assert(isTaskPriorityLine('  * priority: P3'), 'Debe detectar priority en minúscula con asterisco');
+  assert(!isTaskPriorityLine('- [ ] Tarea con Priority: P1 en el título'), 'No debe confundir un task root con priority');
+
+  const testMd = `# Proyecto
+- [ ] Tarea 1
+  - Description: Detalle de tarea
+  - ID: task-1
+  - Status: in_progress
+  - Priority: P1
+`;
+
+  // Strip status only
+  const noStatus = stripStatusFromMarkdown(testMd);
+  assert(!noStatus.includes('- Status:'), 'stripStatusFromMarkdown debe eliminar línea Status');
+  assert(noStatus.includes('- ID: task-1'), 'stripStatusFromMarkdown debe preservar ID');
+  assert(noStatus.includes('- Priority: P1'), 'stripStatusFromMarkdown debe preservar Priority');
+
+  // Strip priority only
+  const noPriority = stripPriorityFromMarkdown(testMd);
+  assert(!noPriority.includes('- Priority:'), 'stripPriorityFromMarkdown debe eliminar línea Priority');
+  assert(noPriority.includes('- Status: in_progress'), 'stripPriorityFromMarkdown debe preservar Status');
+
+  // Strip metadata fields combinations
+  const strippedBoth = stripMetadataFieldsFromMarkdown(testMd, { stripStatus: true, stripPriority: true });
+  assert(!strippedBoth.includes('- Status:'), 'stripMetadataFieldsFromMarkdown debe eliminar Status');
+  assert(!strippedBoth.includes('- Priority:'), 'stripMetadataFieldsFromMarkdown debe eliminar Priority');
+  assert(strippedBoth.includes('- ID: task-1'), 'stripMetadataFieldsFromMarkdown debe conservar ID si stripIds es false');
+
+  const strippedAll = stripMetadataFieldsFromMarkdown(testMd, { stripIds: true, stripStatus: true, stripPriority: true });
+  assert(!strippedAll.includes('- ID:'), 'stripMetadataFieldsFromMarkdown debe eliminar ID');
+  assert(!strippedAll.includes('- Status:'), 'stripMetadataFieldsFromMarkdown debe eliminar Status');
+  assert(!strippedAll.includes('- Priority:'), 'stripMetadataFieldsFromMarkdown debe eliminar Priority');
+  assert(strippedAll.includes('- Description: Detalle de tarea'), 'stripMetadataFieldsFromMarkdown debe conservar Description');
+}
+console.log('   ✓ Detección y ocultamiento de Status y Priority verificado correctamente.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
-
-
-
+process.exit(0);

@@ -14,6 +14,9 @@ export interface TaskFilterState {
   tag: string | 'all';
   onlyBlocked: boolean;
   sortBy: TaskSortOption;
+  showTaskIds?: boolean;
+  showTaskStatus?: boolean;
+  showTaskPriority?: boolean;
 }
 
 interface FilterBarProps {
@@ -36,6 +39,9 @@ interface FilterBarProps {
   syncStatus?: string;
   onOpenSanityModal?: () => void;
   onOpenSyncOverrideModal?: () => void;
+  onToggleShowIds?: () => void;
+  onToggleShowStatus?: () => void;
+  onToggleShowPriority?: () => void;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -58,6 +64,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   syncStatus,
   onOpenSanityModal,
   onOpenSyncOverrideModal,
+  onToggleShowIds,
+  onToggleShowStatus,
+  onToggleShowPriority,
 }) => {
   const { i18n } = useLingui();
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
@@ -85,6 +94,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     (filters.tag !== 'all' ? 1 : 0) +
     (filters.onlyBlocked ? 1 : 0) +
     (filters.sortBy !== 'default' ? 1 : 0) +
+    (filters.showTaskIds === false ? 1 : 0) +
+    (filters.showTaskStatus === false ? 1 : 0) +
+    (filters.showTaskPriority === false ? 1 : 0) +
     (searchQuery.trim() ? 1 : 0);
 
   const hasActiveFilters = activeFiltersCount > 0;
@@ -269,7 +281,67 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                       </span>
                     </label>
 
-                    {/* 6. Ordenación */}
+                    {/* 6. Mostrar identificadores (#ID) */}
+                    <label className="flex items-center gap-2 cursor-pointer pt-0.5">
+                      <input
+                        type="checkbox"
+                        id="checkbox-filter-show-task-ids"
+                        checked={filters.showTaskIds !== false}
+                        onChange={(e) => {
+                          if (onToggleShowIds) {
+                            onToggleShowIds();
+                          } else {
+                            onFilterChange({ ...filters, showTaskIds: e.target.checked });
+                          }
+                        }}
+                        className="w-3.5 h-3.5 rounded text-[var(--primary)] focus:ring-0 cursor-pointer"
+                      />
+                      <span className="text-xs text-[var(--on-surface)] font-medium">
+                        {i18n._(msg`Mostrar identificadores (#ID)`)}
+                      </span>
+                    </label>
+
+                    {/* 7. Mostrar estado (Status) */}
+                    <label className="flex items-center gap-2 cursor-pointer pt-0.5">
+                      <input
+                        type="checkbox"
+                        id="checkbox-filter-show-task-status"
+                        checked={filters.showTaskStatus !== false}
+                        onChange={(e) => {
+                          if (onToggleShowStatus) {
+                            onToggleShowStatus();
+                          } else {
+                            onFilterChange({ ...filters, showTaskStatus: e.target.checked });
+                          }
+                        }}
+                        className="w-3.5 h-3.5 rounded text-[var(--primary)] focus:ring-0 cursor-pointer"
+                      />
+                      <span className="text-xs text-[var(--on-surface)] font-medium">
+                        {i18n._(msg`Mostrar estado (Status)`)}
+                      </span>
+                    </label>
+
+                    {/* 8. Mostrar prioridad (Priority) */}
+                    <label className="flex items-center gap-2 cursor-pointer pt-0.5">
+                      <input
+                        type="checkbox"
+                        id="checkbox-filter-show-task-priority"
+                        checked={filters.showTaskPriority !== false}
+                        onChange={(e) => {
+                          if (onToggleShowPriority) {
+                            onToggleShowPriority();
+                          } else {
+                            onFilterChange({ ...filters, showTaskPriority: e.target.checked });
+                          }
+                        }}
+                        className="w-3.5 h-3.5 rounded text-[var(--primary)] focus:ring-0 cursor-pointer"
+                      />
+                      <span className="text-xs text-[var(--on-surface)] font-medium">
+                        {i18n._(msg`Mostrar prioridad (Priority)`)}
+                      </span>
+                    </label>
+
+                    {/* 7. Ordenación */}
                     <div id="div-filterbar-10" className="flex flex-col gap-1 pt-1 border-t border-[var(--outline)]">
                       <label className="text-[10px] font-semibold text-[var(--on-surface-variant)] uppercase tracking-wider">
                         {i18n._(msg`Ordenar por`)}
@@ -315,6 +387,43 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Quick Toggle Show/Hide Task IDs */}
+              <button
+                id="btn-toggle-show-ids"
+                type="button"
+                onClick={() => {
+                  if (onToggleShowIds) {
+                    onToggleShowIds();
+                  } else {
+                    onFilterChange({
+                      ...filters,
+                      showTaskIds: filters.showTaskIds === false ? true : false,
+                    });
+                  }
+                }}
+                aria-pressed={filters.showTaskIds !== false}
+                aria-label={
+                  filters.showTaskIds !== false
+                    ? i18n._(msg`Ocultar identificadores (#ID)`)
+                    : i18n._(msg`Mostrar identificadores (#ID)`)
+                }
+                className={`btn-m3-secondary px-2 sm:px-2.5 py-1.5 text-xs font-medium cursor-pointer flex items-center gap-1 shrink-0 transition-colors ${
+                  filters.showTaskIds !== false
+                    ? 'border-[var(--primary)] text-[var(--primary)] bg-[var(--primary-container)]/20'
+                    : 'text-[var(--on-surface-variant)] opacity-60'
+                }`}
+                title={
+                  filters.showTaskIds !== false
+                    ? i18n._(msg`Ocultar identificadores (#ID)`)
+                    : i18n._(msg`Mostrar identificadores (#ID)`)
+                }
+              >
+                <span className="material-symbols-outlined text-[15px]">tag</span>
+                <span className="hidden xs:inline font-mono font-semibold text-[11px]">
+                  #ID
+                </span>
+              </button>
 
               {/* Quick Command Palette Button (Cmd + K) on desktop */}
               <button
@@ -439,6 +548,22 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 </div>
               )}
 
+              {onAutoOrganize && activeView === 'canvas' && (
+                <button
+                  id="btn-filterbar-auto-organize"
+                  type="button"
+                  onClick={onAutoOrganize}
+                  disabled={isAutoOrganizing}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--surface)] text-[var(--on-surface)] border border-[var(--outline)] hover:border-[var(--primary)] hover:text-[var(--primary)] hover:bg-[var(--surface-container-high)] text-xs font-sans transition-colors cursor-pointer"
+                  title={i18n._(msg`Reorganizar Canvas automáticamente (mantener bordes y grupos)`)}
+                >
+                  <span className={`material-symbols-outlined text-[14px] ${isAutoOrganizing ? 'animate-spin' : ''}`}>
+                    auto_fix_high
+                  </span>
+                  <span className="hidden sm:inline">{i18n._(msg`Reorganizar`)}</span>
+                </button>
+              )}
+
               <span id="span-filterbar-task-counter" className="px-2 py-0.5 rounded bg-[var(--surface)] border border-[var(--outline)] text-[11px] font-mono">
                 <span id="span-filterbar-counter-mobile" className="sm:hidden">{filteredTasksCount}/{totalTasksCount}</span>
                 <span id="span-filterbar-counter-desktop" className="hidden sm:inline">
@@ -552,6 +677,60 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 type="button"
                 onClick={() => onFilterChange({ ...filters, sortBy: 'default' })}
                 className="hover:text-rose-400 cursor-pointer font-bold"
+              >
+                ×
+              </button>
+            </span>
+          )}
+
+          {filters.showTaskIds === false && (
+            <span className="px-2 py-0.5 rounded bg-[var(--surface)] border border-[var(--outline)] text-[11px] text-[var(--on-surface-variant)] font-medium flex items-center gap-1">
+              <span>{i18n._(msg`IDs ocultos`)}</span>
+              <button
+                id="btn-chip-restore-ids"
+                type="button"
+                onClick={() => {
+                  if (onToggleShowIds) onToggleShowIds();
+                  else onFilterChange({ ...filters, showTaskIds: true });
+                }}
+                className="text-[var(--on-surface-variant)] hover:text-emerald-400 cursor-pointer font-bold"
+                title={i18n._(msg`Mostrar identificadores (#ID)`)}
+              >
+                ×
+              </button>
+            </span>
+          )}
+
+          {filters.showTaskStatus === false && (
+            <span className="px-2 py-0.5 rounded bg-[var(--surface)] border border-[var(--outline)] text-[11px] text-[var(--on-surface-variant)] font-medium flex items-center gap-1">
+              <span>{i18n._(msg`Estado oculto`)}</span>
+              <button
+                id="btn-chip-restore-status"
+                type="button"
+                onClick={() => {
+                  if (onToggleShowStatus) onToggleShowStatus();
+                  else onFilterChange({ ...filters, showTaskStatus: true });
+                }}
+                className="text-[var(--on-surface-variant)] hover:text-emerald-400 cursor-pointer font-bold"
+                title={i18n._(msg`Mostrar estado (Status)`)}
+              >
+                ×
+              </button>
+            </span>
+          )}
+
+          {filters.showTaskPriority === false && (
+            <span className="px-2 py-0.5 rounded bg-[var(--surface)] border border-[var(--outline)] text-[11px] text-[var(--on-surface-variant)] font-medium flex items-center gap-1">
+              <span>{i18n._(msg`Prioridad oculta`)}</span>
+              <button
+                id="btn-chip-restore-priority"
+                type="button"
+                onClick={() => {
+                  if (onToggleShowPriority) onToggleShowPriority();
+                  else onFilterChange({ ...filters, showTaskPriority: true });
+                }}
+                className="text-[var(--on-surface-variant)] hover:text-emerald-400 cursor-pointer font-bold"
+                title={i18n._(msg`Mostrar prioridad (Priority)`)}
               >
                 ×
               </button>

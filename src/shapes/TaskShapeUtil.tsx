@@ -4,6 +4,7 @@ import { useLingui } from '@lingui/react';
 import { msg } from '@lingui/core/macro';
 import { i18n, formatTaskCount } from '../i18n';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   BaseBoxShapeUtil,
   createShapeId,
@@ -44,9 +45,46 @@ export const NOTE_COLOR_OPTIONS = [
  */
 export class CustomNoteShapeUtil extends NoteShapeUtil {
   static override type = 'note' as const;
-  override options: any = {
-    resizeMode: 'scale' as const,
-  };
+
+  constructor(editor: any) {
+    super(editor);
+    const existingOptions = (this as any).options || {};
+    (this as any).options = {
+      ...existingOptions,
+      resizeMode: 'scale' as const,
+    };
+    if (typeof (this as any).options.getDefaultDisplayValues !== 'function') {
+      (this as any).options.getDefaultDisplayValues = (
+        _editor: any,
+        shape: TLNoteShape,
+        theme: any,
+        colorMode: 'dark' | 'light'
+      ) => {
+        const { color = 'yellow', labelColor = 'black' } = shape?.props || {};
+        const colors = theme?.colors?.[colorMode] || {};
+        return {
+          noteWidth: 200,
+          noteHeight: 200,
+          noteBackgroundColor: colors[color] || '#fef08a',
+          borderColor: colors.noteBorder || '#ca8a04',
+          borderWidth: 2,
+          labelColor: labelColor === 'black' ? (colors[color] || '#000000') : '#000000',
+          labelFontFamily: 'sans-serif',
+          labelFontSize: 16,
+          labelLineHeight: 1.3,
+          labelFontWeight: 'normal',
+          labelFontVariant: 'normal',
+          labelFontStyle: 'normal',
+          labelPadding: 16,
+          labelHorizontalAlign: 'center' as const,
+          labelVerticalAlign: 'middle' as const,
+        };
+      };
+    }
+    if (typeof (this as any).options.getCustomDisplayValues !== 'function') {
+      (this as any).options.getCustomDisplayValues = () => ({});
+    }
+  }
 
   override hideResizeHandles(_shape: TLNoteShape): boolean {
     return false;
@@ -96,6 +134,7 @@ export function isShapeFilteredOut(
       completed: p.completed,
       priority: p.priority,
       status: normalizedStatus,
+      description: p.description,
       groupTitle: p.groupTitle,
       tags: p.tags,
       blockedBy: p.blockedBy,
@@ -117,6 +156,7 @@ export type TaskShapeProps = {
   priority: TaskPriority;
   taskId?: string;
   status?: TaskStatus;
+  description?: string;
   groupTitle?: string;
   groupHeadingId?: string;
   branchTitle?: string;
@@ -125,6 +165,7 @@ export type TaskShapeProps = {
   blockedBy?: string;
   isDuplicateId?: boolean;
   hasMissingId?: boolean;
+  hasMissingStatus?: boolean;
   unresolvedBlockers?: string[];
 };
 
@@ -144,11 +185,13 @@ function TaskCardComponent({
     priority,
     taskId,
     status,
+    description,
     tags,
     subtasks,
     blockedBy,
     isDuplicateId,
     hasMissingId,
+    hasMissingStatus,
     unresolvedBlockers,
     w,
     h,
@@ -156,6 +199,31 @@ function TaskCardComponent({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState(title);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const [menuCoords, setMenuCoords] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const close = () => setIsMenuOpen(false);
+    const handlePointerDown = (e: PointerEvent) => {
+      const dropdown = document.getElementById(`task-card-menu-dropdown-${shape.id}`);
+      if (
+        dropdown &&
+        !dropdown.contains(e.target as Node) &&
+        !menuButtonRef.current?.contains(e.target as Node)
+      ) {
+        setIsMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('wheel', close, { passive: true });
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('wheel', close);
+      window.removeEventListener('resize', close);
+    };
+  }, [isMenuOpen, shape.id]);
   const [isSelected, setIsSelected] = useState(false);
   const [isSubtasksOpen, setIsSubtasksOpen] = useState(true);
 
@@ -406,6 +474,7 @@ function TaskCardComponent({
       completed,
       priority,
       status: normalizedStatus,
+      description,
       groupTitle: shape.props.groupTitle,
       tags,
       blockedBy,
@@ -415,6 +484,9 @@ function TaskCardComponent({
   );
 
   const isHidden = isFilterActive && !isMatch;
+  const showTaskIds = globalFilters.showTaskIds !== false;
+  const showTaskStatus = globalFilters.showTaskStatus !== false;
+  const showTaskPriority = globalFilters.showTaskPriority !== false;
 
   useLayoutEffect(() => {
     const container = document.querySelector(`[data-shape-id="${shape.id}"]`) as HTMLElement | null;
@@ -662,17 +734,19 @@ function TaskCardComponent({
 
           <div id={`task-card-actions-${shape.id}`} className="flex items-center gap-1 shrink-0">
             {/* Discreet Priority Indicator */}
-            <button
-              id={`btn-task-card-priority-${shape.id}`}
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={cyclePriority}
-              title={_(msg`Clic para cambiar prioridad (P0-P3)`)}
-              className={`px-1 py-0.5 text-[11px] font-mono font-medium hover:opacity-100 cursor-pointer shrink-0 transition-opacity flex items-center gap-1 ${currentPriority.text}`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${currentPriority.dot}`} />
-              <span><HighlightText text={priority} query={searchQuery} /></span>
-            </button>
+            {showTaskPriority && (
+              <button
+                id={`btn-task-card-priority-${shape.id}`}
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={cyclePriority}
+                title={_(msg`Clic para cambiar prioridad (P0-P3)`)}
+                className={`px-1 py-0.5 text-[11px] font-mono font-medium hover:opacity-100 cursor-pointer shrink-0 transition-opacity flex items-center gap-1 ${currentPriority.text}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${currentPriority.dot}`} />
+                <span><HighlightText text={priority} query={searchQuery} /></span>
+              </button>
+            )}
 
             {/* Quick Central Connector Button */}
             <button
@@ -701,12 +775,30 @@ function TaskCardComponent({
 
             {/* Contextual Action Menu Trigger ⋮ */}
             <button
+              ref={menuButtonRef}
               id={`btn-task-card-menu-${shape.id}`}
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                setIsMenuOpen(!isMenuOpen);
+                if (isMenuOpen) {
+                  setIsMenuOpen(false);
+                } else if (menuButtonRef.current) {
+                  const rect = menuButtonRef.current.getBoundingClientRect();
+                  const menuWidth = 175;
+                  const menuHeight = 220;
+                  let top = rect.bottom + 4;
+                  if (top + menuHeight > window.innerHeight && rect.top - menuHeight > 0) {
+                    top = Math.max(8, rect.top - menuHeight - 4);
+                  }
+                  let left = rect.right - menuWidth;
+                  if (left < 8) left = 8;
+                  if (left + menuWidth > window.innerWidth - 8) {
+                    left = window.innerWidth - menuWidth - 8;
+                  }
+                  setMenuCoords({ top, left });
+                  setIsMenuOpen(true);
+                }
               }}
               className="w-5 h-5 flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] rounded cursor-pointer"
               title={_(msg`Más acciones`)}
@@ -720,12 +812,29 @@ function TaskCardComponent({
           </div>
         </div>
 
+        {/* Optional Description */}
+        {description && (
+          <p
+            id={`task-card-desc-${shape.id}`}
+            className="text-[11px] text-[var(--on-surface-variant)] leading-snug line-clamp-2 my-0.5 select-none"
+            title={description}
+          >
+            <HighlightText text={description} query={searchQuery} />
+          </p>
+        )}
+
         {/* Popover Contextual Menu */}
-        {isMenuOpen && (
+        {isMenuOpen && menuCoords && typeof document !== 'undefined' && createPortal(
           <div
             id={`task-card-menu-dropdown-${shape.id}`}
             onPointerDown={(e) => e.stopPropagation()}
-            className="absolute top-8 right-2 z-50 bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-md p-1 flex flex-col gap-0.5 min-w-[150px] text-xs font-sans"
+            style={{
+              position: 'fixed',
+              top: `${menuCoords.top}px`,
+              left: `${menuCoords.left}px`,
+              zIndex: 99999,
+            }}
+            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-xl p-1 flex flex-col gap-0.5 min-w-[170px] text-xs font-sans pointer-events-auto"
           >
             <button
               id={`btn-task-card-menu-toggle-${shape.id}`}
@@ -757,6 +866,26 @@ function TaskCardComponent({
               >
                 <span className="material-symbols-outlined text-[14px]">auto_fix_high</span>
                 <span>{_(msg`Generar ID automático`)}</span>
+              </button>
+            )}
+
+            {hasMissingStatus && (
+              <button
+                id={`btn-task-card-menu-assign-status-${shape.id}`}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsMenuOpen(false);
+                  window.dispatchEvent(
+                    new CustomEvent('antask:assign-task-status', {
+                      detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
+                    })
+                  );
+                }}
+                className="px-2 py-1 rounded text-left text-cyan-300 hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer font-medium"
+              >
+                <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                <span>{_(msg`Asignar Estado obligatorio`)}</span>
               </button>
             )}
 
@@ -820,7 +949,8 @@ function TaskCardComponent({
             >
               <span>{_(msg`🗑 Eliminar`)}</span>
             </button>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* Subtasks Section (Option A: Checklist Integrado Compacto) */}
@@ -920,77 +1050,103 @@ function TaskCardComponent({
         )}
 
         {/* Bottom Row: Metadata & Status */}
-        <div id={`task-card-footer-${shape.id}`} className="flex items-center justify-between text-xs text-[var(--on-surface-variant)] pt-1.5 border-t border-[var(--outline)] mt-0.5">
-          <div id={`task-card-footer-meta-${shape.id}`} className="flex items-center gap-1.5 truncate max-w-[200px]">
-            {taskId && !hasMissingId ? (
-              <span className="text-[var(--on-surface-variant)] font-mono text-[11px] truncate tracking-tight" title={`ID: ${taskId}`}>
-                #<HighlightText text={taskId} query={searchQuery} />
-              </span>
-            ) : (
-              <button
-                id={`btn-task-card-generate-id-${shape.id}`}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.dispatchEvent(
-                    new CustomEvent('antask:assign-task-id', {
-                      detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
-                    })
-                  );
-                }}
-                className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
-                title={_(msg`Tarea sin ID explícito. Clic para generar ID automático en Markdown.`)}
-              >
-                <span>+ ID</span>
-                <span className="material-symbols-outlined text-[10px]">auto_fix_high</span>
-              </button>
-            )}
+        {(showTaskIds || isDuplicateId || (unresolvedBlockers && unresolvedBlockers.length > 0) || (blockedBy && !completed) || showTaskStatus) && (
+          <div id={`task-card-footer-${shape.id}`} className="flex items-center justify-between text-xs text-[var(--on-surface-variant)] pt-1.5 border-t border-[var(--outline)] mt-0.5">
+            <div id={`task-card-footer-meta-${shape.id}`} className="flex items-center gap-1.5 truncate max-w-[200px]">
+              {showTaskIds && (
+                taskId && !hasMissingId ? (
+                  <span className="text-[var(--on-surface-variant)] font-mono text-[11px] truncate tracking-tight" title={`ID: ${taskId}`}>
+                    #<HighlightText text={taskId} query={searchQuery} />
+                  </span>
+                ) : (
+                  <button
+                    id={`btn-task-card-generate-id-${shape.id}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.dispatchEvent(
+                        new CustomEvent('antask:assign-task-id', {
+                          detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
+                        })
+                      );
+                    }}
+                    className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
+                    title={_(msg`Tarea sin ID explícito. Clic para generar ID automático en Markdown.`)}
+                  >
+                    <span>+ ID</span>
+                    <span className="material-symbols-outlined text-[10px]">auto_fix_high</span>
+                  </button>
+                )
+              )}
 
-            {isDuplicateId && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.dispatchEvent(
-                    new CustomEvent('antask:resolve-single-duplicate-id', {
-                      detail: { taskId: shape.props?.taskId || taskId, taskTitle: title },
-                    })
-                  );
-                }}
-                className="flex items-center gap-0.5 text-rose-400 hover:text-rose-300 font-mono text-[10px] font-semibold transition-colors cursor-pointer px-1 py-0.2 rounded bg-rose-950/80 border border-rose-800/80"
-                title={_(msg`ID duplicado en TASKS.md. Clic para resolver y asignar nuevo ID único.`)}
-              >
-                <span>dup</span>
-                <span className="material-symbols-outlined text-[9px]">auto_fix_high</span>
-              </button>
-            )}
+              {isDuplicateId && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.dispatchEvent(
+                      new CustomEvent('antask:resolve-single-duplicate-id', {
+                        detail: { taskId: shape.props?.taskId || taskId, taskTitle: title },
+                      })
+                    );
+                  }}
+                  className="flex items-center gap-0.5 text-rose-400 hover:text-rose-300 font-mono text-[10px] font-semibold transition-colors cursor-pointer px-1 py-0.2 rounded bg-rose-950/80 border border-rose-800/80"
+                  title={_(msg`ID duplicado en TASKS.md. Clic para resolver y asignar nuevo ID único.`)}
+                >
+                  <span>dup</span>
+                  <span className="material-symbols-outlined text-[9px]">auto_fix_high</span>
+                </button>
+              )}
 
-            {unresolvedBlockers && unresolvedBlockers.length > 0 && (
-              <span
-                className="text-[10px] font-semibold text-amber-400 font-mono"
-                title={_(msg`Dependencia no resuelta: #${unresolvedBlockers.join(', #')}`)}
-              >
-                dep?
-              </span>
-            )}
+              {unresolvedBlockers && unresolvedBlockers.length > 0 && (
+                <span
+                  className="text-[10px] font-semibold text-amber-400 font-mono"
+                  title={_(msg`Dependencia no resuelta: #${unresolvedBlockers.join(', #')}`)}
+                >
+                  dep?
+                </span>
+              )}
 
-            {blockedBy && !completed && !unresolvedBlockers?.length && (
-              <span
-                className="text-[10px] font-mono text-amber-400 flex items-center gap-0.5"
-                title={_(msg`Bloqueada por #${blockedBy}`)}
-              >
-                <span>🔒</span>
-                <span>#{blockedBy}</span>
-              </span>
+              {blockedBy && !completed && !unresolvedBlockers?.length && (
+                <span
+                  className="text-[10px] font-mono text-amber-400 flex items-center gap-0.5"
+                  title={_(msg`Bloqueada por #${blockedBy}`)}
+                >
+                  <span>🔒</span>
+                  <span>#{blockedBy}</span>
+                </span>
+              )}
+            </div>
+
+            {showTaskStatus && (
+              <div id={`task-card-footer-status-${shape.id}`} className="flex items-center gap-1 shrink-0">
+                {hasMissingStatus ? (
+                  <button
+                    id={`btn-task-card-assign-status-${shape.id}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.dispatchEvent(
+                        new CustomEvent('antask:assign-task-status', {
+                          detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
+                        })
+                      );
+                    }}
+                    className="flex items-center gap-0.5 text-cyan-400 hover:text-cyan-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
+                    title={_(msg`Tarea sin Estado obligatorio. Clic para asignar estado.`)}
+                  >
+                    <span>+ Status</span>
+                    <span className="material-symbols-outlined text-[10px]">check_circle</span>
+                  </button>
+                ) : (
+                  <span className={`text-[10px] font-mono uppercase tracking-wider ${currentStatus.text}`}>
+                    {currentStatus.label}
+                  </span>
+                )}
+              </div>
             )}
           </div>
-
-          <div id={`task-card-footer-status-${shape.id}`} className="flex items-center gap-1 shrink-0">
-            <span className={`text-[10px] font-mono uppercase tracking-wider ${currentStatus.text}`}>
-              {currentStatus.label}
-            </span>
-          </div>
-        </div>
+        )}
       </div>
     </HTMLContainer>
   );
@@ -1007,6 +1163,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     priority: T.string,
     taskId: T.string.optional(),
     status: T.string.optional(),
+    description: T.string.optional(),
     groupTitle: T.string.optional(),
     groupHeadingId: T.string.optional(),
     branchTitle: T.string.optional(),
@@ -1019,6 +1176,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     blockedBy: T.string.optional(),
     isDuplicateId: T.boolean.optional(),
     hasMissingId: T.boolean.optional(),
+    hasMissingStatus: T.boolean.optional(),
     unresolvedBlockers: T.arrayOf(T.string).optional(),
   };
 
@@ -1028,7 +1186,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
       h: 110,
       title: 'New developer task',
       completed: false,
-      priority: 'P1',
+      priority: 'P3',
       taskId: 'task',
     };
   }
@@ -1123,12 +1281,8 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     const allGroupShapes = this.editor
       .getCurrentPageShapes()
       .filter((s) => (s as any).type === 'task-group') as any[];
-    const parentTitlesSet = new Set(
-      allGroupShapes.map((g) => ((g.props?.parentTitle || '') as string).trim().toLowerCase()).filter(Boolean)
-    );
     const groupShapes = allGroupShapes.filter((g) => {
-      const gTitle = ((g.props?.title || '') as string).trim().toLowerCase();
-      return !g.props?.isContainer && g.props?.level !== 1 && !parentTitlesSet.has(gTitle);
+      return !g.props?.isContainer && g.props?.level !== 1;
     });
 
     let capturedGroup: any = null;
@@ -1173,12 +1327,8 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     const allGroupShapes = this.editor
       .getCurrentPageShapes()
       .filter((s) => (s as any).type === 'task-group') as any[];
-    const parentTitlesSet = new Set(
-      allGroupShapes.map((g) => ((g.props?.parentTitle || '') as string).trim().toLowerCase()).filter(Boolean)
-    );
     const groupShapes = allGroupShapes.filter((g) => {
-      const gTitle = ((g.props?.title || '') as string).trim().toLowerCase();
-      return !g.props?.isContainer && g.props?.level !== 1 && !parentTitlesSet.has(gTitle);
+      return !g.props?.isContainer && g.props?.level !== 1;
     });
 
     const cardW = current.props?.w || 320;
@@ -1259,13 +1409,18 @@ export class TaskShapeUtil extends ShapeUtil<any> {
       // Check if group height needs expanding to fully contain the snapped card
       const neededHeight = (snappedY - targetGroup.y) + cardH + 24;
       if (neededHeight > (targetGroup.props?.h || 240)) {
+        const newH = Math.ceil(neededHeight);
         (this.editor.updateShape as any)({
           id: targetGroup.id,
           type: 'task-group',
           props: {
             ...targetGroup.props,
-            h: Math.ceil(neededHeight),
+            h: newH,
           },
+        });
+        expandParentContainersIfNeeded(this.editor, {
+          ...targetGroup,
+          props: { ...targetGroup.props, h: newH },
         });
       }
 
@@ -1296,22 +1451,12 @@ export class TaskShapeUtil extends ShapeUtil<any> {
         },
       };
     } else {
-      // Separated from its section into open canvas!
-      // In Markdown, it must be assigned to ## Out
-      if (taskId) {
-        window.dispatchEvent(
-          new CustomEvent('antask:task-moved-group', {
-            detail: { taskId, targetGroupTitle: 'Out' },
-          })
-        );
-      }
-
+      // Retain current group association without forcing synthetic Out section
       return {
         id: current.id,
         type: 'task' as const,
         props: {
           ...current.props,
-          groupTitle: 'Out',
         },
       };
     }
@@ -1327,6 +1472,66 @@ export class TaskShapeUtil extends ShapeUtil<any> {
 
   component(shape: ITaskShape) {
     return <TaskCardComponent shape={shape} editor={this.editor} />;
+  }
+}
+
+export function expandParentContainersIfNeeded(editor: Editor, childGroup: any) {
+  const allShapes = editor.getCurrentPageShapes();
+  const macroGroups = allShapes.filter(
+    (s) => (s as any).type === 'task-group' && Boolean((s as any).props?.isContainer)
+  ) as any[];
+
+  const MACRO_PAD_X = 28;
+  const MACRO_HEADER_PAD_Y = 56;
+  const MACRO_BOTTOM_PAD_Y = 28;
+
+  for (const mg of macroGroups) {
+    const isDirectParent =
+      (childGroup.props?.parentId && mg.props?.headingId === childGroup.props.parentId) ||
+      (childGroup.props?.parentTitle && mg.props?.title?.trim().toLowerCase() === childGroup.props.parentTitle.trim().toLowerCase()) ||
+      (mg.props?.level === 2 && childGroup.props?.branchTitle && mg.props?.title?.trim().toLowerCase() === childGroup.props.branchTitle.trim().toLowerCase());
+
+    if (isDirectParent) {
+      const siblings = allShapes.filter((s) => {
+        if ((s as any).type !== 'task-group' || s.id === mg.id) return false;
+        const sp = (s as any).props;
+        if (sp?.parentId && mg.props?.headingId) return sp.parentId === mg.props.headingId;
+        if (sp?.parentTitle && mg.props?.title) return sp.parentTitle.trim().toLowerCase() === mg.props.title.trim().toLowerCase();
+        if (mg.props?.level === 2 && sp?.branchTitle && mg.props?.title) return sp.branchTitle.trim().toLowerCase() === mg.props.title.trim().toLowerCase();
+        return false;
+      }) as any[];
+
+      const allChildren = siblings.length > 0 ? siblings : [childGroup];
+      const minX = Math.min(...allChildren.map((c) => c.x));
+      const minY = Math.min(...allChildren.map((c) => c.y));
+      const maxRight = Math.max(...allChildren.map((c) => c.x + (c.props?.w || 360)));
+      const maxBottom = Math.max(...allChildren.map((c) => c.y + (c.props?.h || 240)));
+
+      const calcX = minX - MACRO_PAD_X;
+      const calcY = minY - MACRO_HEADER_PAD_Y;
+      const calcW = (maxRight - minX) + MACRO_PAD_X * 2;
+      const calcH = (maxBottom - minY) + MACRO_HEADER_PAD_Y + MACRO_BOTTOM_PAD_Y;
+
+      if (mg.x !== calcX || mg.y !== calcY || mg.props.w !== calcW || mg.props.h !== calcH) {
+        (editor.updateShape as any)({
+          id: mg.id,
+          type: 'task-group',
+          x: calcX,
+          y: calcY,
+          props: {
+            ...mg.props,
+            w: Math.ceil(calcW),
+            h: Math.ceil(calcH),
+          },
+        });
+        expandParentContainersIfNeeded(editor, {
+          ...mg,
+          x: calcX,
+          y: calcY,
+          props: { ...mg.props, w: Math.ceil(calcW), h: Math.ceil(calcH) },
+        });
+      }
+    }
   }
 }
 
@@ -1532,7 +1737,8 @@ function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?
   const headingLevel = Math.max(1, Math.min(6, level || (isContainer ? 1 : 2)));
   const headingPrefix = '#'.repeat(headingLevel);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const groupMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const [menuCoords, setMenuCoords] = useState<{ top: number; left: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const activeColorKey = color && SECTION_COLOR_OPTIONS[color] ? color : 'default';
@@ -1585,23 +1791,42 @@ function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?
 
   useEffect(() => {
     if (!isMenuOpen) return;
+    const close = () => setIsMenuOpen(false);
     const handlePointerDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const dropdown = document.getElementById(`task-group-menu-dropdown-${shape.id}`);
+      if (
+        dropdown &&
+        !dropdown.contains(e.target as Node) &&
+        !groupMenuBtnRef.current?.contains(e.target as Node)
+      ) {
         setIsMenuOpen(false);
       }
     };
     window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [isMenuOpen]);
+    window.addEventListener('wheel', close, { passive: true });
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('wheel', close);
+      window.removeEventListener('resize', close);
+    };
+  }, [isMenuOpen, shape.id]);
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const rect = e.currentTarget.getBoundingClientRect();
-    setMenuPosition({
-      x: Math.max(8, e.clientX - rect.left),
-      y: Math.max(8, e.clientY - rect.top),
-    });
+    const menuWidth = 205;
+    const menuHeight = 240;
+    let top = e.clientY + 2;
+    if (top + menuHeight > window.innerHeight && e.clientY - menuHeight > 0) {
+      top = Math.max(8, e.clientY - menuHeight - 2);
+    }
+    let left = e.clientX + 2;
+    if (left + menuWidth > window.innerWidth - 8) {
+      left = window.innerWidth - menuWidth - 8;
+    }
+    if (left < 8) left = 8;
+    setMenuCoords({ top, left });
     setIsMenuOpen(true);
   };
 
@@ -1683,13 +1908,30 @@ function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?
             )}
             {/* Context menu trigger ⋮ */}
             <button
+              ref={groupMenuBtnRef}
               id={`btn-task-group-menu-${shape.id}`}
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                setMenuPosition(null);
-                setIsMenuOpen(!isMenuOpen);
+                if (isMenuOpen) {
+                  setIsMenuOpen(false);
+                } else if (groupMenuBtnRef.current) {
+                  const rect = groupMenuBtnRef.current.getBoundingClientRect();
+                  const menuWidth = 205;
+                  const menuHeight = 240;
+                  let top = rect.bottom + 4;
+                  if (top + menuHeight > window.innerHeight && rect.top - menuHeight > 0) {
+                    top = Math.max(8, rect.top - menuHeight - 4);
+                  }
+                  let left = rect.right - menuWidth;
+                  if (left < 8) left = 8;
+                  if (left + menuWidth > window.innerWidth - 8) {
+                    left = window.innerWidth - menuWidth - 8;
+                  }
+                  setMenuCoords({ top, left });
+                  setIsMenuOpen(true);
+                }
               }}
               className="w-5 h-5 flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] rounded cursor-pointer transition-colors"
               title={isContainer ? i18n._(msg`Opciones de contenedor`) : i18n._(msg`Opciones de sección`)}
@@ -1704,19 +1946,18 @@ function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?
         </div>
 
         {/* Popover Contextual Menu */}
-        {isMenuOpen && (
+        {isMenuOpen && menuCoords && typeof document !== 'undefined' && createPortal(
           <div
             ref={menuRef}
             id={`task-group-menu-dropdown-${shape.id}`}
             onPointerDown={(e) => e.stopPropagation()}
             style={{
-              position: 'absolute',
-              left: menuPosition ? `${menuPosition.x}px` : 'auto',
-              top: menuPosition ? `${menuPosition.y}px` : '36px',
-              right: menuPosition ? 'auto' : '8px',
-              zIndex: 100,
+              position: 'fixed',
+              left: `${menuCoords.left}px`,
+              top: `${menuCoords.top}px`,
+              zIndex: 99999,
             }}
-            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-lg p-1.5 flex flex-col gap-1 min-w-[190px] text-xs font-sans pointer-events-auto"
+            className="bg-[var(--surface-container)] border border-[var(--outline)] rounded-md shadow-xl p-1.5 flex flex-col gap-1 min-w-[200px] text-xs font-sans pointer-events-auto"
           >
             <div className="px-2 py-1 text-[11px] font-mono text-[var(--on-surface-variant)] border-b border-[var(--outline)] mb-0.5 truncate">
               {`${headingPrefix} ${title}`}
@@ -1807,7 +2048,8 @@ function TaskGroupComponent({ shape, editor }: { shape: ITaskGroupShape; editor?
               <span className="material-symbols-outlined text-[14px]">delete</span>
               <span>{isContainer ? i18n._(msg`Eliminar contenedor`) : i18n._(msg`Eliminar sección`)}</span>
             </button>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     </HTMLContainer>
@@ -1874,6 +2116,44 @@ export class TaskGroupShapeUtil extends BaseBoxShapeUtil<any> {
   override canResize = () => true;
   override isAspectRatioLocked = () => false;
   override onResize(shape: ITaskGroupShape, info: any) {
+    const allShapes = this.editor.getCurrentPageShapes();
+    if (shape.props?.isContainer) {
+      const childGroups = allShapes.filter((s) => {
+        if ((s as any).type !== 'task-group' || s.id === shape.id) return false;
+        const sp = (s as any).props;
+        if (sp?.parentId && shape.props?.headingId) return sp.parentId === shape.props.headingId;
+        if (sp?.parentTitle && shape.props?.title) return sp.parentTitle.trim().toLowerCase() === shape.props.title.trim().toLowerCase();
+        if (shape.props?.level === 2 && sp?.branchTitle && shape.props?.title) return sp.branchTitle.trim().toLowerCase() === shape.props.title.trim().toLowerCase();
+        return false;
+      }) as any[];
+
+      if (childGroups.length > 0) {
+        const maxRight = Math.max(...childGroups.map((c) => c.x + (c.props?.w || 360)));
+        const maxBottom = Math.max(...childGroups.map((c) => c.y + (c.props?.h || 240)));
+        const minW = Math.max(360, (maxRight - shape.x) + 28);
+        const minH = Math.max(180, (maxBottom - shape.y) + 28);
+        return resizeBox(shape as any, info, { minWidth: minW, minHeight: minH });
+      }
+      return resizeBox(shape as any, info, { minWidth: 360, minHeight: 180 });
+    }
+
+    const tasks = allShapes.filter((s) => {
+      if ((s as any).type !== 'task') return false;
+      const tp = (s as any).props;
+      if (shape.props?.headingId && tp?.groupHeadingId) {
+        return tp.groupHeadingId === shape.props.headingId;
+      }
+      return (tp?.groupTitle || '').trim().toLowerCase() === (shape.props?.title || '').trim().toLowerCase();
+    }) as any[];
+
+    if (tasks.length > 0) {
+      const maxTaskBottom = Math.max(...tasks.map((t) => t.y + (t.props?.h || 96)));
+      const maxTaskRight = Math.max(...tasks.map((t) => t.x + (t.props?.w || 320)));
+      const minH = Math.max(180, (maxTaskBottom - shape.y) + 24);
+      const minW = Math.max(260, (maxTaskRight - shape.x) + 20);
+      return resizeBox(shape as any, info, { minWidth: minW, minHeight: minH });
+    }
+
     return resizeBox(shape as any, info, { minWidth: 200, minHeight: 120 });
   }
 
@@ -2055,6 +2335,7 @@ export function populateCanvasWithGroups(
   const validationReport = rawMarkdown ? validateMarkdownDocument(rawMarkdown) : null;
   const duplicateIds = validationReport?.duplicateIds || new Set<string>();
   const missingIdTaskIds = validationReport?.missingIdTaskIds || new Set<string>();
+  const missingStatusTaskIds = validationReport?.missingStatusTaskIds || new Set<string>();
   const unresolvedBlockerMap = validationReport?.unresolvedBlockerMap || new Map<string, string[]>();
 
   const cardWidth = 320;
@@ -2123,7 +2404,8 @@ export function populateCanvasWithGroups(
 
   const getTaskCalculatedHeight = (task: ParsedMarkdownTask) => {
     const subCount = task.subtasks?.items?.length || 0;
-    return subCount > 0 ? cardHeight + 20 + subCount * 22 : cardHeight;
+    const descExtra = task.description ? 24 : 0;
+    return subCount > 0 ? cardHeight + 20 + subCount * 22 + descExtra : cardHeight + descExtra;
   };
 
   // Pass 1: Place groups that already have saved positions in savedGroupMap
@@ -2143,8 +2425,8 @@ export function populateCanvasWithGroups(
           Math.max(0, taskCount - 1) * cardGap +
           groupPaddingBottom
       );
-      const w = saved.width || groupWidth;
-      const h = saved.height || defaultCalculatedHeight;
+      const w = Math.max(saved.width || 0, groupWidth);
+      const h = Math.max(saved.height || 0, defaultCalculatedHeight);
       let x = saved.x;
       let y = saved.y;
 
@@ -2195,8 +2477,15 @@ export function populateCanvasWithGroups(
       const prev = placedRects[placedRects.length - 1];
       const prevGroup = groups[index - 1];
       const isNewBranch = prevGroup && group.branchTitle && prevGroup.branchTitle !== group.branchTitle;
-      x = prev.x + prev.w + (isNewBranch ? 100 : 40);
-      y = prev.y;
+      const tentativeX = prev.x + prev.w + (isNewBranch ? 64 : 40);
+      if (isNewBranch || tentativeX + w > 1400 + 80) {
+        const maxBottom = Math.max(...placedRects.map((p) => p.y + p.h));
+        x = 80;
+        y = maxBottom + 64;
+      } else {
+        x = tentativeX;
+        y = prev.y;
+      }
     }
 
     while (placedRects.some((p) => isRectOverlapping({ x, y, w, h }, p))) {
@@ -2265,6 +2554,7 @@ export function populateCanvasWithGroups(
       // Only associate for arrow bindings if not duplicated collision
       const isDuplicate = task.taskId ? duplicateIds.has(task.taskId.toLowerCase()) : false;
       const isMissingId = !task.taskId || missingIdTaskIds.has(resolvedTaskId);
+      const isMissingStatus = !task.status || missingStatusTaskIds.has(resolvedTaskId);
       const unresolvedBlockers = unresolvedBlockerMap.get(normalizedId);
 
       if (!isDuplicate) {
@@ -2297,9 +2587,10 @@ export function populateCanvasWithGroups(
           h: taskH,
           title: task.title,
           completed: task.completed,
-          priority: task.priority || 'P1',
+          priority: task.priority || 'P3',
           taskId: resolvedTaskId,
           status: task.status,
+          description: task.description,
           groupTitle: group.title,
           groupHeadingId: group.id,
           branchTitle: group.branchTitle,
@@ -2308,10 +2599,36 @@ export function populateCanvasWithGroups(
           blockedBy: task.blockedBy,
           isDuplicateId: isDuplicate,
           hasMissingId: isMissingId,
+          hasMissingStatus: isMissingStatus,
           unresolvedBlockers,
         },
       });
     });
+  });
+
+  // Ensure every group shape strictly encloses all of its tasks with safe padding
+  groupShapesToCreate.forEach((gShape) => {
+    const containedTasks = taskShapesToCreate.filter((t) => {
+      const p = t.props;
+      if (gShape.props?.headingId && p?.groupHeadingId) {
+        return p.groupHeadingId === gShape.props.headingId;
+      }
+      return (p?.groupTitle || '').trim().toLowerCase() === (gShape.props?.title || '').trim().toLowerCase();
+    });
+
+    if (containedTasks.length > 0) {
+      const maxTaskBottom = Math.max(...containedTasks.map((t) => t.y + (t.props?.h || 96)));
+      const requiredH = (maxTaskBottom - gShape.y) + groupPaddingBottom;
+      if (requiredH > gShape.props.h) {
+        gShape.props.h = Math.ceil(requiredH);
+      }
+
+      const maxTaskRight = Math.max(...containedTasks.map((t) => t.x + (t.props?.w || cardWidth)));
+      const requiredW = (maxTaskRight - gShape.x) + groupPaddingX;
+      if (requiredW > gShape.props.w) {
+        gShape.props.w = Math.ceil(requiredW);
+      }
+    }
   });
 
   // Create native arrows from blocker task -> blocked task (ignoring nonexistent/duplicate targets)
@@ -2408,8 +2725,11 @@ export function populateCanvasWithGroups(
   const sortedParents = [...parentHeadings].sort((a, b) => (b.level || 1) - (a.level || 1));
 
   sortedParents.forEach((ph) => {
-    // Direct children: match by parentId === ph.id first, with fallback to parentTitle + branchTitle
+    // Direct children: match by branchTitle for level 2, or parentId === ph.id first, with fallback to parentTitle
     const directChildren = [...groupShapesToCreate, ...macroGroupShapesToCreate].filter((s) => {
+      if (ph.level === 2 && s.props?.branchTitle && s.props.branchTitle.toLowerCase() === ph.title.toLowerCase()) {
+        return true;
+      }
       if (s.props?.parentId && ph.id) {
         return s.props.parentId === ph.id;
       }
@@ -2440,11 +2760,11 @@ export function populateCanvasWithGroups(
     macroGroupShapesToCreate.push({
       id: createShapeId(),
       type: 'task-group' as const,
-      x: pSaved ? Math.min(pSaved.x, calcX) : calcX,
-      y: pSaved ? Math.min(pSaved.y, calcY) : calcY,
+      x: calcX,
+      y: calcY,
       props: {
-        w: pSaved ? Math.max(pSaved.width, (maxRight - Math.min(pSaved.x, calcX)) + MACRO_PAD_X) : calcW,
-        h: pSaved ? Math.max(pSaved.height, (maxBottom - Math.min(pSaved.y, calcY)) + MACRO_BOTTOM_PAD_Y) : calcH,
+        w: calcW,
+        h: calcH,
         title: ph.title,
         count: totalTasks,
         completedCount: completedTasks,
@@ -2479,17 +2799,22 @@ export function populateCanvasWithGroups(
     (editor.createBindings as any)(bindingsToCreate);
   }
 
-  // Populate note shapes from Markdown "## Notas" section if needed
+  // Populate note shapes from Markdown "## Notas" or "## Comentarios" section if needed
   if (rawMarkdown) {
     const existingNotes = editor
       .getCurrentPageShapes()
       .filter((s) => (s as any).type === 'note' || (s as any).type === 'text');
 
-    if (existingNotes.length === 0 || options?.clearNotes) {
-      if (options?.clearNotes && existingNotes.length > 0) {
-        editor.deleteShapes(existingNotes.map((s) => s.id));
+    const scannedNotes = scanNotesFromMarkdown(rawMarkdown);
+
+    if (options?.clearNotes) {
+      if (existingNotes.length > 0) {
+        try {
+          editor.deleteShapes(existingNotes.map((s) => s.id));
+        } catch {
+          // ignore
+        }
       }
-      const scannedNotes = scanNotesFromMarkdown(rawMarkdown);
       if (scannedNotes.length > 0) {
         let maxRight = 40;
         for (const g of groupShapesToCreate) {
@@ -2509,7 +2834,60 @@ export function populateCanvasWithGroups(
           },
         }));
 
+        try {
+          (editor.createShapes as any)(noteShapesToCreate);
+        } catch (err) {
+          console.error('[TaskShapeUtil] Failed to create note shapes from markdown:', err);
+        }
+      }
+    } else if (existingNotes.length === 0 && scannedNotes.length > 0) {
+      let maxRight = 40;
+      for (const g of groupShapesToCreate) {
+        const right = (g.x || 0) + (g.props?.w || 360);
+        if (right > maxRight) maxRight = right;
+      }
+
+      const noteShapesToCreate = scannedNotes.map((noteText, idx) => ({
+        id: createShapeId(),
+        type: 'note' as const,
+        x: maxRight + 40,
+        y: 40 + idx * 220,
+        props: {
+          richText: toRichTextHelper(noteText),
+          color: 'yellow',
+          size: 'm',
+        },
+      }));
+
+      try {
         (editor.createShapes as any)(noteShapesToCreate);
+      } catch (err) {
+        console.error('[TaskShapeUtil] Failed to create note shapes from markdown:', err);
+      }
+    } else if (existingNotes.length > 0 && scannedNotes.length > existingNotes.length) {
+      // Append newly added notes from markdown
+      let maxRight = 40;
+      for (const g of groupShapesToCreate) {
+        const right = (g.x || 0) + (g.props?.w || 360);
+        if (right > maxRight) maxRight = right;
+      }
+      const extraNotes = scannedNotes.slice(existingNotes.length);
+      const newShapes = extraNotes.map((noteText, idx) => ({
+        id: createShapeId(),
+        type: 'note' as const,
+        x: maxRight + 40,
+        y: 40 + (existingNotes.length + idx) * 220,
+        props: {
+          richText: toRichTextHelper(noteText),
+          color: 'yellow',
+          size: 'm',
+        },
+      }));
+
+      try {
+        (editor.createShapes as any)(newShapes);
+      } catch (err) {
+        console.error('[TaskShapeUtil] Failed to append note shapes from markdown:', err);
       }
     }
   }

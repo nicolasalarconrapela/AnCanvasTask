@@ -1,4 +1,4 @@
-import type { TaskPriority } from './taskMarkdown';
+import type { TaskPriority, TaskStatus } from './taskMarkdown';
 
 export interface SubtaskItem {
   title: string;
@@ -11,6 +11,7 @@ export interface TaskUpdatePayload {
   completed?: boolean;
   priority?: TaskPriority;
   status?: string;
+  description?: string;
   tags?: string[];
   blockedBy?: string;
   subtasks?: {
@@ -31,6 +32,7 @@ export interface TaskBlockInfo {
   rawPriority?: string;
   detectedBlockedBy?: string;
   detectedStatus?: string;
+  detectedDescription?: string;
   detectedTags?: string[];
   detectedSubtasks?: {
     total: number;
@@ -54,6 +56,8 @@ export type MarkdownIssueType =
   | 'duplicate_id'
   | 'unresolved_blocker'
   | 'invalid_priority'
+  | 'missing_status'
+  | 'invalid_status'
   | 'unknown_metadata'
   | 'task_outside_heading'
   | 'empty_heading';
@@ -79,6 +83,7 @@ export interface MarkdownValidationReport {
   infoCount: number;
   duplicateIds: Set<string>;
   missingIdTaskIds: Set<string>;
+  missingStatusTaskIds: Set<string>;
   unresolvedBlockerMap: Map<string, string[]>; // taskId -> missing blocker IDs
 }
 
@@ -110,6 +115,36 @@ export interface ParentHeadingInfo {
 }
 
 /**
+ * Replaces the content of HTML comments (<!-- ... -->) with spaces/newlines,
+ * preserving exact line numbers and column offsets, except for heading color directives (<!-- color: ... -->).
+ * Also safely masks unclosed comments until EOF so typing in LiveMarkdown never generates partial/corrupted tasks.
+ */
+export function maskHtmlComments(markdown: string): string {
+  if (!markdown) return '';
+  return markdown.replace(/<!--([\s\S]*?)(?:-->|$)/g, (fullMatch, commentBody) => {
+    if (/^\s*color:\s*[a-zA-Z0-9_-]+\s*$/i.test(commentBody)) {
+      return fullMatch; // Keep color annotations on headings
+    }
+    // Replace all non-newline characters with spaces to preserve line breaks and character positions
+    return fullMatch.replace(/[^\r\n]/g, ' ');
+  });
+}
+
+// A commented task is deliberately inactive, including comments still being typed.
+export function isTaskCommentedOut(markdown: string, taskId: string, title?: string): boolean {
+  for (const comment of markdown.matchAll(/<!--([\s\S]*?)(?:-->|$)/g)) {
+    const entries = comment[1].split(/(?=^[ \t]*[-*][ \t]*\[[ xX]\])/m);
+    for (const entry of entries) {
+      const id = entry.match(/^\s*(?:[-*]\s*)?ID\s*:\s*(.+)$/im)?.[1].trim();
+      const commentedTitle = entry.match(/^[ \t]*[-*][ \t]*\[[ xX]\][ \t]*([^\r\n]*)/m)?.[1].trim();
+      if (id ? id === taskId : commentedTitle !== undefined &&
+        (commentedTitle === title?.trim() || slugify(commentedTitle) === taskId)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Parses all task blocks and their associated groups from a Markdown string,
  * detecting unknown metadata, headings, and lines without modifying the document.
  */
@@ -118,7 +153,9 @@ export function scanTaskBlocks(markdown: string): {
   groupHeadings: GroupHeadingInfo[];
   parentHeadings: ParentHeadingInfo[];
 } {
-  const lines = markdown.split(/\r?\n/);
+  const maskedMarkdown = maskHtmlComments(markdown);
+  const lines = maskedMarkdown.split(/\r?\n/);
+  const originalLines = (markdown || '').split(/\r?\n/);
   const taskBlocks: TaskBlockInfo[] = [];
   const groupHeadings: GroupHeadingInfo[] = [];
   const parentHeadings: ParentHeadingInfo[] = [];
@@ -150,7 +187,6 @@ export function scanTaskBlocks(markdown: string): {
     const headingMatch = trimmed.match(/^([#]{1,6})\s+(.+)$/);
     if (headingMatch) {
       if (currentBlock) {
-        currentBlock.endLineIndex = i - 1;
         taskBlocks.push(currentBlock);
         currentBlock = null;
       }
@@ -206,19 +242,21 @@ export function scanTaskBlocks(markdown: string): {
     // Check for task item: "- [ ] Title" or "- [x] Title"
     // Indented checkbox lines under an active task block are subtasks, not root tasks
     const isIndented = line.startsWith(' ') || line.startsWith('\t');
+    const isMetadataLine =
+      Boolean(currentBlock) &&
+      /^(?:\s*[-*]\s*(?:\[[ xX]\]\s*)?)?(?:ID|Priority|Status|Description|Descripci[oó]n|Desc|Tags?|Blocked\s*(?:by|-by)?)\s*:/i.test(trimmed);
     const taskMatch = line.match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/);
-    if (taskMatch && (!currentBlock || !isIndented)) {
+    if (taskMatch && (!currentBlock || !isIndented) && !isMetadataLine) {
       if (currentBlock) {
-        currentBlock.endLineIndex = i - 1;
         taskBlocks.push(currentBlock);
       }
       taskCounter++;
       currentBlock = {
         taskLineIndex: i,
         endLineIndex: i,
-        rawTaskLine: line,
+        rawTaskLine: originalLines[i] !== undefined ? originalLines[i] : line,
         temporaryId: `temp-task-${taskCounter}`,
-        detectedTitle: taskMatch[4].trim(),
+        detectedTitle: (taskMatch[4] || '').trim(),
         unknownMetadata: [],
         headingId: currentHeading ? currentHeading.id : undefined,
         headingLineIndex: currentHeading ? currentHeading.lineIndex : undefined,
@@ -238,17 +276,18 @@ export function scanTaskBlocks(markdown: string): {
         line.startsWith(' ') ||
         line.startsWith('\t') ||
         trimmed.startsWith('-') ||
-        trimmed.startsWith('*');
+        trimmed.startsWith('*') ||
+        isMetadataLine;
 
       if (isSubLine && trimmed.length > 0) {
-        const idMatch = trimmed.match(/^(?:[-*]\s*)?ID\s*:\s*(.+)$/i);
+        const idMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?ID\s*:\s*(.+)$/i);
         if (idMatch) {
           currentBlock.detectedId = idMatch[1].trim();
           currentBlock.endLineIndex = i;
           continue;
         }
 
-        const priorityMatch = trimmed.match(/^(?:[-*]\s*)?Priority\s*:\s*(.+)$/i);
+        const priorityMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?Priority\s*:\s*(.+)$/i);
         if (priorityMatch) {
           const rawP = priorityMatch[1].trim();
           currentBlock.rawPriority = rawP;
@@ -260,21 +299,28 @@ export function scanTaskBlocks(markdown: string): {
           continue;
         }
 
-        const blockedByMatch = trimmed.match(/^(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:\s*(.+)$/i);
+        const blockedByMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?Blocked\s*(?:by|-by)?\s*:\s*(.+)$/i);
         if (blockedByMatch) {
           currentBlock.detectedBlockedBy = blockedByMatch[1].trim();
           currentBlock.endLineIndex = i;
           continue;
         }
 
-        const statusMatch = trimmed.match(/^(?:[-*]\s*)?Status\s*:\s*(.+)$/i);
+        const statusMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?Status\s*:\s*(.+)$/i);
         if (statusMatch) {
-          currentBlock.detectedStatus = statusMatch[1].trim().toLowerCase().replace(/\s+/g, '_');
+          currentBlock.detectedStatus = statusMatch[1].trim();
           currentBlock.endLineIndex = i;
           continue;
         }
 
-        const tagsMatch = trimmed.match(/^(?:[-*]\s*)?(?:Tags|Labels)\s*:\s*(.+)$/i);
+        const descriptionMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?(?:Description|Descripci[oó]n|Desc)\s*:\s*(.+)$/i);
+        if (descriptionMatch) {
+          currentBlock.detectedDescription = descriptionMatch[1].trim();
+          currentBlock.endLineIndex = i;
+          continue;
+        }
+
+        const tagsMatch = trimmed.match(/^(?:[-*]\s*(?:\[[ xX]\]\s*)?)?(?:Tags?|Labels)\s*:\s*(.+)$/i);
         if (tagsMatch) {
           currentBlock.detectedTags = tagsMatch[1]
             .split(',')
@@ -318,18 +364,30 @@ export function scanTaskBlocks(markdown: string): {
         }
 
         // Unknown metadata line (e.g. "Owner: Nicolas", "Estimate: 2h")
-        const genericMetaMatch = trimmed.match(/^(?:[-*]\s*)?([a-zA-Z0-9_-]+)\s*:\s*(.+)$/);
-        if (genericMetaMatch) {
-          currentBlock.unknownMetadata.push({
-            key: genericMetaMatch[1],
-            rawLine: line,
-          });
-          currentBlock.endLineIndex = i;
-          continue;
+        if (!trimmed.startsWith('<!--') && !trimmed.startsWith('//')) {
+          const genericMetaMatch = trimmed.match(/^(?:[-*]\s*)?([a-zA-Z0-9_-]+)\s*:\s*(.+)$/);
+          if (genericMetaMatch) {
+            currentBlock.unknownMetadata.push({
+              key: genericMetaMatch[1],
+              rawLine: originalLines[i] !== undefined ? originalLines[i] : line,
+            });
+            currentBlock.endLineIndex = i;
+            continue;
+          }
         }
       }
 
       if (trimmed.length > 0 && !trimmed.startsWith('#')) {
+        if (
+          !currentBlock.detectedDescription &&
+          isIndented &&
+          !trimmed.startsWith('```') &&
+          !trimmed.startsWith('-') &&
+          !trimmed.startsWith('*') &&
+          !trimmed.includes(':')
+        ) {
+          currentBlock.detectedDescription = trimmed;
+        }
         currentBlock.endLineIndex = i;
       }
     }
@@ -400,10 +458,12 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
 
   const duplicateIds = new Set<string>();
   const missingIdTaskIds = new Set<string>();
+  const missingStatusTaskIds = new Set<string>();
   const unresolvedBlockerMap = new Map<string, string[]>();
 
   const idCounts = new Map<string, TaskBlockInfo[]>();
   const allKnownIds = new Set<string>();
+  const VALID_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked']);
 
   // 1. Index all detected IDs and check for missing IDs
   taskBlocks.forEach((block, idx) => {
@@ -499,7 +559,38 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
         taskTitle: block.detectedTitle,
         groupTitle: block.groupTitle,
         lineIndex: block.taskLineIndex,
-        details: 'Valores válidos: P0 (crítica), P1 (alta), P2 (media), P3 (baja). Se usará P1 en el canvas.',
+        details: 'Valores válidos: P0 (crítica), P1 (alta), P2 (media), P3 (baja). Se usará P3 en el canvas.',
+      });
+    }
+  });
+
+  // 5. Check for Mandatory Status (missing or invalid)
+  taskBlocks.forEach((block, idx) => {
+    const taskKey = block.detectedId || block.temporaryId || `temp-${idx + 1}`;
+    if (!block.detectedStatus) {
+      missingStatusTaskIds.add(taskKey);
+      issues.push({
+        id: `missing-status-${block.detectedId || idx}`,
+        type: 'missing_status',
+        severity: 'warning',
+        message: `Tarea sin Estado: "${block.detectedTitle || 'Sin título'}"`,
+        taskId: taskKey,
+        taskTitle: block.detectedTitle,
+        groupTitle: block.groupTitle,
+        lineIndex: block.taskLineIndex,
+        details: 'El campo "- Status:" es obligatorio. Asigna un estado (ej. backlog, todo, in_progress, review, done, blocked).',
+      });
+    } else if (!VALID_STATUSES.has(block.detectedStatus.trim().toLowerCase())) {
+      issues.push({
+        id: `invalid-status-${block.detectedId || idx}`,
+        type: 'invalid_status',
+        severity: 'warning',
+        message: `Estado no válido "${block.detectedStatus}" en "${block.detectedTitle}"`,
+        taskId: taskKey,
+        taskTitle: block.detectedTitle,
+        groupTitle: block.groupTitle,
+        lineIndex: block.taskLineIndex,
+        details: 'Valores válidos: backlog, todo, in_progress, review, done, blocked. Se usará backlog por defecto.',
       });
     }
   });
@@ -542,6 +633,10 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
 
   // 7. Check for Empty Headings
   groupHeadings.forEach((gh, idx) => {
+    const lowerTitle = gh.title.trim().toLowerCase();
+    if (['notas', 'notes', 'comentarios', 'comments'].includes(lowerTitle)) {
+      return;
+    }
     const tasksInHeading = taskBlocks.filter((b) =>
       b.headingId ? b.headingId === gh.id : b.groupTitle.toLowerCase() === gh.title.toLowerCase()
     );
@@ -572,6 +667,7 @@ export function validateMarkdownDocument(markdown: string): MarkdownValidationRe
     infoCount,
     duplicateIds,
     missingIdTaskIds,
+    missingStatusTaskIds,
     unresolvedBlockerMap,
   };
 }
@@ -703,6 +799,31 @@ export function findDependentTasks(
 }
 
 /**
+ * Returns canonical rank for task metadata lines:
+ * 1: Description
+ * 2: ID
+ * 3: Status
+ * 4: Priority
+ * 5: Blocked by
+ * 6: Tags
+ * 7: Progress
+ * 8: Subtasks
+ * 9: Other / comments / unknown metadata
+ */
+export function getMetadataLineRank(line: string): number {
+  const trimmed = line.trim();
+  if (/^(?:[-*]\s*)?(?:Description|Descripci[oó]n|Desc)\s*:/i.test(trimmed)) return 1;
+  if (/^(?:[-*]\s*)?ID\s*:/i.test(trimmed)) return 2;
+  if (/^(?:[-*]\s*)?Status\s*:/i.test(trimmed)) return 3;
+  if (/^(?:[-*]\s*)?Priority\s*:/i.test(trimmed)) return 4;
+  if (/^(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:/i.test(trimmed)) return 5;
+  if (/^(?:[-*]\s*)?(?:Tags?|Labels)\s*:/i.test(trimmed)) return 6;
+  if (/^(?:[-*]\s*)?(?:Progress|Subtasks)\s*:\s*\d+/i.test(trimmed)) return 7;
+  if (/^[-*]\s*\[[ xX]\]/.test(trimmed)) return 8;
+  return 9;
+}
+
+/**
  * Updates a specific task's title, completed status, or priority in a markdown string
  * while preserving unknown metadata, surrounding text, comments, and structure.
  */
@@ -712,26 +833,44 @@ export function updateTaskInMarkdown(markdown: string, taskId: string, updates: 
   if (!block) return markdown;
   const taskLine = lines[block.taskLineIndex].match(/^(\s*[-*]\s*\[)([ xX])(\]\s*)(.*)$/)!;
   const completed = updates.completed ?? (updates.status !== undefined ? updates.status === 'done' : /[xX]/.test(taskLine[2]));
-  lines[block.taskLineIndex] = `${taskLine[1]}${completed ? 'x' : ' '}${taskLine[3]}${updates.title ?? taskLine[4]}`;
+  const inlineComments = taskLine[4].match(/<!--[\s\S]*?(?:-->|$)/g) || [];
+  const title = updates.title === undefined ? taskLine[4] : updates.title + (inlineComments.length ? ' ' + inlineComments.join(' ') : '');
+  lines[block.taskLineIndex] = `${taskLine[1]}${completed ? 'x' : ' '}${taskLine[3]}${title}`;
   const body = lines.slice(block.taskLineIndex + 1, block.endLineIndex + 1);
   const metadata = (pattern: RegExp, label: string, value: string | undefined, insert = true) => {
     if (value === undefined) return;
-    const index = body.findIndex(line => pattern.test(line));
+    const context = [...lines.slice(0, block.taskLineIndex + 1), ...body].join('\n');
+    const visibleBody = maskHtmlComments(context).split('\n').slice(block.taskLineIndex + 1);
+    const index = visibleBody.findIndex(line => pattern.test(line));
     if (index >= 0) {
       if (value) body[index] = body[index].replace(pattern, (_, prefix) => prefix + value);
       else body.splice(index, 1);
-    } else if (value && insert) body.unshift(`${block.indentation}  - ${label}: ${value}`);
+    } else if (value && insert) {
+      const firstVisible = visibleBody.findIndex(line => line.trim());
+      if (firstVisible >= 0 || maskHtmlComments(context + '\n__metadata__').endsWith('__metadata__'))
+        body.splice(firstVisible >= 0 ? firstVisible : body.length, 0, `${block.indentation}  - ${label}: ${value}`);
+    }
   };
+  const statusToSet = updates.status !== undefined
+    ? updates.status
+    : updates.completed === true
+      ? 'done'
+      : updates.completed === false && block.detectedStatus === 'done'
+        ? 'backlog'
+        : undefined;
+
   metadata(/^(\s*(?:[-*]\s*)?Priority\s*:\s*).*$/i, 'Priority', updates.priority);
-  metadata(/^(\s*(?:[-*]\s*)?Status\s*:\s*).*$/i, 'Status', updates.status, !['todo', 'done'].includes(updates.status || ''));
+  metadata(/^(\s*(?:[-*]\s*)?Status\s*:\s*).*$/i, 'Status', statusToSet, !['todo', 'done'].includes(statusToSet || ''));
+  metadata(/^(\s*(?:[-*]\s*)?(?:Description|Descripci[oó]n|Desc)\s*:\s*).*$/i, 'Description', updates.description !== undefined ? updates.description.trim() : undefined, Boolean(updates.description && updates.description.trim()));
   metadata(/^(\s*(?:[-*]\s*)?(?:Tags|Labels)\s*:\s*).*$/i, 'Tags', updates.tags?.join(', '));
   metadata(/^(\s*(?:[-*]\s*)?Blocked\s*(?:by|-by)?\s*:\s*).*$/i, 'Blocked by', updates.blockedBy?.trim());
   metadata(/^(\s*(?:[-*]\s*)?ID\s*:\s*).*$/i, 'ID', updates.id?.trim());
 
   if (updates.subtasks?.items) {
+    const visibleBody = maskHtmlComments([...lines.slice(0, block.taskLineIndex + 1), ...body].join('\n')).split('\n').slice(block.taskLineIndex + 1);
     let subIdx = 0;
     for (let i = 0; i < body.length; i++) {
-      const bTrimmed = body[i].trim();
+      const bTrimmed = visibleBody[i].trim();
       const match = bTrimmed.match(/^([-*]\s*\[)([ xX])(\]\s*.*)$/);
       if (match && subIdx < updates.subtasks.items.length) {
         const targetSub = updates.subtasks.items[subIdx];
@@ -742,7 +881,12 @@ export function updateTaskInMarkdown(markdown: string, taskId: string, updates: 
     }
   }
 
-  lines.splice(block.taskLineIndex + 1, block.endLineIndex - block.taskLineIndex, ...body);
+  // Stable sort body lines according to canonical metadata order: Description -> ID -> Status -> Priority -> etc.
+  const indexed = body.map((line, idx) => ({ line, idx, rank: getMetadataLineRank(line) }));
+  if (!lines.slice(block.taskLineIndex, block.endLineIndex + 1).join('\n').includes('<!--')) indexed.sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.idx - b.idx));
+  const sortedBody = indexed.map((item) => item.line);
+
+  lines.splice(block.taskLineIndex + 1, block.endLineIndex - block.taskLineIndex, ...sortedBody);
   return lines.join('\n');
 }
 
@@ -761,9 +905,10 @@ export function toggleSubtaskInMarkdown(
   const block = findMatchingTaskBlock(taskBlocks, taskId, taskTitle);
   if (!block) return markdown;
 
+  const visibleLines = maskHtmlComments(markdown).split(/\r?\n/);
   let currentSubtaskIdx = 0;
   for (let i = block.taskLineIndex + 1; i <= block.endLineIndex; i++) {
-    const line = lines[i];
+    const line = visibleLines[i];
     const trimmed = line.trim();
     const isSubLine = line.startsWith(' ') || line.startsWith('\t');
     if (isSubLine) {
@@ -792,8 +937,10 @@ export function addTaskToMarkdown(
   payload: {
     title: string;
     priority?: TaskPriority;
+    status?: TaskStatus;
     groupTitle: string;
     customId?: string;
+    description?: string;
     blockedBy?: string;
     tags?: string[];
     subtasks?: Array<{ title: string; completed?: boolean }>;
@@ -802,18 +949,26 @@ export function addTaskToMarkdown(
   }
 ): { updatedMarkdown: string; taskId: string } {
   const cleanTitle = payload.title.trim();
-  const cleanGroup = payload.groupTitle.trim() || 'General';
-  const priority = payload.priority || 'P1';
+  const cleanGroup = (payload.groupTitle || 'General').trim() || 'General';
+  const priority = payload.priority || 'P3';
+  const status = payload.status || 'backlog';
   const finalId = payload.customId?.trim() || generateUniqueTaskId(cleanTitle, markdown);
 
   const lines = markdown.split(/\r?\n/);
   const { groupHeadings, parentHeadings } = scanTaskBlocks(markdown);
 
+  const isDone = status === 'done';
   const taskLines: string[] = [
-    `- [ ] ${cleanTitle}`,
-    `  - ID: ${finalId}`,
-    `  - Priority: ${priority}`,
+    `- [${isDone ? 'x' : ' '}] ${cleanTitle}`,
   ];
+
+  if (payload.description && payload.description.trim()) {
+    taskLines.push(`  - Description: ${payload.description.trim()}`);
+  }
+
+  taskLines.push(`  - ID: ${finalId}`);
+  taskLines.push(`  - Status: ${status}`);
+  taskLines.push(`  - Priority: ${priority}`);
 
   if (payload.blockedBy && payload.blockedBy.trim()) {
     taskLines.push(`  - Blocked by: ${payload.blockedBy.trim()}`);
@@ -887,7 +1042,9 @@ export function deleteTaskFromMarkdown(
   }
 
   const countToRemove = targetBlock.endLineIndex - targetBlock.taskLineIndex + 1;
-  lines.splice(targetBlock.taskLineIndex, countToRemove);
+  const original = lines.slice(targetBlock.taskLineIndex, targetBlock.endLineIndex + 1);
+  const comments = original.join('\n').match(/<!--[\s\S]*?(?:-->|$)/g) || [];
+  lines.splice(targetBlock.taskLineIndex, countToRemove, ...comments);
 
   return lines.join('\n').replace(/\n{3,}/g, '\n\n');
 }
@@ -1066,13 +1223,16 @@ export function assignTaskIdToTask(
 /**
  * Automatically generates and assigns unique IDs to all tasks in Markdown that do not have an ID.
  */
-export function autoAssignAllMissingTaskIds(markdown: string): {
+export function autoAssignAllMissingTaskIds(markdown: string, baseMarkdown?: string): {
   updatedMarkdown: string;
   assignedCount: number;
   assignedTasks: Array<{ taskId: string; title: string }>;
 } {
   const { taskBlocks } = scanTaskBlocks(markdown);
   const missingBlocks = taskBlocks.filter((b) => !b.detectedId);
+  const baseBlocks = baseMarkdown === undefined ? [] : scanTaskBlocks(baseMarkdown).taskBlocks;
+  const sharedTitle = taskBlocks.length === 1 && baseBlocks.length === 1 && !baseBlocks[0].detectedId &&
+    taskBlocks[0].groupTitle === baseBlocks[0].groupTitle ? baseBlocks[0].detectedTitle : undefined;
 
   if (missingBlocks.length === 0) {
     return { updatedMarkdown: markdown, assignedCount: 0, assignedTasks: [] };
@@ -1090,7 +1250,7 @@ export function autoAssignAllMissingTaskIds(markdown: string): {
   const sortedBlocks = [...missingBlocks].sort((a, b) => b.taskLineIndex - a.taskLineIndex);
 
   for (const block of sortedBlocks) {
-    const baseSlug = slugify(block.detectedTitle);
+    const baseSlug = slugify(sharedTitle ?? block.detectedTitle);
     let candidate = baseSlug;
     let counter = 2;
     while (existingIdSet.has(candidate.toLowerCase())) {
@@ -1111,6 +1271,93 @@ export function autoAssignAllMissingTaskIds(markdown: string): {
     assignedCount: assignedTasks.length,
     assignedTasks,
   };
+}
+
+/**
+ * Automatically assigns a valid Status to all tasks in Markdown that do not have a Status field.
+ * Completed tasks (- [x]) get 'done', pending tasks get the defaultStatus (defaults to 'backlog').
+ */
+export function autoAssignAllMissingTaskStatuses(
+  markdown: string,
+  defaultStatus: TaskStatus = 'backlog'
+): {
+  updatedMarkdown: string;
+  assignedCount: number;
+  assignedTasks: Array<{ taskId: string; title: string; status: TaskStatus }>;
+} {
+  const { taskBlocks } = scanTaskBlocks(markdown);
+  const missingBlocks = taskBlocks.filter((b) => !b.detectedStatus);
+
+  if (missingBlocks.length === 0) {
+    return { updatedMarkdown: markdown, assignedCount: 0, assignedTasks: [] };
+  }
+
+  const lines = markdown.split(/\r?\n/);
+  const assignedTasks: Array<{ taskId: string; title: string; status: TaskStatus }> = [];
+
+  // Sort blocks in reverse line order to prevent index shifting on insertion
+  const sortedBlocks = [...missingBlocks].sort((a, b) => b.taskLineIndex - a.taskLineIndex);
+
+  for (const block of sortedBlocks) {
+    const isCompleted = block.rawTaskLine.includes('[x]') || block.rawTaskLine.includes('[X]');
+    const assignedStatus: TaskStatus = isCompleted ? 'done' : defaultStatus;
+    const baseIndent = block.indentation ? `${block.indentation}  ` : '  ';
+    const statusLine = `${baseIndent}- Status: ${assignedStatus}`;
+
+    // Find the best insertion point after ID or Priority if present
+    let insertOffset = 1;
+    for (let i = block.taskLineIndex + 1; i <= block.endLineIndex; i++) {
+      const lineText = lines[i];
+      if (/^\s*(?:[-*]\s*)?(?:ID|Priority)\s*:/i.test(lineText)) {
+        insertOffset = i - block.taskLineIndex + 1;
+      }
+    }
+
+    lines.splice(block.taskLineIndex + insertOffset, 0, statusLine);
+    assignedTasks.unshift({
+      taskId: block.detectedId || block.temporaryId,
+      title: block.detectedTitle,
+      status: assignedStatus,
+    });
+  }
+
+  return {
+    updatedMarkdown: lines.join('\n'),
+    assignedCount: assignedTasks.length,
+    assignedTasks,
+  };
+}
+
+/**
+ * Assigns or updates the Status field of a single task in Markdown.
+ */
+export function assignStatusToTask(
+  markdown: string,
+  taskIdOrTitle: string,
+  status: TaskStatus = 'backlog'
+): string {
+  const { taskBlocks } = scanTaskBlocks(markdown);
+  const targetBlock = findMatchingTaskBlock(taskBlocks, taskIdOrTitle);
+  if (!targetBlock) {
+    return markdown;
+  }
+  if (targetBlock.detectedStatus) {
+    return updateTaskInMarkdown(markdown, taskIdOrTitle, { status });
+  }
+  const lines = markdown.split(/\r?\n/);
+  const baseIndent = targetBlock.indentation ? `${targetBlock.indentation}  ` : '  ';
+  const statusLine = `${baseIndent}- Status: ${status}`;
+
+  let insertOffset = 1;
+  for (let i = targetBlock.taskLineIndex + 1; i <= targetBlock.endLineIndex; i++) {
+    const lineText = lines[i];
+    if (/^\s*(?:[-*]\s*)?(?:ID|Priority)\s*:/i.test(lineText)) {
+      insertOffset = i - targetBlock.taskLineIndex + 1;
+    }
+  }
+
+  lines.splice(targetBlock.taskLineIndex + insertOffset, 0, statusLine);
+  return lines.join('\n');
 }
 
 /**
@@ -1266,11 +1513,13 @@ export function resolveSingleDuplicateTaskId(
 }
 
 /**
- * Scans note items from the "## Notas" or "## Notes" section of the Markdown.
+ * Scans note and comment items from the "## Notas", "## Notes", "## Comentarios" or "## Comments" section of the Markdown.
+ * Completely ignores content inside HTML comments (<!-- ... -->).
  */
 export function scanNotesFromMarkdown(markdown: string): string[] {
   if (!markdown) return [];
-  const lines = markdown.split(/\r?\n/);
+  const maskedMarkdown = maskHtmlComments(markdown);
+  const lines = maskedMarkdown.split(/\r?\n/);
   let inNotesSection = false;
   const notes: string[] = [];
   let currentNoteLines: string[] = [];
@@ -1289,11 +1538,11 @@ export function scanNotesFromMarkdown(markdown: string): string[] {
     const line = lines[i];
     const trimmed = line.trim();
 
-    if (/^##\s+(?:Notas|Notes)\b/i.test(trimmed)) {
+    if (/^[#]{1,6}\s+(?:Notas|Notes|Comentarios|Comments)\b/i.test(trimmed)) {
       flushCurrent();
       inNotesSection = true;
       continue;
-    } else if (trimmed.startsWith('## ') && inNotesSection) {
+    } else if (trimmed.startsWith('#') && inNotesSection) {
       flushCurrent();
       inNotesSection = false;
       continue;
@@ -1318,7 +1567,8 @@ export function scanNotesFromMarkdown(markdown: string): string[] {
 }
 
 /**
- * Synchronizes canvas notes into the Markdown document under the "## Notas" section.
+ * Synchronizes canvas notes into the Markdown document under the "## Notas" or "## Comentarios" section.
+ * Preserves any HTML comments (<!-- ... -->) present within the section.
  */
 export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
   const validNotes = notes.map((n) => n.trim()).filter(Boolean);
@@ -1326,11 +1576,13 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
 
   let sectionStart = -1;
   let sectionEnd = -1;
+  let headerLine = '## Notas';
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
-    if (/^##\s+(?:Notas|Notes)\b/i.test(trimmed)) {
+    if (/^[#]{1,6}\s+(?:Notas|Notes|Comentarios|Comments)\b/i.test(trimmed)) {
       sectionStart = i;
+      headerLine = lines[i].trim();
       break;
     }
   }
@@ -1338,16 +1590,26 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
   if (sectionStart !== -1) {
     sectionEnd = lines.length;
     for (let i = sectionStart + 1; i < lines.length; i++) {
-      if (lines[i].trim().startsWith('## ')) {
+      if (lines[i].trim().startsWith('#')) {
         sectionEnd = i;
         break;
       }
     }
   }
 
+  // Extract any existing HTML comments from the notes section
+  let existingComments: string[] = [];
+  if (sectionStart !== -1) {
+    const sectionText = lines.slice(sectionStart + 1, sectionEnd).join('\n');
+    const commentMatches = sectionText.match(/<!--[\s\S]*?(?:-->|$)/g);
+    if (commentMatches) {
+      existingComments = commentMatches.map((c) => c.trim()).filter(Boolean);
+    }
+  }
+
   const newNotesLines: string[] = [];
-  if (validNotes.length > 0) {
-    newNotesLines.push('## Notas');
+  if (validNotes.length > 0 || existingComments.length > 0) {
+    newNotesLines.push(headerLine);
     for (const note of validNotes) {
       const noteLines = note.split(/\r?\n/);
       newNotesLines.push(`- ${noteLines[0]}`);
@@ -1355,11 +1617,19 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
         newNotesLines.push(`  ${noteLines[j]}`);
       }
     }
+    if (existingComments.length > 0) {
+      if (validNotes.length > 0) {
+        newNotesLines.push('');
+      }
+      for (const comment of existingComments) {
+        newNotesLines.push(comment);
+      }
+    }
   }
 
   if (sectionStart !== -1) {
-    if (validNotes.length === 0) {
-      // Remove empty section
+    if (validNotes.length === 0 && existingComments.length === 0) {
+      // Remove empty section only if there are no notes AND no comments
       lines.splice(sectionStart, sectionEnd - sectionStart);
       return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
     } else {
@@ -1367,7 +1637,7 @@ export function syncNotesToMarkdown(markdown: string, notes: string[]): string {
       return lines.join('\n');
     }
   } else {
-    if (validNotes.length === 0) {
+    if (validNotes.length === 0 && existingComments.length === 0) {
       return markdown;
     }
     const trimmedMd = markdown.trimEnd();
@@ -1434,4 +1704,185 @@ export function updateSectionColorInMarkdown(
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Detects whether a line represents a task ID metadata entry (e.g. `  id: task-1`, `  - ID: 123`).
+ * Excludes normal root task lines that have checkboxes.
+ */
+export function isTaskIdLine(lineText: string): boolean {
+  const trimmed = lineText.trim();
+  if (/^[-*]\s*\[[ xX]\]/i.test(trimmed)) return false;
+  return /^(?:[-*]\s*)?ID\s*:\s*.+$/i.test(trimmed);
+}
+
+/**
+ * Detects whether a line represents a task Status metadata entry (e.g. `  - Status: backlog`).
+ */
+export function isTaskStatusLine(lineText: string): boolean {
+  const trimmed = lineText.trim();
+  if (/^[-*]\s*\[[ xX]\]/i.test(trimmed)) return false;
+  return /^(?:[-*]\s*)?Status\s*:\s*.+$/i.test(trimmed);
+}
+
+/**
+ * Detects whether a line represents a task Priority metadata entry (e.g. `  - Priority: P1`).
+ */
+export function isTaskPriorityLine(lineText: string): boolean {
+  const trimmed = lineText.trim();
+  if (/^[-*]\s*\[[ xX]\]/i.test(trimmed)) return false;
+  return /^(?:[-*]\s*)?Priority\s*:\s*.+$/i.test(trimmed);
+}
+
+/**
+ * Strips task ID metadata lines from a Markdown document for clean viewing/copying.
+ */
+export function stripTaskIdsFromMarkdown(markdown: string): string {
+  return markdown
+    .split(/\r?\n/)
+    .filter((line) => !isTaskIdLine(line))
+    .join('\n');
+}
+
+/**
+ * Strips task Status metadata lines from a Markdown document.
+ */
+export function stripStatusFromMarkdown(markdown: string): string {
+  return markdown
+    .split(/\r?\n/)
+    .filter((line) => !isTaskStatusLine(line))
+    .join('\n');
+}
+
+/**
+ * Strips task Priority metadata lines from a Markdown document.
+ */
+export function stripPriorityFromMarkdown(markdown: string): string {
+  return markdown
+    .split(/\r?\n/)
+    .filter((line) => !isTaskPriorityLine(line))
+    .join('\n');
+}
+
+/**
+ * Strips specified metadata fields (ID, Status, Priority) from Markdown.
+ */
+export function stripMetadataFieldsFromMarkdown(
+  markdown: string,
+  options: { stripIds?: boolean; stripStatus?: boolean; stripPriority?: boolean }
+): string {
+  const { stripIds, stripStatus, stripPriority } = options;
+  if (!stripIds && !stripStatus && !stripPriority) return markdown;
+  return markdown
+    .split(/\r?\n/)
+    .filter((line) => {
+      if (stripIds && isTaskIdLine(line)) return false;
+      if (stripStatus && isTaskStatusLine(line)) return false;
+      if (stripPriority && isTaskPriorityLine(line)) return false;
+      return true;
+    })
+    .join('\n');
+}
+
+/**
+ * Sanitizes the metadata line order for all tasks in Markdown so they adhere
+ * strictly to the canonical sequence:
+ * Description -> ID -> Status -> Priority -> Blocked by -> Tags -> Progress -> Subtasks -> Others
+ */
+export function sanitizeTaskMetadataOrder(markdown: string): {
+  updatedMarkdown: string;
+  reorderedCount: number;
+} {
+  if (!markdown || !markdown.trim()) {
+    return { updatedMarkdown: markdown, reorderedCount: 0 };
+  }
+
+  const { taskBlocks } = scanTaskBlocks(markdown);
+  if (taskBlocks.length === 0) {
+    return { updatedMarkdown: markdown, reorderedCount: 0 };
+  }
+
+  const lines = markdown.split(/\r?\n/);
+  let reorderedCount = 0;
+
+  // Process blocks in reverse order (bottom to top) to ensure line index stability
+  const sortedBlocks = [...taskBlocks].sort((a, b) => b.taskLineIndex - a.taskLineIndex);
+
+  for (const block of sortedBlocks) {
+    if (block.endLineIndex <= block.taskLineIndex) continue;
+
+    const originalBody = lines.slice(block.taskLineIndex + 1, block.endLineIndex + 1);
+    if (originalBody.length <= 1) continue;
+
+    // Stable sort according to metadata rank
+    const indexed = originalBody.map((line, idx) => ({
+      line,
+      idx,
+      rank: getMetadataLineRank(line),
+    }));
+
+    indexed.sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return a.idx - b.idx;
+    });
+
+    const newBody = indexed.map((item) => item.line);
+
+    // Check if reordering actually occurred
+    const hasChanged = newBody.some((line, i) => line !== originalBody[i]);
+    if (hasChanged) {
+      lines.splice(block.taskLineIndex + 1, originalBody.length, ...newBody);
+      reorderedCount++;
+    }
+  }
+
+  return {
+    updatedMarkdown: lines.join('\n'),
+    reorderedCount,
+  };
+}
+
+export interface TaskEnterSnippet {
+  snippetText: string;
+  cursorOffset: number;
+}
+
+/**
+ * Builds the canonical metadata snippet (Description / ID / Status / Priority)
+ * when pressing Enter on a task line in Live Markdown.
+ */
+export function buildTaskEnterSnippet(
+  taskLineText: string,
+  fullMarkdown: string
+): TaskEnterSnippet | null {
+  const taskMatch = taskLineText.match(/^(\s*)[-*+]\s*\[([ xX])\]\s*(.*)$/);
+  if (!taskMatch) return null;
+
+  const indent = taskMatch[1] || '';
+  const isCompleted = taskMatch[2].toLowerCase() === 'x';
+  const rawTitle = taskMatch[3].trim();
+  const subIndent = `${indent}  `;
+
+  const candidateId = generateUniqueTaskId(rawTitle, fullMarkdown);
+  const statusValue = isCompleted ? 'done' : 'backlog';
+
+  // Canonical order: Description -> ID -> Status -> Priority
+  const lines = [
+    `${subIndent}- Description: `,
+    `${subIndent}- ID: ${candidateId}`,
+    `${subIndent}- Status: ${statusValue}`,
+    `${subIndent}- Priority: P3`,
+  ];
+
+  const snippetText = '\n' + lines.join('\n');
+  // If task title is empty, keep cursor right behind '[ ] ' so the user can type the title immediately;
+  // otherwise place cursor right after '- Description: '
+  const cursorOffset = rawTitle.length > 0
+    ? 1 + subIndent.length + '- Description: '.length
+    : 0;
+
+  return {
+    snippetText,
+    cursorOffset,
+  };
 }

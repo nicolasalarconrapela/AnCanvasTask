@@ -1,3 +1,16 @@
+# Correcciones adicionales - 15/10/2026
+
+Se reprodujeron y corrigieron fallos que las pruebas anteriores no cubrian:
+
+- Las proyecciones remotas reactivaban tareas comentadas; editar, borrar o actualizar subtareas podia alterar comentarios y sus metadatos. Se conservan los comentarios abiertos/cerrados y se permite restauracion manual explicita.
+- La asignacion automatica fallaba ante una BASE sin IDs. Para una unica tarea anonima compartida, las ediciones concurrentes derivan su ID de la misma BASE; se deduplican metadatos compatibles y se rechazan identidades incompatibles.
+- Una pestana nueva reutilizaba el writer heredado en sessionStorage. Ahora recibe otro; una recarga conserva el existente para continuar su journal.
+- Seguir escribiendo durante un guardado pendiente podia duplicar texto al fusionar su propio eco. La confirmacion se reconcilia contra el snapshot enviado antes de avanzar la BASE, tambien al reproducir operaciones propias. Se conserva la seleccion local de rama/documento.
+
+Validacion: 120/120 pruebas de sincronizacion, verificaciones del nucleo, TypeScript/lint y build; Edge y Chrome, incluidas dos pestanas del mismo perfil, identidad heredada, recarga, respuesta de guardado retrasada, comentarios y preservacion de conflictos reales. Servidor simulado; sin escrituras en el dataset real.
+
+---
+
 # Estado de la correccion - 11/10/2026
 
 Corregidos los casos F01-F15 del diagnostico siguiente y los defectos de UI asociados. Restauracion manual permitida; restauracion automatica bloqueada. Sin cambios de schemas ni dependencias.

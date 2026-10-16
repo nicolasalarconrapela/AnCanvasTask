@@ -101,6 +101,7 @@ export function checkTaskMatchesQuery(
     tags?: string[];
     priority?: string;
     status?: string;
+    description?: string;
     groupTitle?: string;
   },
   query: string
@@ -110,6 +111,7 @@ export function checkTaskMatchesQuery(
   const cleanQ = q.replace(/^#/, '');
 
   if (task.title && (task.title.toLowerCase().includes(q) || task.title.toLowerCase().includes(cleanQ))) return true;
+  if (task.description && (task.description.toLowerCase().includes(q) || task.description.toLowerCase().includes(cleanQ))) return true;
   if (task.taskId && task.taskId.toLowerCase().includes(cleanQ)) return true;
   if (task.tags && task.tags.some((t) => t.toLowerCase().includes(cleanQ))) return true;
   if (task.groupTitle && task.groupTitle.toLowerCase().includes(q)) return true;

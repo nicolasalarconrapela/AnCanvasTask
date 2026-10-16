@@ -9,6 +9,7 @@ export interface ParsedMarkdownTask {
   temporaryId?: string;
   priority: TaskPriority;
   status?: TaskStatus;
+  description?: string;
   tags?: string[];
   subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
@@ -33,10 +34,10 @@ export function parseTasksMarkdown(markdown: string): ParsedGroup[] {
   const parsedGroups: ParsedGroup[] = [];
   const groupById = new Map<string, ParsedGroup>();
 
-  // Ensure headings are preserved in order, excluding "Notas" / "Notes" sections
+  // Ensure headings are preserved in order, excluding "Notas" / "Notes" / "Comentarios" / "Comments" sections
   groupHeadings.forEach((gh) => {
     const lower = gh.title.trim().toLowerCase();
-    if (lower !== 'notas' && lower !== 'notes') {
+    if (lower !== 'notas' && lower !== 'notes' && lower !== 'comentarios' && lower !== 'comments') {
       const gItem: ParsedGroup = {
         id: gh.id || `h_${gh.lineIndex}`,
         title: gh.title,
@@ -75,8 +76,9 @@ export function parseTasksMarkdown(markdown: string): ParsedGroup[] {
       completed: isCompleted,
       taskId: block.detectedId,
       temporaryId: block.temporaryId,
-      priority: block.detectedPriority || 'P1',
+      priority: block.detectedPriority || 'P3',
       status: (block.detectedStatus as any) || (isCompleted ? 'done' : 'todo'),
+      description: block.detectedDescription,
       tags: block.detectedTags,
       subtasks: block.detectedSubtasks,
       blockedBy: block.detectedBlockedBy,
