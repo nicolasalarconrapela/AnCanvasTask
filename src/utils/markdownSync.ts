@@ -1717,12 +1717,70 @@ export function isTaskIdLine(lineText: string): boolean {
 }
 
 /**
+ * Detects whether a line represents a task Status metadata entry (e.g. `  - Status: backlog`).
+ */
+export function isTaskStatusLine(lineText: string): boolean {
+  const trimmed = lineText.trim();
+  if (/^[-*]\s*\[[ xX]\]/i.test(trimmed)) return false;
+  return /^(?:[-*]\s*)?Status\s*:\s*.+$/i.test(trimmed);
+}
+
+/**
+ * Detects whether a line represents a task Priority metadata entry (e.g. `  - Priority: P1`).
+ */
+export function isTaskPriorityLine(lineText: string): boolean {
+  const trimmed = lineText.trim();
+  if (/^[-*]\s*\[[ xX]\]/i.test(trimmed)) return false;
+  return /^(?:[-*]\s*)?Priority\s*:\s*.+$/i.test(trimmed);
+}
+
+/**
  * Strips task ID metadata lines from a Markdown document for clean viewing/copying.
  */
 export function stripTaskIdsFromMarkdown(markdown: string): string {
   return markdown
     .split(/\r?\n/)
     .filter((line) => !isTaskIdLine(line))
+    .join('\n');
+}
+
+/**
+ * Strips task Status metadata lines from a Markdown document.
+ */
+export function stripStatusFromMarkdown(markdown: string): string {
+  return markdown
+    .split(/\r?\n/)
+    .filter((line) => !isTaskStatusLine(line))
+    .join('\n');
+}
+
+/**
+ * Strips task Priority metadata lines from a Markdown document.
+ */
+export function stripPriorityFromMarkdown(markdown: string): string {
+  return markdown
+    .split(/\r?\n/)
+    .filter((line) => !isTaskPriorityLine(line))
+    .join('\n');
+}
+
+/**
+ * Strips specified metadata fields (ID, Status, Priority) from Markdown.
+ */
+export function stripMetadataFieldsFromMarkdown(
+  markdown: string,
+  options: { stripIds?: boolean; stripStatus?: boolean; stripPriority?: boolean }
+): string {
+  const { stripIds, stripStatus, stripPriority } = options;
+  if (!stripIds && !stripStatus && !stripPriority) return markdown;
+  return markdown
+    .split(/\r?\n/)
+    .filter((line) => {
+      if (stripIds && isTaskIdLine(line)) return false;
+      if (stripStatus && isTaskStatusLine(line)) return false;
+      if (stripPriority && isTaskPriorityLine(line)) return false;
+      return true;
+    })
     .join('\n');
 }
 

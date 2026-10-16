@@ -145,6 +145,7 @@ import {
   updateTaskInMarkdown,
   validateMarkdownDocument,
   stripTaskIdsFromMarkdown,
+  stripMetadataFieldsFromMarkdown,
   sanitizeTaskMetadataOrder,
 } from './utils/markdownSync';
 
@@ -347,6 +348,8 @@ export default function App() {
     onlyBlocked: false,
     sortBy: 'default',
     showTaskIds: userSettings.showTaskIds ?? true,
+    showTaskStatus: userSettings.showTaskStatus ?? true,
+    showTaskPriority: userSettings.showTaskPriority ?? true,
   }));
 
   // Sync React taskFilters state into global filter store for canvas shapes & listeners
@@ -357,12 +360,12 @@ export default function App() {
   const handleUpdateSettings = useCallback((newSettings: AppUserSettings) => {
     setUserSettings(newSettings);
     saveUserSettings(newSettings);
-    if (newSettings.showTaskIds !== undefined) {
-      setTaskFilters((prev) => ({
-        ...prev,
-        showTaskIds: newSettings.showTaskIds,
-      }));
-    }
+    setTaskFilters((prev) => ({
+      ...prev,
+      showTaskIds: newSettings.showTaskIds ?? prev.showTaskIds,
+      showTaskStatus: newSettings.showTaskStatus ?? prev.showTaskStatus,
+      showTaskPriority: newSettings.showTaskPriority ?? prev.showTaskPriority,
+    }));
   }, []);
 
   const handleToggleShowTaskIds = useCallback(() => {
@@ -377,15 +380,51 @@ export default function App() {
     });
   }, []);
 
+  const handleToggleShowTaskStatus = useCallback(() => {
+    setTaskFilters((prev) => {
+      const nextShow = prev.showTaskStatus === false ? true : false;
+      setUserSettings((currSettings) => {
+        const updated = { ...currSettings, showTaskStatus: nextShow };
+        saveUserSettings(updated);
+        return updated;
+      });
+      return { ...prev, showTaskStatus: nextShow };
+    });
+  }, []);
+
+  const handleToggleShowTaskPriority = useCallback(() => {
+    setTaskFilters((prev) => {
+      const nextShow = prev.showTaskPriority === false ? true : false;
+      setUserSettings((currSettings) => {
+        const updated = { ...currSettings, showTaskPriority: nextShow };
+        saveUserSettings(updated);
+        return updated;
+      });
+      return { ...prev, showTaskPriority: nextShow };
+    });
+  }, []);
+
   useEffect(() => {
     const handleToggleIdsEvent = () => {
       handleToggleShowTaskIds();
     };
+    const handleToggleStatusEvent = () => {
+      handleToggleShowTaskStatus();
+    };
+    const handleTogglePriorityEvent = () => {
+      handleToggleShowTaskPriority();
+    };
+
     window.addEventListener('antask:toggle-show-ids', handleToggleIdsEvent);
+    window.addEventListener('antask:toggle-show-status', handleToggleStatusEvent);
+    window.addEventListener('antask:toggle-show-priority', handleTogglePriorityEvent);
+
     return () => {
       window.removeEventListener('antask:toggle-show-ids', handleToggleIdsEvent);
+      window.removeEventListener('antask:toggle-show-status', handleToggleStatusEvent);
+      window.removeEventListener('antask:toggle-show-priority', handleTogglePriorityEvent);
     };
-  }, [handleToggleShowTaskIds]);
+  }, [handleToggleShowTaskIds, handleToggleShowTaskStatus, handleToggleShowTaskPriority]);
 
   // Command Palette & Recent Tasks State (DESIGN.md Section 12 & 15)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
@@ -4155,10 +4194,11 @@ export default function App() {
   );
 
   const handleCopyMarkdown = () => {
-    const textToCopy =
-      taskFilters.showTaskIds === false
-        ? stripTaskIdsFromMarkdown(markdownInput)
-        : markdownInput;
+    const textToCopy = stripMetadataFieldsFromMarkdown(markdownInput, {
+      stripIds: taskFilters.showTaskIds === false,
+      stripStatus: taskFilters.showTaskStatus === false,
+      stripPriority: taskFilters.showTaskPriority === false,
+    });
     navigator.clipboard.writeText(textToCopy);
     setCopiedMarkdown(true);
     setTimeout(() => setCopiedMarkdown(false), 2000);
@@ -5572,10 +5612,14 @@ export default function App() {
                 onlyBlocked: false,
                 sortBy: 'default',
                 showTaskIds: userSettings.showTaskIds ?? true,
+                showTaskStatus: userSettings.showTaskStatus ?? true,
+                showTaskPriority: userSettings.showTaskPriority ?? true,
               });
               setActiveFilter('all');
             }}
             onToggleShowIds={handleToggleShowTaskIds}
+            onToggleShowStatus={handleToggleShowTaskStatus}
+            onToggleShowPriority={handleToggleShowTaskPriority}
             searchQuery={searchQuery}
             onSearchChange={(q) => setSearchQuery(q)}
             availableSections={existingSections}
@@ -6178,6 +6222,10 @@ export default function App() {
                   onOpenNormalizer={() => setIsSafeNormalizerOpen(true)}
                   showTaskIds={taskFilters.showTaskIds}
                   onToggleShowTaskIds={handleToggleShowTaskIds}
+                  showTaskStatus={taskFilters.showTaskStatus}
+                  onToggleShowTaskStatus={handleToggleShowTaskStatus}
+                  showTaskPriority={taskFilters.showTaskPriority}
+                  onToggleShowTaskPriority={handleToggleShowTaskPriority}
                 />
               </div>
             )}
@@ -7254,6 +7302,58 @@ export default function App() {
                   </span>
                 </button>
                 <button
+                  id="btn-view-markdown-toggle-status"
+                  type="button"
+                  onClick={handleToggleShowTaskStatus}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs ${
+                    taskFilters.showTaskStatus !== false
+                      ? 'bg-cyan-950/40 text-cyan-300 border-cyan-800/80 hover:bg-cyan-900/60'
+                      : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+                  }`}
+                  title={
+                    taskFilters.showTaskStatus !== false
+                      ? i18n._(msg`Ocultar estado (Status:) en el Markdown`)
+                      : i18n._(msg`Mostrar estado (Status:) en el Markdown`)
+                  }
+                  aria-label={
+                    taskFilters.showTaskStatus !== false
+                      ? i18n._(msg`Ocultar Status en Markdown`)
+                      : i18n._(msg`Mostrar Status en Markdown`)
+                  }
+                >
+                  <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                  <span className="font-mono text-[10px] font-bold">#Status</span>
+                  <span className="text-[10px]">
+                    {taskFilters.showTaskStatus !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
+                  </span>
+                </button>
+                <button
+                  id="btn-view-markdown-toggle-priority"
+                  type="button"
+                  onClick={handleToggleShowTaskPriority}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs ${
+                    taskFilters.showTaskPriority !== false
+                      ? 'bg-rose-950/40 text-rose-300 border-rose-800/80 hover:bg-rose-900/60'
+                      : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+                  }`}
+                  title={
+                    taskFilters.showTaskPriority !== false
+                      ? i18n._(msg`Ocultar prioridad (Priority:) en el Markdown`)
+                      : i18n._(msg`Mostrar prioridad (Priority:) en el Markdown`)
+                  }
+                  aria-label={
+                    taskFilters.showTaskPriority !== false
+                      ? i18n._(msg`Ocultar Priority en Markdown`)
+                      : i18n._(msg`Mostrar Priority en Markdown`)
+                  }
+                >
+                  <span className="material-symbols-outlined text-[13px]">flag</span>
+                  <span className="font-mono text-[10px] font-bold">#Prio</span>
+                  <span className="text-[10px]">
+                    {taskFilters.showTaskPriority !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
+                  </span>
+                </button>
+                <button
                   id="btn-view-markdown-close-header"
                   type="button"
                   onClick={() => setIsViewMarkdownOpen(false)}
@@ -7267,7 +7367,11 @@ export default function App() {
             <div id="div-app-81" className="p-4 flex flex-col gap-2.5 overflow-hidden">
               <div id="div-app-82" className="relative w-full rounded bg-[var(--surface)] border border-[var(--outline)] overflow-hidden">
                 <pre className="p-3 text-xs font-mono text-[var(--on-surface)] overflow-auto max-h-[46vh] leading-relaxed select-text whitespace-pre-wrap">
-                  {taskFilters.showTaskIds === false ? stripTaskIdsFromMarkdown(markdownInput) : markdownInput}
+                  {stripMetadataFieldsFromMarkdown(markdownInput, {
+                    stripIds: taskFilters.showTaskIds === false,
+                    stripStatus: taskFilters.showTaskStatus === false,
+                    stripPriority: taskFilters.showTaskPriority === false,
+                  })}
                 </pre>
               </div>
             </div>

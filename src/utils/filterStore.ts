@@ -22,6 +22,8 @@ export const DEFAULT_TASK_FILTERS: TaskFilterState = {
   onlyBlocked: false,
   sortBy: 'default',
   showTaskIds: true,
+  showTaskStatus: true,
+  showTaskPriority: true,
 };
 
 let currentGlobalFilters: TaskFilterState = { ...DEFAULT_TASK_FILTERS };

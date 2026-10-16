@@ -19,6 +19,11 @@ import {
   syncNotesToMarkdown,
   maskHtmlComments,
   buildTaskEnterSnippet,
+  isTaskStatusLine,
+  isTaskPriorityLine,
+  stripStatusFromMarkdown,
+  stripPriorityFromMarkdown,
+  stripMetadataFieldsFromMarkdown,
 } from '../src/utils/markdownSync';
 import { CustomNoteShapeUtil } from '../src/shapes/TaskShapeUtil';
 import {
@@ -1028,6 +1033,52 @@ console.log('24. Verificando addTaskToMarkdown sincronizado con orden canónico 
 }
 
 console.log('   ✓ addTaskToMarkdown sincronizado con Description/ID/Status/Priority verificado correctamente.');
+
+// 25. Verificando detección y ocultamiento de Status y Priority en Markdown
+console.log('25. Verificando detección y ocultamiento de Status y Priority en Markdown...');
+{
+  assert(isTaskStatusLine('  - Status: backlog'), 'Debe detectar Status con guión e indentación');
+  assert(isTaskStatusLine('Status: done'), 'Debe detectar Status sin guión');
+  assert(isTaskStatusLine('  * status: in_progress'), 'Debe detectar status en minúscula con asterisco');
+  assert(!isTaskStatusLine('- [ ] Tarea con Status: backlog en el título'), 'No debe confundir un task root con status');
+
+  assert(isTaskPriorityLine('  - Priority: P1'), 'Debe detectar Priority con guión e indentación');
+  assert(isTaskPriorityLine('Priority: P0'), 'Debe detectar Priority sin guión');
+  assert(isTaskPriorityLine('  * priority: P3'), 'Debe detectar priority en minúscula con asterisco');
+  assert(!isTaskPriorityLine('- [ ] Tarea con Priority: P1 en el título'), 'No debe confundir un task root con priority');
+
+  const testMd = `# Proyecto
+- [ ] Tarea 1
+  - Description: Detalle de tarea
+  - ID: task-1
+  - Status: in_progress
+  - Priority: P1
+`;
+
+  // Strip status only
+  const noStatus = stripStatusFromMarkdown(testMd);
+  assert(!noStatus.includes('- Status:'), 'stripStatusFromMarkdown debe eliminar línea Status');
+  assert(noStatus.includes('- ID: task-1'), 'stripStatusFromMarkdown debe preservar ID');
+  assert(noStatus.includes('- Priority: P1'), 'stripStatusFromMarkdown debe preservar Priority');
+
+  // Strip priority only
+  const noPriority = stripPriorityFromMarkdown(testMd);
+  assert(!noPriority.includes('- Priority:'), 'stripPriorityFromMarkdown debe eliminar línea Priority');
+  assert(noPriority.includes('- Status: in_progress'), 'stripPriorityFromMarkdown debe preservar Status');
+
+  // Strip metadata fields combinations
+  const strippedBoth = stripMetadataFieldsFromMarkdown(testMd, { stripStatus: true, stripPriority: true });
+  assert(!strippedBoth.includes('- Status:'), 'stripMetadataFieldsFromMarkdown debe eliminar Status');
+  assert(!strippedBoth.includes('- Priority:'), 'stripMetadataFieldsFromMarkdown debe eliminar Priority');
+  assert(strippedBoth.includes('- ID: task-1'), 'stripMetadataFieldsFromMarkdown debe conservar ID si stripIds es false');
+
+  const strippedAll = stripMetadataFieldsFromMarkdown(testMd, { stripIds: true, stripStatus: true, stripPriority: true });
+  assert(!strippedAll.includes('- ID:'), 'stripMetadataFieldsFromMarkdown debe eliminar ID');
+  assert(!strippedAll.includes('- Status:'), 'stripMetadataFieldsFromMarkdown debe eliminar Status');
+  assert(!strippedAll.includes('- Priority:'), 'stripMetadataFieldsFromMarkdown debe eliminar Priority');
+  assert(strippedAll.includes('- Description: Detalle de tarea'), 'stripMetadataFieldsFromMarkdown debe conservar Description');
+}
+console.log('   ✓ Detección y ocultamiento de Status y Priority verificado correctamente.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 process.exit(0);
