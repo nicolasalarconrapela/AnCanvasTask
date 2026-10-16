@@ -1137,8 +1137,36 @@ console.log('26. Verificando etiquetas lineales (inline pastel) de items ocultos
   assert.strictEqual(widget.items[0].type, 'id');
   assert.strictEqual(widget.items[1].type, 'status');
   assert.strictEqual(widget.items[2].type, 'priority');
+
+  // 26.4 Con labelTypes selectivo (solo ID), únicamente el ID genera label visual en el widget
+  const decoOnlyIdLabels = buildHideTaskMetadataDeco(state, {
+    hideIds: true,
+    hideStatus: true,
+    hidePriority: true,
+    showLabels: true,
+    labelTypes: { id: true, status: false, priority: false },
+  });
+  // 2 widgets inline lineales (uno para Tarea Alpha y uno para Tarea Beta) + 4 líneas colapsadas = 6
+  assert.strictEqual(decoOnlyIdLabels.size, 6, 'Debe generar 6 decoraciones');
+
+  // 26.5 Con labelTypes todos en false, no se generan widgets inline
+  const decoNoLabelsThroughTypes = buildHideTaskMetadataDeco(state, {
+    hideIds: true,
+    hideStatus: true,
+    hidePriority: true,
+    showLabels: true,
+    labelTypes: { id: false, status: false, priority: false },
+  });
+  assert.strictEqual(decoNoLabelsThroughTypes.size, 4, 'No debe generar widgets inline si todos los labelTypes están en false');
+
+  // 26.6 DEFAULT_USER_SETTINGS y DEFAULT_TASK_FILTERS incluyen hiddenItemLabelTypes
+  assert(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes, 'DEFAULT_USER_SETTINGS debe tener hiddenItemLabelTypes');
+  assert.strictEqual(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes.id, true);
+  assert.strictEqual(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes.status, true);
+  assert.strictEqual(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes.priority, true);
+  assert(DEFAULT_TASK_FILTERS.hiddenItemLabelTypes, 'DEFAULT_TASK_FILTERS debe tener hiddenItemLabelTypes');
 }
-console.log('   ✓ Etiquetas lineales de items ocultos en LiveMarkdowns verificadas correctamente.');
+console.log('   ✓ Etiquetas lineales de items ocultos y desplegable de selección verificados correctamente.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 process.exit(0);

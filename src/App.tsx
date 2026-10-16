@@ -418,6 +418,20 @@ export default function App() {
     });
   }, []);
 
+  const handleChangeHiddenItemLabelTypes = useCallback(
+    (types: { id: boolean; status: boolean; priority: boolean }) => {
+      setTaskFilters((prev) => {
+        setUserSettings((currSettings) => {
+          const updated = { ...currSettings, hiddenItemLabelTypes: types };
+          saveUserSettings(updated);
+          return updated;
+        });
+        return { ...prev, hiddenItemLabelTypes: types };
+      });
+    },
+    []
+  );
+
   useEffect(() => {
     const handleToggleIdsEvent = () => {
       handleToggleShowTaskIds();
@@ -431,19 +445,27 @@ export default function App() {
     const handleToggleHiddenLabelsEvent = () => {
       handleToggleShowHiddenItemLabels();
     };
+    const handleSetHiddenLabelTypesEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ id: boolean; status: boolean; priority: boolean }>;
+      if (custom.detail) {
+        handleChangeHiddenItemLabelTypes(custom.detail);
+      }
+    };
 
     window.addEventListener('antask:toggle-show-ids', handleToggleIdsEvent);
     window.addEventListener('antask:toggle-show-status', handleToggleStatusEvent);
     window.addEventListener('antask:toggle-show-priority', handleTogglePriorityEvent);
     window.addEventListener('antask:toggle-show-hidden-labels', handleToggleHiddenLabelsEvent);
+    window.addEventListener('antask:set-hidden-label-types', handleSetHiddenLabelTypesEvent);
 
     return () => {
       window.removeEventListener('antask:toggle-show-ids', handleToggleIdsEvent);
       window.removeEventListener('antask:toggle-show-status', handleToggleStatusEvent);
       window.removeEventListener('antask:toggle-show-priority', handleTogglePriorityEvent);
       window.removeEventListener('antask:toggle-show-hidden-labels', handleToggleHiddenLabelsEvent);
+      window.removeEventListener('antask:set-hidden-label-types', handleSetHiddenLabelTypesEvent);
     };
-  }, [handleToggleShowTaskIds, handleToggleShowTaskStatus, handleToggleShowTaskPriority, handleToggleShowHiddenItemLabels]);
+  }, [handleToggleShowTaskIds, handleToggleShowTaskStatus, handleToggleShowTaskPriority, handleToggleShowHiddenItemLabels, handleChangeHiddenItemLabelTypes]);
 
   // Command Palette & Recent Tasks State (DESIGN.md Section 12 & 15)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
@@ -6261,6 +6283,8 @@ export default function App() {
                   onToggleShowTaskPriority={handleToggleShowTaskPriority}
                   showHiddenItemLabels={taskFilters.showHiddenItemLabels}
                   onToggleShowHiddenItemLabels={handleToggleShowHiddenItemLabels}
+                  hiddenItemLabelTypes={taskFilters.hiddenItemLabelTypes}
+                  onChangeHiddenItemLabelTypes={handleChangeHiddenItemLabelTypes}
                 />
               </div>
             )}

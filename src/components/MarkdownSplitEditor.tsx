@@ -138,6 +138,11 @@ export interface HideTaskMetadataOptions {
   hideStatus: boolean;
   hidePriority: boolean;
   showLabels: boolean;
+  labelTypes?: {
+    id?: boolean;
+    status?: boolean;
+    priority?: boolean;
+  };
   onToggleLabels?: () => void;
 }
 
@@ -171,8 +176,13 @@ export function buildHideTaskMetadataDeco(
         else if (opts.hidePriority && isTaskPriorityLine(subText)) type = 'priority';
 
         if (type) {
-          const cleanLabel = subText.trim().replace(/^[-*]\s*/, '');
-          hiddenItems.push({ type, label: cleanLabel, rawText: subText });
+          const isLabelAllowed =
+            opts.showLabels &&
+            (opts.labelTypes ? opts.labelTypes[type] !== false : true);
+          if (isLabelAllowed) {
+            const cleanLabel = subText.trim().replace(/^[-*]\s*/, '');
+            hiddenItems.push({ type, label: cleanLabel, rawText: subText });
+          }
           const lFrom = subLine.from;
           const lTo = subL < state.doc.lines ? subLine.to + 1 : subLine.to;
           hiddenRanges.push({ from: lFrom, to: lTo });
@@ -549,6 +559,8 @@ interface MarkdownSplitEditorProps {
   onToggleShowTaskPriority?: () => void;
   showHiddenItemLabels?: boolean;
   onToggleShowHiddenItemLabels?: () => void;
+  hiddenItemLabelTypes?: { id: boolean; status: boolean; priority: boolean };
+  onChangeHiddenItemLabelTypes?: (types: { id: boolean; status: boolean; priority: boolean }) => void;
 }
 
 export function MarkdownSplitEditor({
@@ -570,6 +582,8 @@ export function MarkdownSplitEditor({
   onToggleShowTaskPriority,
   showHiddenItemLabels,
   onToggleShowHiddenItemLabels,
+  hiddenItemLabelTypes,
+  onChangeHiddenItemLabelTypes,
 }: MarkdownSplitEditorProps) {
   const { i18n } = useLingui();
   const editorRef = useRef<ReactCodeMirrorRef>(null);
@@ -589,6 +603,86 @@ export function MarkdownSplitEditor({
       setLocalShowHiddenLabels((prev) => !prev);
     }
   }, [onToggleShowHiddenItemLabels]);
+
+  const [localLabelTypes, setLocalLabelTypes] = useState<{ id: boolean; status: boolean; priority: boolean }>({
+    id: true,
+    status: true,
+    priority: true,
+  });
+
+  const effectiveLabelTypes = useMemo(() => ({
+    id: hiddenItemLabelTypes?.id !== undefined ? hiddenItemLabelTypes.id : localLabelTypes.id,
+    status: hiddenItemLabelTypes?.status !== undefined ? hiddenItemLabelTypes.status : localLabelTypes.status,
+    priority: hiddenItemLabelTypes?.priority !== undefined ? hiddenItemLabelTypes.priority : localLabelTypes.priority,
+  }), [hiddenItemLabelTypes, localLabelTypes]);
+
+  const [isLabelsDropdownOpen, setIsLabelsDropdownOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
+  const labelsDropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleToggleLabelsDropdown = useCallback(() => {
+    setIsLabelsDropdownOpen((prev) => {
+      const next = !prev;
+      if (next && labelsDropdownRef.current) {
+        const rect = labelsDropdownRef.current.getBoundingClientRect();
+        setDropdownPos({
+          top: rect.bottom + 4,
+          right: Math.max(8, window.innerWidth - rect.right),
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isLabelsDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const menuEl = document.getElementById('menu-markdown-hidden-labels-dropdown');
+      if (
+        labelsDropdownRef.current &&
+        !labelsDropdownRef.current.contains(target) &&
+        (!menuEl || !menuEl.contains(target))
+      ) {
+        setIsLabelsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isLabelsDropdownOpen]);
+
+  const handleToggleLabelType = useCallback(
+    (type: 'id' | 'status' | 'priority') => {
+      const next = {
+        ...effectiveLabelTypes,
+        [type]: !effectiveLabelTypes[type],
+      };
+      if (onChangeHiddenItemLabelTypes) {
+        onChangeHiddenItemLabelTypes(next);
+      } else {
+        setLocalLabelTypes(next);
+      }
+      if (!effectiveLabelTypes[type] && showHiddenLabels === false && onToggleShowHiddenItemLabels) {
+        onToggleShowHiddenItemLabels();
+      }
+    },
+    [effectiveLabelTypes, onChangeHiddenItemLabelTypes, showHiddenLabels, onToggleShowHiddenItemLabels]
+  );
+
+  const handleSetAllLabelTypes = useCallback(
+    (enabled: boolean) => {
+      const next = { id: enabled, status: enabled, priority: enabled };
+      if (onChangeHiddenItemLabelTypes) {
+        onChangeHiddenItemLabelTypes(next);
+      } else {
+        setLocalLabelTypes(next);
+      }
+      if (enabled && showHiddenLabels === false && onToggleShowHiddenItemLabels) {
+        onToggleShowHiddenItemLabels();
+      }
+    },
+    [onChangeHiddenItemLabelTypes, showHiddenLabels, onToggleShowHiddenItemLabels]
+  );
 
   // Apply remote changes before the controlled editor replaces its whole value.
   // CodeMirror maps the cursor through these edits and excludes them from undo.
@@ -776,6 +870,7 @@ export function MarkdownSplitEditor({
           hideStatus: showTaskStatus === false,
           hidePriority: showTaskPriority === false,
           showLabels: showHiddenLabels !== false,
+          labelTypes: effectiveLabelTypes,
           onToggleLabels: handleToggleHiddenLabels,
         })
       );
@@ -788,6 +883,7 @@ export function MarkdownSplitEditor({
     showTaskStatus,
     showTaskPriority,
     showHiddenLabels,
+    effectiveLabelTypes,
     handleToggleHiddenLabels,
   ]);
 
@@ -889,7 +985,7 @@ export function MarkdownSplitEditor({
             aria-label={i18n._(msg`Sanitizar orden`)}
           >
             <span className="material-symbols-outlined text-[14px] text-indigo-400">low_priority</span>
-            <span className="hidden sm:inline">{i18n._(msg`Sanitizar orden`)}</span>
+            <span className="hidden lg:inline">{i18n._(msg`Sanitizar`)}</span>
           </button>
 
           {/* Toggle Show/Hide Task IDs in Editor */}
@@ -916,9 +1012,6 @@ export function MarkdownSplitEditor({
             >
               <span className="material-symbols-outlined text-[13px]">tag</span>
               <span className="font-mono text-[10px] font-bold">#ID</span>
-              <span className="hidden 2xl:inline text-[10px]">
-                {showTaskIds !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
-              </span>
             </button>
           )}
 
@@ -946,9 +1039,6 @@ export function MarkdownSplitEditor({
             >
               <span className="material-symbols-outlined text-[13px]">check_circle</span>
               <span className="font-mono text-[10px] font-bold">#Status</span>
-              <span className="hidden 2xl:inline text-[10px]">
-                {showTaskStatus !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
-              </span>
             </button>
           )}
 
@@ -976,42 +1066,169 @@ export function MarkdownSplitEditor({
             >
               <span className="material-symbols-outlined text-[13px]">flag</span>
               <span className="font-mono text-[10px] font-bold">#Prio</span>
-              <span className="hidden 2xl:inline text-[10px]">
-                {showTaskPriority !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
-              </span>
             </button>
           )}
 
-          {/* Toggle Show/Hide Visual Labels for Hidden Items */}
+          {/* Dropdown to select which hidden item labels to show */}
           {(showTaskIds === false || showTaskStatus === false || showTaskPriority === false) && (
-            <button
-              id="btn-markdown-toggle-hidden-labels"
-              type="button"
-              onClick={handleToggleHiddenLabels}
-              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
-                showHiddenLabels !== false
-                  ? 'bg-sky-950/40 text-sky-300 border-sky-800/80 hover:bg-sky-900/60'
-                  : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
-              }`}
-              title={
-                showHiddenLabels !== false
-                  ? i18n._(msg`Ocultar etiquetas de items ocultos en el editor Markdown`)
-                  : i18n._(msg`Mostrar etiquetas de items ocultos en el editor Markdown`)
-              }
-              aria-label={
-                showHiddenLabels !== false
-                  ? i18n._(msg`Ocultar etiquetas de items ocultos`)
-                  : i18n._(msg`Mostrar etiquetas de items ocultos`)
-              }
-            >
-              <span className="material-symbols-outlined text-[13px]">
-                {showHiddenLabels !== false ? 'visibility' : 'visibility_off'}
-              </span>
-              <span className="font-mono text-[10px] font-bold">Labels</span>
-              <span className="hidden 2xl:inline text-[10px]">
-                {showHiddenLabels !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
-              </span>
-            </button>
+            <div className="relative shrink-0" ref={labelsDropdownRef}>
+              <button
+                id="btn-markdown-toggle-hidden-labels"
+                type="button"
+                onClick={handleToggleLabelsDropdown}
+                className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
+                  showHiddenLabels && (effectiveLabelTypes.id || effectiveLabelTypes.status || effectiveLabelTypes.priority)
+                    ? 'bg-sky-950/40 text-sky-300 border-sky-800/80 hover:bg-sky-900/60'
+                    : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+                }`}
+                title={i18n._(msg`Elegir qué etiquetas mostrar para items ocultos`)}
+                aria-label={i18n._(msg`Elegir etiquetas de items ocultos`)}
+                aria-expanded={isLabelsDropdownOpen}
+                aria-haspopup="true"
+              >
+                <span className="material-symbols-outlined text-[13px]">
+                  {showHiddenLabels && (effectiveLabelTypes.id || effectiveLabelTypes.status || effectiveLabelTypes.priority)
+                    ? 'visibility'
+                    : 'visibility_off'}
+                </span>
+                <span className="font-mono text-[10px] font-bold">Labels</span>
+                <span className="material-symbols-outlined text-[12px] opacity-75">
+                  {isLabelsDropdownOpen ? 'expand_less' : 'expand_more'}
+                </span>
+              </button>
+
+              {isLabelsDropdownOpen && (
+                <div
+                  id="menu-markdown-hidden-labels-dropdown"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'fixed',
+                    top: `${dropdownPos.top}px`,
+                    right: `${dropdownPos.right}px`,
+                    zIndex: 9999,
+                  }}
+                  className="w-56 bg-[var(--surface-container-high)] border border-[var(--outline)] rounded-md shadow-xl p-2 flex flex-col gap-1.5 text-xs select-none"
+                >
+                  <div className="flex items-center justify-between pb-1 border-b border-[var(--outline)]">
+                    <span className="font-semibold text-[var(--on-surface)] text-[11px] flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[13px] text-[var(--primary)]">label</span>
+                      <span>{i18n._(msg`Mostrar etiquetas de:`)}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsLabelsDropdownOpen(false)}
+                      className="text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] text-[12px] p-0.5 rounded cursor-pointer leading-none"
+                      title={i18n._(msg`Cerrar`)}
+                      aria-label={i18n._(msg`Cerrar menú`)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* ID Option */}
+                  <label
+                    id="label-opt-hidden-id"
+                    className="flex items-center justify-between px-1.5 py-1 rounded cursor-pointer hover:bg-[var(--surface-container)] transition-colors"
+                  >
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={effectiveLabelTypes.id}
+                        onChange={() => handleToggleLabelType('id')}
+                        className="rounded text-[var(--primary)] focus:ring-0 cursor-pointer w-3.5 h-3.5 shrink-0"
+                      />
+                      <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-amber-100/50 text-amber-900 border border-amber-200/80 dark:bg-amber-950/30 dark:text-amber-200/90 dark:border-amber-700/40 shrink-0">
+                        <span className="material-symbols-outlined text-[8.5px]">tag</span>
+                        <span>ID</span>
+                      </span>
+                      <span className="text-[11px] text-[var(--on-surface)] truncate">
+                        {i18n._(msg`Identificador`)}
+                      </span>
+                    </span>
+                    {showTaskIds !== false && (
+                      <span className="text-[9px] text-[var(--on-surface-variant)] italic shrink-0 ml-1">
+                        ({i18n._(msg`no oculto`)})
+                      </span>
+                    )}
+                  </label>
+
+                  {/* Status Option */}
+                  <label
+                    id="label-opt-hidden-status"
+                    className="flex items-center justify-between px-1.5 py-1 rounded cursor-pointer hover:bg-[var(--surface-container)] transition-colors"
+                  >
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={effectiveLabelTypes.status}
+                        onChange={() => handleToggleLabelType('status')}
+                        className="rounded text-[var(--primary)] focus:ring-0 cursor-pointer w-3.5 h-3.5 shrink-0"
+                      />
+                      <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-sky-100/50 text-sky-900 border border-sky-200/80 dark:bg-sky-950/30 dark:text-sky-200/90 dark:border-sky-700/40 shrink-0">
+                        <span className="material-symbols-outlined text-[8.5px]">check_circle</span>
+                        <span>Status</span>
+                      </span>
+                      <span className="text-[11px] text-[var(--on-surface)] truncate">
+                        {i18n._(msg`Estado`)}
+                      </span>
+                    </span>
+                    {showTaskStatus !== false && (
+                      <span className="text-[9px] text-[var(--on-surface-variant)] italic shrink-0 ml-1">
+                        ({i18n._(msg`no oculto`)})
+                      </span>
+                    )}
+                  </label>
+
+                  {/* Priority Option */}
+                  <label
+                    id="label-opt-hidden-priority"
+                    className="flex items-center justify-between px-1.5 py-1 rounded cursor-pointer hover:bg-[var(--surface-container)] transition-colors"
+                  >
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={effectiveLabelTypes.priority}
+                        onChange={() => handleToggleLabelType('priority')}
+                        className="rounded text-[var(--primary)] focus:ring-0 cursor-pointer w-3.5 h-3.5 shrink-0"
+                      />
+                      <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-rose-100/50 text-rose-900 border border-rose-200/80 dark:bg-rose-950/30 dark:text-rose-200/90 dark:border-rose-700/40 shrink-0">
+                        <span className="material-symbols-outlined text-[8.5px]">flag</span>
+                        <span>Prio</span>
+                      </span>
+                      <span className="text-[11px] text-[var(--on-surface)] truncate">
+                        {i18n._(msg`Prioridad`)}
+                      </span>
+                    </span>
+                    {showTaskPriority !== false && (
+                      <span className="text-[9px] text-[var(--on-surface-variant)] italic shrink-0 ml-1">
+                        ({i18n._(msg`no oculto`)})
+                      </span>
+                    )}
+                  </label>
+
+                  {/* Quick actions */}
+                  <div className="pt-1 mt-0.5 border-t border-[var(--outline)] flex items-center justify-between text-[10px]">
+                    <button
+                      id="btn-hidden-labels-select-all"
+                      type="button"
+                      onClick={() => handleSetAllLabelTypes(true)}
+                      className="text-[var(--primary)] hover:underline cursor-pointer font-medium"
+                    >
+                      {i18n._(msg`Mostrar todas`)}
+                    </button>
+                    <button
+                      id="btn-hidden-labels-select-none"
+                      type="button"
+                      onClick={() => handleSetAllLabelTypes(false)}
+                      className="text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:underline cursor-pointer"
+                    >
+                      {i18n._(msg`Ocultar todas`)}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Copy Markdown */}

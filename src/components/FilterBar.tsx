@@ -18,6 +18,11 @@ export interface TaskFilterState {
   showTaskStatus?: boolean;
   showTaskPriority?: boolean;
   showHiddenItemLabels?: boolean;
+  hiddenItemLabelTypes?: {
+    id: boolean;
+    status: boolean;
+    priority: boolean;
+  };
 }
 
 interface FilterBarProps {

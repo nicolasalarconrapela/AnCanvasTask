@@ -25,6 +25,11 @@ export const DEFAULT_TASK_FILTERS: TaskFilterState = {
   showTaskStatus: true,
   showTaskPriority: true,
   showHiddenItemLabels: true,
+  hiddenItemLabelTypes: {
+    id: true,
+    status: true,
+    priority: true,
+  },
 };
 
 let currentGlobalFilters: TaskFilterState = { ...DEFAULT_TASK_FILTERS };
