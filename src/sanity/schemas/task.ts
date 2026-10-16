@@ -72,7 +72,7 @@ export const taskSchema = {
           { title: 'P3 - Baja', value: 'P3' },
         ],
       },
-      initialValue: 'P1',
+      initialValue: 'P3',
     },
     {
       name: 'groupTitle',
@@ -134,7 +134,7 @@ export const taskSchema = {
       const { title, subtitle, priority, completed } = selection;
       const statusIcon = completed ? '✅' : '⏳';
       return {
-        title: `${statusIcon} [${priority || 'P1'}] ${title || 'Sin título'}`,
+        title: `${statusIcon} [${priority || 'P3'}] ${title || 'Sin título'}`,
         subtitle: `Sección: ${subtitle || 'General'}`,
       };
     },

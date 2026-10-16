@@ -126,8 +126,11 @@ import {
 import { analyzeSyncDifferences } from './services/syncEngineService';
 import {
   addTaskToMarkdown,
+  generateUniqueTaskId,
   assignTaskIdToTask,
   autoAssignAllMissingTaskIds,
+  autoAssignAllMissingTaskStatuses,
+  assignStatusToTask,
   resolveDuplicateTaskIds,
   resolveSingleDuplicateTaskId,
   deleteSectionFromMarkdown,
@@ -142,6 +145,8 @@ import {
   updateTaskInMarkdown,
   validateMarkdownDocument,
   stripTaskIdsFromMarkdown,
+  stripMetadataFieldsFromMarkdown,
+  sanitizeTaskMetadataOrder,
 } from './utils/markdownSync';
 
 export type SyncStatus = 'idle' | 'saving' | 'synced' | 'local' | 'loading';
@@ -343,6 +348,8 @@ export default function App() {
     onlyBlocked: false,
     sortBy: 'default',
     showTaskIds: userSettings.showTaskIds ?? true,
+    showTaskStatus: userSettings.showTaskStatus ?? true,
+    showTaskPriority: userSettings.showTaskPriority ?? true,
   }));
 
   // Sync React taskFilters state into global filter store for canvas shapes & listeners
@@ -353,12 +360,12 @@ export default function App() {
   const handleUpdateSettings = useCallback((newSettings: AppUserSettings) => {
     setUserSettings(newSettings);
     saveUserSettings(newSettings);
-    if (newSettings.showTaskIds !== undefined) {
-      setTaskFilters((prev) => ({
-        ...prev,
-        showTaskIds: newSettings.showTaskIds,
-      }));
-    }
+    setTaskFilters((prev) => ({
+      ...prev,
+      showTaskIds: newSettings.showTaskIds ?? prev.showTaskIds,
+      showTaskStatus: newSettings.showTaskStatus ?? prev.showTaskStatus,
+      showTaskPriority: newSettings.showTaskPriority ?? prev.showTaskPriority,
+    }));
   }, []);
 
   const handleToggleShowTaskIds = useCallback(() => {
@@ -373,15 +380,51 @@ export default function App() {
     });
   }, []);
 
+  const handleToggleShowTaskStatus = useCallback(() => {
+    setTaskFilters((prev) => {
+      const nextShow = prev.showTaskStatus === false ? true : false;
+      setUserSettings((currSettings) => {
+        const updated = { ...currSettings, showTaskStatus: nextShow };
+        saveUserSettings(updated);
+        return updated;
+      });
+      return { ...prev, showTaskStatus: nextShow };
+    });
+  }, []);
+
+  const handleToggleShowTaskPriority = useCallback(() => {
+    setTaskFilters((prev) => {
+      const nextShow = prev.showTaskPriority === false ? true : false;
+      setUserSettings((currSettings) => {
+        const updated = { ...currSettings, showTaskPriority: nextShow };
+        saveUserSettings(updated);
+        return updated;
+      });
+      return { ...prev, showTaskPriority: nextShow };
+    });
+  }, []);
+
   useEffect(() => {
     const handleToggleIdsEvent = () => {
       handleToggleShowTaskIds();
     };
+    const handleToggleStatusEvent = () => {
+      handleToggleShowTaskStatus();
+    };
+    const handleTogglePriorityEvent = () => {
+      handleToggleShowTaskPriority();
+    };
+
     window.addEventListener('antask:toggle-show-ids', handleToggleIdsEvent);
+    window.addEventListener('antask:toggle-show-status', handleToggleStatusEvent);
+    window.addEventListener('antask:toggle-show-priority', handleTogglePriorityEvent);
+
     return () => {
       window.removeEventListener('antask:toggle-show-ids', handleToggleIdsEvent);
+      window.removeEventListener('antask:toggle-show-status', handleToggleStatusEvent);
+      window.removeEventListener('antask:toggle-show-priority', handleTogglePriorityEvent);
     };
-  }, [handleToggleShowTaskIds]);
+  }, [handleToggleShowTaskIds, handleToggleShowTaskStatus, handleToggleShowTaskPriority]);
 
   // Command Palette & Recent Tasks State (DESIGN.md Section 12 & 15)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
@@ -695,7 +738,10 @@ export default function App() {
 
   const handleAutoAssignAllTaskIds = useCallback(() => {
     setMarkdownInput((curr) => {
-      const { updatedMarkdown, assignedCount } = autoAssignAllMissingTaskIds(curr);
+      const store = workspaceStoreRef.current;
+      const ws = getActiveWorkspace(store), branch = getActiveBranch(ws), doc = getActiveDocument(branch);
+      const base = store.remoteBase?.find(w => w.id === ws.id)?.branches.find(b => b.name === branch.name)?.taskDocuments.find(d => d.id === doc.id);
+      const { updatedMarkdown, assignedCount } = autoAssignAllMissingTaskIds(curr, base?.content);
       if (assignedCount > 0) {
         pushToast(i18n._(msg`Se asignaron IDs automáticos a ${assignedCount} tareas`), 'success');
       } else {
@@ -733,6 +779,47 @@ export default function App() {
     [pushToast]
   );
 
+  const handleAutoAssignAllTaskStatuses = useCallback(() => {
+    setMarkdownInput((curr) => {
+      const { updatedMarkdown, assignedCount } = autoAssignAllMissingTaskStatuses(curr);
+      if (assignedCount > 0) {
+        pushToast(i18n._(msg`Se asignaron estados automáticos a ${assignedCount} tareas`), 'success');
+      } else {
+        pushToast(i18n._(msg`Todas las tareas ya cuentan con estado`), 'info');
+      }
+      return updatedMarkdown;
+    });
+  }, [pushToast]);
+
+  const handleAssignSingleTaskStatus = useCallback(
+    (taskIdOrTitle: string, status?: TaskStatus) => {
+      setMarkdownInput((curr) => {
+        const updatedMarkdown = assignStatusToTask(curr, taskIdOrTitle, status || 'backlog');
+        pushToast(i18n._(msg`Estado asignado a la tarea`), 'success');
+        return updatedMarkdown;
+      });
+    },
+    [pushToast]
+  );
+
+  const handleSanitizeMetadataOrder = useCallback(() => {
+    setMarkdownInput((curr) => {
+      const { updatedMarkdown, reorderedCount } = sanitizeTaskMetadataOrder(curr);
+      if (reorderedCount > 0) {
+        pushToast(
+          i18n._(msg`Orden sanitizado en ${reorderedCount} tarea(s) (Description / ID / Status / Priority)`),
+          'success'
+        );
+      } else {
+        pushToast(
+          i18n._(msg`El orden de los metadatos ya está sanitizado (Description / ID / Status / Priority)`),
+          'info'
+        );
+      }
+      return updatedMarkdown;
+    });
+  }, [pushToast]);
+
   useEffect(() => {
     const handleAssignEvent = (e: any) => {
       const { taskId, taskTitle } = e.detail || {};
@@ -742,6 +829,15 @@ export default function App() {
     };
     const handleBatchAssignEvent = () => {
       handleAutoAssignAllTaskIds();
+    };
+    const handleAssignStatusEvent = (e: any) => {
+      const { taskId, taskTitle, status } = e.detail || {};
+      if (taskId !== undefined || taskTitle !== undefined) {
+        handleAssignSingleTaskStatus(taskId ?? taskTitle, status);
+      }
+    };
+    const handleBatchAssignStatusesEvent = () => {
+      handleAutoAssignAllTaskStatuses();
     };
     const handleResolveDuplicateEvent = () => {
       handleResolveDuplicateIds();
@@ -839,22 +935,37 @@ export default function App() {
 
     window.addEventListener('antask:assign-task-id', handleAssignEvent);
     window.addEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
+    window.addEventListener('antask:assign-task-status', handleAssignStatusEvent);
+    window.addEventListener('antask:auto-assign-all-statuses', handleBatchAssignStatusesEvent);
     window.addEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
     window.addEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
     window.addEventListener('antask:delete-section', handleDeleteSectionEvent);
     window.addEventListener('antask:section-color-changed', handleSectionColorChangedEvent);
     window.addEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
+    const handleSanitizeOrderEvent = () => handleSanitizeMetadataOrder();
+    window.addEventListener('antask:sanitize-task-metadata-order', handleSanitizeOrderEvent);
 
     return () => {
       window.removeEventListener('antask:assign-task-id', handleAssignEvent);
       window.removeEventListener('antask:auto-assign-all-ids', handleBatchAssignEvent);
+      window.removeEventListener('antask:assign-task-status', handleAssignStatusEvent);
+      window.removeEventListener('antask:auto-assign-all-statuses', handleBatchAssignStatusesEvent);
       window.removeEventListener('antask:resolve-duplicate-ids', handleResolveDuplicateEvent);
       window.removeEventListener('antask:resolve-single-duplicate-id', handleResolveSingleDuplicateEvent);
       window.removeEventListener('antask:delete-section', handleDeleteSectionEvent);
       window.removeEventListener('antask:section-color-changed', handleSectionColorChangedEvent);
       window.removeEventListener('antask:toggle-subtask', handleToggleSubtaskEvent);
+      window.removeEventListener('antask:sanitize-task-metadata-order', handleSanitizeOrderEvent);
     };
-  }, [handleAssignSingleTaskId, handleAutoAssignAllTaskIds, handleResolveDuplicateIds, handleResolveSingleDuplicateId]);
+  }, [
+    handleAssignSingleTaskId,
+    handleAutoAssignAllTaskIds,
+    handleAssignSingleTaskStatus,
+    handleAutoAssignAllTaskStatuses,
+    handleResolveDuplicateIds,
+    handleResolveSingleDuplicateId,
+    handleSanitizeMetadataOrder,
+  ]);
 
   // Online / Offline network status listener
   useEffect(() => {
@@ -898,7 +1009,11 @@ export default function App() {
 
   // New task form state
   const [newTaskTitle, setNewTaskTitle] = useState<string>('');
-  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('P1');
+  const [newTaskDescription, setNewTaskDescription] = useState<string>('');
+  const [newTaskId, setNewTaskId] = useState<string>('');
+  const [isCustomTaskId, setIsCustomTaskId] = useState<boolean>(false);
+  const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus>('backlog');
+  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('P3');
   const [newTaskGroup, setNewTaskGroup] = useState<string>('General');
   const [customGroupInput, setCustomGroupInput] = useState<string>('');
   const [isCustomGroup, setIsCustomGroup] = useState<boolean>(false);
@@ -979,6 +1094,42 @@ export default function App() {
   const blockedWorkspaceIdsRef = useRef(new Set<string>());
   const refreshRemoteRef = useRef<() => Promise<void>>(async () => {});
 
+  const acknowledgeWorkspaceSave = useCallback((sent: Workspace, document: any, session: NonNullable<ReturnType<typeof getSyncSession>>) => {
+    if (!document) return;
+    assertSyncSession(session);
+    const previous = workspaceStoreRef.current;
+    if (previous.scope !== session.scope) return;
+    const current = previous.workspaces.find(w => w.id === sent.id);
+    if (!current) return;
+    const local = { ...current, branches: current.branches.map(b => ({ ...b, taskDocuments: b.taskDocuments.map(d =>
+      `${current.id}::${b.name}::${d.id}` === activeDocKeyRef.current ? { ...d, content: markdownRef.current } : d) })) };
+    const remote = normalizeSanityWorkspaceDoc(document);
+    const masks = local.localOnlyDeletions || [];
+    const merged = mergeSyncValue(applyLocalDeletions(sent, masks), local, applyLocalDeletions(remote, masks), '/workspace') as Workspace;
+    const resolved = { ...merged,
+      activeBranchName: merged.branches.some(b => b.name === local.activeBranchName) ? local.activeBranchName : merged.activeBranchName,
+      branches: merged.branches.map(b => {
+        const selected = local.branches.find(branch => branch.name === b.name)?.activeDocumentId;
+        return { ...b, activeDocumentId: b.taskDocuments.some(d => d.id === selected) ? selected! : b.activeDocumentId };
+      }) };
+
+    const next = { ...previous, workspaces: previous.workspaces.map(w => w.id === sent.id ? resolved : w),
+      remoteBase: [...(previous.remoteBase || []).filter(w => w.id !== sent.id), remote],
+      remoteDocuments: [...(previous.remoteDocuments || []).filter(d => d._id !== document._id), document] };
+    const doc = resolved.branches.flatMap(b => b.taskDocuments.map(d => ({ key: `${resolved.id}::${b.name}::${d.id}`, doc: d })))
+      .find(value => value.key === activeDocKeyRef.current)?.doc;
+    if (doc) {
+      if (markdownStoreSyncDebounceRef.current) clearTimeout(markdownStoreSyncDebounceRef.current);
+      if (markdownEditorDebounceRef.current) clearTimeout(markdownEditorDebounceRef.current);
+      pendingMarkdownRef.current = null;
+      markdownRef.current = doc.content;
+      setMarkdownInput(doc.content);
+    }
+    workspaceStoreRef.current = next;
+    saveWorkspaceStore(next);
+    setWorkspaceStore(next);
+  }, []);
+
   // Dynamic profile / configuration sync listener (INV-02, INV-07)
   useEffect(() => {
     const handleConfigChange = (e: any) => {
@@ -1038,7 +1189,9 @@ export default function App() {
               assertSyncSession(session);
               syncReadyRef.current = false;
               setSyncReady(false);
-              if (session.config.token) await documentSync.flush(session).catch(error => {
+              if (session.config.token) await documentSync.flush(session, (sent, document) => {
+                if (document._type === 'workspace') acknowledgeWorkspaceSave(normalizeSanityWorkspaceDoc(sent), document, session);
+              }).catch(error => {
                 if (!(error instanceof SyncConflict)) throw error;
               });
               let docs = await fetchSanityDocumentsList(session.config, true, false, false);
@@ -1873,7 +2026,7 @@ export default function App() {
         void saveWorkspaceToSanity(updatedWs, session.config).then(res => {
           if (getSyncSession() !== session) return;
           if (!res.ok) pushToast(res.message, 'warning');
-          else void refreshRemoteRef.current();
+          else { acknowledgeWorkspaceSave(updatedWs, res.document, session); void refreshRemoteRef.current(); }
         });
       }
       pushToast(i18n._(msg`Workspace "${updatedWs.name}" actualizado`), 'success');
@@ -2291,7 +2444,7 @@ export default function App() {
       const session = getSyncSession(config);
       const res = await saveWorkspaceToSanity(ws, config);
       if (getSyncSession(config) !== session) return;
-      if (res.ok) void refreshRemoteRef.current();
+      if (res.ok && session) { acknowledgeWorkspaceSave(ws, res.document, session); void refreshRemoteRef.current(); }
       if (res.ok) {
         pushToast(res.message, 'success');
       } else {
@@ -2747,11 +2900,46 @@ export default function App() {
   }, [markdownInput]);
 
   const handleOpenNewTaskModal = useCallback(
-    (defaultGroup?: string) => {
+    (
+      defaultGroupOrStatus?: string | { group?: string; status?: TaskStatus },
+      explicitStatus?: TaskStatus
+    ) => {
       setNewTaskTitle('');
-      setNewTaskPriority('P1');
-      if (defaultGroup && defaultGroup.trim()) {
-        const trimmed = defaultGroup.trim();
+      setNewTaskDescription('');
+      setNewTaskId('');
+      setIsCustomTaskId(false);
+      setNewTaskPriority('P3');
+
+      let targetGroup: string | undefined;
+      let targetStatus: TaskStatus = explicitStatus || 'backlog';
+
+      if (typeof defaultGroupOrStatus === 'object' && defaultGroupOrStatus !== null) {
+        targetGroup = defaultGroupOrStatus.group;
+        if (defaultGroupOrStatus.status) {
+          targetStatus = defaultGroupOrStatus.status;
+        }
+      } else if (typeof defaultGroupOrStatus === 'string') {
+        const raw = defaultGroupOrStatus.trim();
+        const lower = raw.toLowerCase();
+        if (['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked'].includes(lower)) {
+          targetStatus = lower as TaskStatus;
+        } else if (lower === 'por hacer') {
+          targetStatus = 'todo';
+        } else if (lower === 'en progreso') {
+          targetStatus = 'in_progress';
+        } else if (lower === 'hecho' || lower === 'completado') {
+          targetStatus = 'done';
+        } else if (lower === 'en revisión' || lower === 'revision' || lower === 'revisión') {
+          targetStatus = 'review';
+        } else {
+          targetGroup = raw;
+        }
+      }
+
+      setNewTaskStatus(targetStatus);
+
+      if (targetGroup && targetGroup.trim()) {
+        const trimmed = targetGroup.trim();
         if (existingSections.includes(trimmed)) {
           setNewTaskGroup(trimmed);
           setIsCustomGroup(false);
@@ -3107,6 +3295,7 @@ export default function App() {
                   const isCompletedChanged = toProps.completed !== fromProps.completed;
                   const isPriorityChanged = toProps.priority !== fromProps.priority;
                   const isStatusChanged = toProps.status !== fromProps.status;
+                  const isDescriptionChanged = toProps.description !== fromProps.description;
                   const isTagsChanged = JSON.stringify(toProps.tags) !== JSON.stringify(fromProps.tags);
                   const isBlockedByChanged = toProps.blockedBy !== fromProps.blockedBy;
                   const isSubtasksChanged = JSON.stringify(toProps.subtasks) !== JSON.stringify(fromProps.subtasks);
@@ -3116,6 +3305,7 @@ export default function App() {
                     isCompletedChanged ||
                     isPriorityChanged ||
                     isStatusChanged ||
+                    isDescriptionChanged ||
                     isTagsChanged ||
                     isBlockedByChanged ||
                     isSubtasksChanged
@@ -3132,6 +3322,7 @@ export default function App() {
                             completed: toProps.completed,
                             priority: toProps.priority,
                             status: toProps.status,
+                            description: toProps.description,
                             tags: toProps.tags,
                             blockedBy: toProps.blockedBy,
                             subtasks: toProps.subtasks,
@@ -3656,10 +3847,15 @@ export default function App() {
       ? (customGroupInput.trim() || 'General')
       : (newTaskGroup.trim() || (existingSections.length > 0 ? existingSections[0] : 'General'));
 
+    const finalId = newTaskId.trim() || undefined;
+
     const { updatedMarkdown, taskId } = addTaskToMarkdown(markdownInput, {
       title: newTaskTitle.trim(),
       priority: newTaskPriority,
+      status: newTaskStatus,
       groupTitle,
+      customId: finalId,
+      description: newTaskDescription.trim() || undefined,
     });
 
     setMarkdownInput(updatedMarkdown);
@@ -3701,7 +3897,8 @@ export default function App() {
           targetY = maxTaskBottom + 12;
         }
 
-        const newTaskH = 110;
+        const descExtra = newTaskDescription.trim() ? 24 : 0;
+        const newTaskH = 110 + descExtra;
         const neededHeight = Math.max(
           targetGroupShape.props?.h || 240,
           (targetY + newTaskH + 24) - targetGroupShape.y
@@ -3774,10 +3971,12 @@ export default function App() {
         y: targetY,
         props: {
           w: 320,
-          h: 110,
+          h: 110 + (newTaskDescription.trim() ? 24 : 0),
           title: newTaskTitle.trim(),
-          completed: false,
+          completed: newTaskStatus === 'done',
           priority: newTaskPriority,
+          status: newTaskStatus,
+          description: newTaskDescription.trim() || undefined,
           taskId,
           groupTitle,
           groupHeadingId: targetGroupShape?.props?.headingId,
@@ -3789,7 +3988,11 @@ export default function App() {
     }
 
     setNewTaskTitle('');
-    setNewTaskPriority('P1');
+    setNewTaskDescription('');
+    setNewTaskId('');
+    setIsCustomTaskId(false);
+    setNewTaskStatus('backlog');
+    setNewTaskPriority('P3');
     setIsNewTaskModalOpen(false);
     showToast(
       taskFilters.showTaskIds === false
@@ -3910,7 +4113,7 @@ export default function App() {
     const result = await saveWorkspaceToSanity(activeWorkspace, session.config);
     if (getSyncSession() !== session) return;
     pushToast(result.message, result.ok ? 'success' : 'error');
-    if (result.ok) await refreshRemoteRef.current();
+    if (result.ok) { acknowledgeWorkspaceSave(activeWorkspace, result.document, session); await refreshRemoteRef.current(); }
   }, [activeWorkspace, pushToast]);
 
   // Local state stays current; only hydrated sessions may publish after a pause.
@@ -3924,7 +4127,8 @@ export default function App() {
         if (!syncReadyRef.current || blockedWorkspaceIdsRef.current.has(activeWorkspace.id)) return;
         const baseWs = workspaceStore.remoteBase?.find(w => w.id === activeWorkspace.id);
         if (JSON.stringify(syncComparable(baseWs && applyLocalDeletions(baseWs, activeWorkspace.localOnlyDeletions))) === JSON.stringify(syncComparable(activeWorkspace))) return;
-        const normalized = autoAssignAllMissingTaskIds(markdownInput).updatedMarkdown;
+        const baseDocument = baseWs?.branches.find(b => b.name === activeBranch.name)?.taskDocuments.find(d => d.id === activeDocument.id);
+        const normalized = autoAssignAllMissingTaskIds(markdownInput, baseDocument?.content).updatedMarkdown;
         if (normalized !== markdownInput) { setMarkdownInput(normalized); return; }
         if (!baseWs && isEmptyWorkspacePlaceholder(activeWorkspace)) return;
         const snapshot = { ...activeWorkspace, branches: activeWorkspace.branches.map(b => b.name === activeBranch.name
@@ -3933,6 +4137,7 @@ export default function App() {
         const result = await saveWorkspaceToSanity(snapshot, session.config);
         assertSyncSession(session);
         if (!result.ok) throw result.conflict ? new SyncConflict(result.message) : new Error(result.message);
+        acknowledgeWorkspaceSave(snapshot, result.document, session);
         await refreshRemoteRef.current();
       } catch (error: any) {
         if (getSyncSession() === session) {
@@ -3968,11 +4173,14 @@ export default function App() {
       const groupTitle = taskDoc.groupTitle || 'General';
       const { updatedMarkdown, taskId } = addTaskToMarkdown(markdownInput, {
         title: taskDoc.title,
-        priority: taskDoc.priority || 'P1',
+        priority: taskDoc.priority || 'P3',
+        status: taskDoc.status || 'backlog',
         groupTitle,
+        customId: taskDoc.taskId,
         blockedBy: taskDoc.blockedBy,
         tags: taskDoc.tags,
         subtasks: taskDoc.subtasks,
+        description: taskDoc.description,
       });
       setMarkdownInput(updatedMarkdown);
       pushToast(
@@ -3986,10 +4194,11 @@ export default function App() {
   );
 
   const handleCopyMarkdown = () => {
-    const textToCopy =
-      taskFilters.showTaskIds === false
-        ? stripTaskIdsFromMarkdown(markdownInput)
-        : markdownInput;
+    const textToCopy = stripMetadataFieldsFromMarkdown(markdownInput, {
+      stripIds: taskFilters.showTaskIds === false,
+      stripStatus: taskFilters.showTaskStatus === false,
+      stripPriority: taskFilters.showTaskPriority === false,
+    });
     navigator.clipboard.writeText(textToCopy);
     setCopiedMarkdown(true);
     setTimeout(() => setCopiedMarkdown(false), 2000);
@@ -4004,6 +4213,7 @@ export default function App() {
         completed?: boolean;
         priority?: TaskPriority;
         status?: TaskStatus;
+        description?: string;
         groupTitle?: string;
         tags?: string[];
         blockedBy?: string;
@@ -4021,6 +4231,7 @@ export default function App() {
           updates.completed !== undefined ||
           updates.priority !== undefined ||
           updates.status !== undefined ||
+          updates.description !== undefined ||
           updates.tags !== undefined ||
           updates.blockedBy !== undefined
         ) {
@@ -4032,6 +4243,7 @@ export default function App() {
               completed: updates.completed,
               priority: updates.priority,
               status: updates.status,
+              description: updates.description,
               tags: updates.tags,
               blockedBy: updates.blockedBy,
             },
@@ -4051,6 +4263,12 @@ export default function App() {
         });
 
         if (taskShape) {
+          const currentP = (taskShape as any).props || {};
+          const nextDescription = updates.description !== undefined ? updates.description : currentP.description;
+          const subCount = currentP.subtasks?.items?.length || 0;
+          const descExtra = nextDescription ? 24 : 0;
+          const targetH = subCount > 0 ? 110 + 20 + subCount * 22 + descExtra : 110 + descExtra;
+
           editor.updateShape({
             id: taskShape.id,
             type: 'task',
@@ -4059,6 +4277,7 @@ export default function App() {
               ...(updates.completed !== undefined ? { completed: updates.completed } : {}),
               ...(updates.priority !== undefined ? { priority: updates.priority } : {}),
               ...(updates.status !== undefined ? { status: updates.status } : {}),
+              ...(updates.description !== undefined ? { description: updates.description, h: Math.max(currentP.h || 110, targetH) } : {}),
               ...(updates.tags !== undefined ? { tags: updates.tags } : {}),
               ...(updates.blockedBy !== undefined ? { blockedBy: updates.blockedBy } : {}),
               ...(updates.groupTitle !== undefined ? { groupTitle: updates.groupTitle } : {}),
@@ -4180,8 +4399,9 @@ export default function App() {
         title: b.detectedTitle,
         groupTitle: b.groupTitle || 'General',
         completed: isCompleted,
-        priority: (b.detectedPriority || 'P1') as TaskPriority,
+        priority: (b.detectedPriority || 'P3') as TaskPriority,
         status: ((b.detectedStatus as any) || (isCompleted ? 'done' : 'todo')) as TaskStatus,
+        description: b.detectedDescription,
         tags: b.detectedTags,
         blockedBy: b.detectedBlockedBy,
       };
@@ -4309,6 +4529,16 @@ export default function App() {
         category: 'action',
         perform: () => {
           handleResolveDuplicateIds();
+        },
+      },
+      {
+        id: 'sanitize-metadata-order',
+        title: 'Sanitizar orden de metadatos (Description / ID / Status / Priority)',
+        shortcut: '⇧O',
+        icon: 'low_priority',
+        category: 'action',
+        perform: () => {
+          handleSanitizeMetadataOrder();
         },
       },
       {
@@ -4581,13 +4811,15 @@ export default function App() {
           taskId: resId,
           title: tProps.title || '',
           completed: Boolean(tProps.completed),
-          priority: (tProps.priority || 'P1') as TaskPriority,
+          priority: (tProps.priority || 'P3') as TaskPriority,
           status: (tProps.status || (tProps.completed ? 'done' : 'todo')) as TaskStatus,
+          description: tProps.description ?? matchedBlock?.detectedDescription ?? '',
           tags: tProps.tags || matchedBlock?.detectedTags || [],
           subtasks: tProps.subtasks || matchedBlock?.detectedSubtasks,
           blockedBy: tProps.blockedBy || matchedBlock?.detectedBlockedBy || '',
           groupTitle: matchedBlock?.groupTitle || 'General',
           hasMissingId: !matchedBlock?.detectedId,
+          hasMissingStatus: !matchedBlock?.detectedStatus,
         };
       }
     }
@@ -4605,13 +4837,15 @@ export default function App() {
         taskId: block.detectedId || block.temporaryId,
         title: block.detectedTitle,
         completed: isCompleted,
-        priority: block.detectedPriority || 'P1',
+        priority: block.detectedPriority || 'P3',
         status: (block.detectedStatus as any) || (isCompleted ? 'done' : 'todo'),
+        description: block.detectedDescription || '',
         tags: block.detectedTags || [],
         subtasks: block.detectedSubtasks,
         blockedBy: block.detectedBlockedBy || '',
         groupTitle: block.groupTitle || 'General',
         hasMissingId: !block.detectedId,
+        hasMissingStatus: !block.detectedStatus,
       };
     }
 
@@ -5378,10 +5612,14 @@ export default function App() {
                 onlyBlocked: false,
                 sortBy: 'default',
                 showTaskIds: userSettings.showTaskIds ?? true,
+                showTaskStatus: userSettings.showTaskStatus ?? true,
+                showTaskPriority: userSettings.showTaskPriority ?? true,
               });
               setActiveFilter('all');
             }}
             onToggleShowIds={handleToggleShowTaskIds}
+            onToggleShowStatus={handleToggleShowTaskStatus}
+            onToggleShowPriority={handleToggleShowTaskPriority}
             searchQuery={searchQuery}
             onSearchChange={(q) => setSearchQuery(q)}
             availableSections={existingSections}
@@ -5984,6 +6222,10 @@ export default function App() {
                   onOpenNormalizer={() => setIsSafeNormalizerOpen(true)}
                   showTaskIds={taskFilters.showTaskIds}
                   onToggleShowTaskIds={handleToggleShowTaskIds}
+                  showTaskStatus={taskFilters.showTaskStatus}
+                  onToggleShowTaskStatus={handleToggleShowTaskStatus}
+                  showTaskPriority={taskFilters.showTaskPriority}
+                  onToggleShowTaskPriority={handleToggleShowTaskPriority}
                 />
               </div>
             )}
@@ -6494,6 +6736,18 @@ export default function App() {
                     <span>{i18n._(msg`Generar IDs a todas (${validationReport.missingIdTaskIds.size})`)}</span>
                   </button>
                 )}
+                {validationReport.missingStatusTaskIds.size > 0 && (
+                  <button
+                    id="btn-problems-auto-assign-all-statuses"
+                    type="button"
+                    onClick={handleAutoAssignAllTaskStatuses}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-sans font-medium bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 cursor-pointer transition-colors"
+                    title={i18n._(msg`Asignar estado obligatorio a todas las tareas sin estado`)}
+                  >
+                    <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                    <span>{i18n._(msg`Asignar Status a todas (${validationReport.missingStatusTaskIds.size})`)}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -6543,6 +6797,17 @@ export default function App() {
                         >
                           <span className="material-symbols-outlined text-[12px]">auto_fix_high</span>
                           <span>{i18n._(msg`Generar ID`)}</span>
+                        </button>
+                      )}
+                      {issue.type === 'missing_status' && (
+                        <button
+                          id={`btn-problems-assign-status-${issue.id}`}
+                          type="button"
+                          onClick={() => handleAssignSingleTaskStatus(issue.taskId ?? issue.taskTitle ?? '')}
+                          className="px-2.5 py-1 rounded text-[11px] font-medium bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 cursor-pointer transition-colors flex items-center gap-1"
+                        >
+                          <span className="material-symbols-outlined text-[12px]">check_circle</span>
+                          <span>{i18n._(msg`Asignar Status`)}</span>
                         </button>
                       )}
                       {issue.taskId && (
@@ -6764,13 +7029,102 @@ export default function App() {
               <div id="div-app-68" className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-[var(--on-surface)]">{i18n._(msg`Título`)}</label>
                 <input
+                  id="input-new-task-title"
                   type="text"
                   autoFocus={!isCustomGroup}
                   value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewTaskTitle(val);
+                    if (!isCustomTaskId) {
+                      setNewTaskId(val.trim() ? generateUniqueTaskId(val, markdownInput) : '');
+                    }
+                  }}
                   placeholder={i18n._(msg`ej. Crear recuperación de contraseña`)}
                   className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none"
                 />
+              </div>
+
+              {/* Description Input (Canonical: Description -> ID -> Status -> Priority) */}
+              <div id="div-app-new-task-description" className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--on-surface)] flex items-center justify-between">
+                  <span>{i18n._(msg`Descripción`)}</span>
+                  <span className="text-[10px] text-[var(--on-surface-variant)] font-normal">{i18n._(msg`opcional`)}</span>
+                </label>
+                <textarea
+                  id="textarea-new-task-description"
+                  rows={2}
+                  value={newTaskDescription}
+                  onChange={(e) => setNewTaskDescription(e.target.value)}
+                  placeholder={i18n._(msg`Notas o descripción de la tarea...`)}
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none resize-none"
+                />
+              </div>
+
+              {/* ID Input */}
+              <div id="div-app-new-task-id" className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-[var(--on-surface)] flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">tag</span>
+                    <span>{i18n._(msg`ID de tarea`)}</span>
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    {isCustomTaskId && (
+                      <button
+                        id="btn-new-task-reset-id"
+                        type="button"
+                        onClick={() => {
+                          setIsCustomTaskId(false);
+                          setNewTaskId(newTaskTitle.trim() ? generateUniqueTaskId(newTaskTitle, markdownInput) : '');
+                        }}
+                        className="text-[10px] text-[var(--primary)] hover:underline cursor-pointer flex items-center gap-0.5"
+                        title={i18n._(msg`Restablecer a ID automático basado en el título`)}
+                      >
+                        <span className="material-symbols-outlined text-[12px]">refresh</span>
+                        <span>{i18n._(msg`Auto`)}</span>
+                      </button>
+                    )}
+                    <span className="text-[10px] text-[var(--on-surface-variant)]">
+                      {isCustomTaskId ? i18n._(msg`personalizado`) : i18n._(msg`autogenerado`)}
+                    </span>
+                  </div>
+                </div>
+                <input
+                  id="input-new-task-id"
+                  type="text"
+                  value={newTaskId}
+                  onChange={(e) => {
+                    setIsCustomTaskId(true);
+                    setNewTaskId(e.target.value);
+                  }}
+                  placeholder={newTaskTitle.trim() ? generateUniqueTaskId(newTaskTitle, markdownInput) : i18n._(msg`ej. mi-tarea (se autogenera del título)`)}
+                  className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-mono text-[var(--on-surface)] focus:outline-none"
+                />
+              </div>
+
+              {/* Status Selection */}
+              <div id="div-app-new-task-status" className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--on-surface)] flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">pending_actions</span>
+                  <span>{i18n._(msg`Estado`)}</span>
+                </label>
+                <div className="relative">
+                  <select
+                    id="select-new-task-status"
+                    value={newTaskStatus}
+                    onChange={(e) => setNewTaskStatus(e.target.value as TaskStatus)}
+                    className="w-full bg-[var(--surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2.5 py-1.5 text-xs font-sans text-[var(--on-surface)] focus:outline-none cursor-pointer appearance-none pr-8"
+                  >
+                    <option value="backlog">📦 Backlog ({i18n._(msg`Predeterminado`)})</option>
+                    <option value="todo">⏳ Todo ({i18n._(msg`Por hacer`)})</option>
+                    <option value="in_progress">⚡ In Progress ({i18n._(msg`En progreso`)})</option>
+                    <option value="review">👀 Review ({i18n._(msg`En revisión`)})</option>
+                    <option value="done">✅ Done ({i18n._(msg`Completado`)})</option>
+                  </select>
+                  <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-[16px] text-[var(--on-surface-variant)] pointer-events-none">
+                    expand_more
+                  </span>
+                </div>
               </div>
 
               {/* Priority Selection */}
@@ -6948,6 +7302,58 @@ export default function App() {
                   </span>
                 </button>
                 <button
+                  id="btn-view-markdown-toggle-status"
+                  type="button"
+                  onClick={handleToggleShowTaskStatus}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs ${
+                    taskFilters.showTaskStatus !== false
+                      ? 'bg-cyan-950/40 text-cyan-300 border-cyan-800/80 hover:bg-cyan-900/60'
+                      : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+                  }`}
+                  title={
+                    taskFilters.showTaskStatus !== false
+                      ? i18n._(msg`Ocultar estado (Status:) en el Markdown`)
+                      : i18n._(msg`Mostrar estado (Status:) en el Markdown`)
+                  }
+                  aria-label={
+                    taskFilters.showTaskStatus !== false
+                      ? i18n._(msg`Ocultar Status en Markdown`)
+                      : i18n._(msg`Mostrar Status en Markdown`)
+                  }
+                >
+                  <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                  <span className="font-mono text-[10px] font-bold">#Status</span>
+                  <span className="text-[10px]">
+                    {taskFilters.showTaskStatus !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
+                  </span>
+                </button>
+                <button
+                  id="btn-view-markdown-toggle-priority"
+                  type="button"
+                  onClick={handleToggleShowTaskPriority}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs ${
+                    taskFilters.showTaskPriority !== false
+                      ? 'bg-rose-950/40 text-rose-300 border-rose-800/80 hover:bg-rose-900/60'
+                      : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+                  }`}
+                  title={
+                    taskFilters.showTaskPriority !== false
+                      ? i18n._(msg`Ocultar prioridad (Priority:) en el Markdown`)
+                      : i18n._(msg`Mostrar prioridad (Priority:) en el Markdown`)
+                  }
+                  aria-label={
+                    taskFilters.showTaskPriority !== false
+                      ? i18n._(msg`Ocultar Priority en Markdown`)
+                      : i18n._(msg`Mostrar Priority en Markdown`)
+                  }
+                >
+                  <span className="material-symbols-outlined text-[13px]">flag</span>
+                  <span className="font-mono text-[10px] font-bold">#Prio</span>
+                  <span className="text-[10px]">
+                    {taskFilters.showTaskPriority !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
+                  </span>
+                </button>
+                <button
                   id="btn-view-markdown-close-header"
                   type="button"
                   onClick={() => setIsViewMarkdownOpen(false)}
@@ -6961,7 +7367,11 @@ export default function App() {
             <div id="div-app-81" className="p-4 flex flex-col gap-2.5 overflow-hidden">
               <div id="div-app-82" className="relative w-full rounded bg-[var(--surface)] border border-[var(--outline)] overflow-hidden">
                 <pre className="p-3 text-xs font-mono text-[var(--on-surface)] overflow-auto max-h-[46vh] leading-relaxed select-text whitespace-pre-wrap">
-                  {taskFilters.showTaskIds === false ? stripTaskIdsFromMarkdown(markdownInput) : markdownInput}
+                  {stripMetadataFieldsFromMarkdown(markdownInput, {
+                    stripIds: taskFilters.showTaskIds === false,
+                    stripStatus: taskFilters.showTaskStatus === false,
+                    stripPriority: taskFilters.showTaskPriority === false,
+                  })}
                 </pre>
               </div>
             </div>

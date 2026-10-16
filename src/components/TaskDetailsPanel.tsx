@@ -10,11 +10,13 @@ export interface TaskDetailsData {
   completed: boolean;
   priority: TaskPriority;
   status: TaskStatus;
+  description?: string;
   tags?: string[];
   subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
   groupTitle?: string;
   hasMissingId?: boolean;
+  hasMissingStatus?: boolean;
 }
 
 export interface MinimalTaskInfo {
@@ -39,6 +41,7 @@ interface TaskDetailsPanelProps {
       completed?: boolean;
       priority?: TaskPriority;
       status?: TaskStatus;
+      description?: string;
       groupTitle?: string;
       tags?: string[];
       blockedBy?: string;
@@ -80,6 +83,7 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
 
   // Single task local editing states
   const [localTitle, setLocalTitle] = useState('');
+  const [localDescription, setLocalDescription] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
@@ -93,12 +97,13 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
   useEffect(() => {
     if (task) {
       setLocalTitle(task.title);
+      setLocalDescription(task.description || '');
       setIsEditingTitle(false);
       setIsMenuOpen(false);
       setIsAddingTag(false);
       setNewTagInput('');
     }
-  }, [task?.taskId, task?.title]);
+  }, [task?.taskId, task?.title, task?.description]);
 
   // Global escape handler to close panel when not editing inputs
   useEffect(() => {
@@ -169,6 +174,19 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
     setIsEditingTitle(false);
   };
 
+  const handleDescriptionCommit = () => {
+    if (!task) return;
+    const trimmed = localDescription.trim();
+    if (trimmed !== (task.description || '').trim()) {
+      setSaveIndicator('saving');
+      onUpdateTask(task.taskId, { description: trimmed });
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(() => {
+        setSaveIndicator('saved');
+      }, 500);
+    }
+  };
+
   const handleCopyId = () => {
     if (!task) return;
     navigator.clipboard.writeText(task.taskId);
@@ -180,7 +198,8 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
     if (!task) return;
     const completedMark = task.completed ? 'x' : ' ';
     const tagsStr = task.tags && task.tags.length > 0 ? ` #${task.tags.join(' #')}` : '';
-    const line = `- [${completedMark}] ${task.title}${tagsStr}\n  id: ${task.taskId}\n  priority: ${task.priority}\n  status: ${task.status}`;
+    const descLine = task.description ? `\n  - Description: ${task.description.trim()}` : '';
+    const line = `- [${completedMark}] ${task.title}${tagsStr}${descLine}\n  - ID: ${task.taskId}\n  - Status: ${task.status}\n  - Priority: ${task.priority}`;
     navigator.clipboard.writeText(line);
     setIsMenuOpen(false);
   };
@@ -523,6 +542,25 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
                     </button>
                   )}
 
+                  {task.hasMissingStatus && (
+                    <button
+                      id="btn-task-menu-assign-status"
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        window.dispatchEvent(
+                          new CustomEvent('antask:assign-task-status', {
+                            detail: { taskId: task.taskId, taskTitle: task.title },
+                          })
+                        );
+                      }}
+                      className="px-2 py-1 rounded text-left text-cyan-300 hover:bg-[var(--surface-container-highest)] flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                      <span>{i18n._(msg`Asignar Estado obligatorio`)}</span>
+                    </button>
+                  )}
+
                   <button
                     id="btn-task-menu-copy-id"
                     type="button"
@@ -666,11 +704,37 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
           </div>
         )}
 
+        {/* Description Field (Optional / Sanity) */}
+        <div id="div-taskdetailspanel-description" className="flex flex-col gap-1">
+          <label className="text-[10px] font-mono font-semibold text-[var(--on-surface-variant)] uppercase tracking-wider flex items-center justify-between">
+            <span>{i18n._(msg`Descripción`)}</span>
+            <span className="text-[9px] font-sans text-[var(--on-surface-variant)] lowercase">
+              ({i18n._(msg`opcional / Sanity`)})
+            </span>
+          </label>
+          <textarea
+            id="textarea-task-description"
+            rows={2}
+            value={localDescription}
+            onChange={(e) => setLocalDescription(e.target.value)}
+            onBlur={handleDescriptionCommit}
+            placeholder={i18n._(msg`Añadir descripción o notas opcionales...`)}
+            className="w-full bg-[var(--surface)] text-[var(--on-surface)] border border-[var(--outline)] focus:border-[var(--primary)] rounded px-2 py-1 text-xs font-sans focus:outline-none resize-none transition-colors"
+          />
+        </div>
+
         {/* 4. Status Grid */}
         <div id="div-taskdetailspanel-21" className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-mono font-semibold text-[var(--on-surface-variant)] uppercase tracking-wider">
-            {i18n._(msg`Estado`)}
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] font-mono font-semibold text-[var(--on-surface-variant)] uppercase tracking-wider">
+              {i18n._(msg`Estado`)}
+            </label>
+            {task.hasMissingStatus && (
+              <span className="text-[10px] font-mono font-medium text-cyan-400 bg-cyan-950/60 border border-cyan-800/80 px-1.5 py-0.2 rounded">
+                {i18n._(msg`Obligatorio pendiente`)}
+              </span>
+            )}
+          </div>
           <div id="div-taskdetailspanel-22" className="grid grid-cols-3 gap-1">
             {statusOptions.map((st) => {
               const isCurrent = currentStatusId === st.id;

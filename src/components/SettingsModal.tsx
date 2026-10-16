@@ -452,6 +452,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   />
                 </div>
 
+                {/* Show Task Status */}
+                <div id="div-settings-canvas-show-status" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Mostrar estado (Status)`)}</span>
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Mostrar u ocultar el estado en tarjetas y en el editor Markdown`)}</span>
+                  </div>
+                  <input
+                    id="checkbox-settings-show-task-status-canvas"
+                    type="checkbox"
+                    checked={settings.showTaskStatus !== false}
+                    onChange={(e) => handleUpdate('showTaskStatus', e.target.checked)}
+                    className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
+                  />
+                </div>
+
+                {/* Show Task Priority */}
+                <div id="div-settings-canvas-show-priority" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Mostrar prioridad (Priority)`)}</span>
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Mostrar u ocultar la prioridad en tarjetas y en el editor Markdown`)}</span>
+                  </div>
+                  <input
+                    id="checkbox-settings-show-task-priority-canvas"
+                    type="checkbox"
+                    checked={settings.showTaskPriority !== false}
+                    onChange={(e) => handleUpdate('showTaskPriority', e.target.checked)}
+                    className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
+                  />
+                </div>
+
                 {/* tldraw SDK License */}
                 <div id="div-settings-tldraw-license" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
                   <div className="flex flex-col gap-0.5 min-w-0">
@@ -551,6 +581,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     type="checkbox"
                     checked={settings.showTaskIds !== false}
                     onChange={(e) => handleUpdate('showTaskIds', e.target.checked)}
+                    className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
+                  />
+                </div>
+
+                {/* Show Task Status in Kanban Cards */}
+                <div id="div-settings-kanban-show-status" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Mostrar estado (Status)`)}</span>
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Mostrar u ocultar el estado en tarjetas y en el editor Markdown`)}</span>
+                  </div>
+                  <input
+                    id="checkbox-settings-show-task-status-kanban"
+                    type="checkbox"
+                    checked={settings.showTaskStatus !== false}
+                    onChange={(e) => handleUpdate('showTaskStatus', e.target.checked)}
+                    className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
+                  />
+                </div>
+
+                {/* Show Task Priority in Kanban Cards */}
+                <div id="div-settings-kanban-show-priority" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Mostrar prioridad (Priority)`)}</span>
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Mostrar u ocultar la prioridad en tarjetas y en el editor Markdown`)}</span>
+                  </div>
+                  <input
+                    id="checkbox-settings-show-task-priority-kanban"
+                    type="checkbox"
+                    checked={settings.showTaskPriority !== false}
+                    onChange={(e) => handleUpdate('showTaskPriority', e.target.checked)}
                     className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
                   />
                 </div>

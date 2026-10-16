@@ -45,9 +45,46 @@ export const NOTE_COLOR_OPTIONS = [
  */
 export class CustomNoteShapeUtil extends NoteShapeUtil {
   static override type = 'note' as const;
-  override options: any = {
-    resizeMode: 'scale' as const,
-  };
+
+  constructor(editor: any) {
+    super(editor);
+    const existingOptions = (this as any).options || {};
+    (this as any).options = {
+      ...existingOptions,
+      resizeMode: 'scale' as const,
+    };
+    if (typeof (this as any).options.getDefaultDisplayValues !== 'function') {
+      (this as any).options.getDefaultDisplayValues = (
+        _editor: any,
+        shape: TLNoteShape,
+        theme: any,
+        colorMode: 'dark' | 'light'
+      ) => {
+        const { color = 'yellow', labelColor = 'black' } = shape?.props || {};
+        const colors = theme?.colors?.[colorMode] || {};
+        return {
+          noteWidth: 200,
+          noteHeight: 200,
+          noteBackgroundColor: colors[color] || '#fef08a',
+          borderColor: colors.noteBorder || '#ca8a04',
+          borderWidth: 2,
+          labelColor: labelColor === 'black' ? (colors[color] || '#000000') : '#000000',
+          labelFontFamily: 'sans-serif',
+          labelFontSize: 16,
+          labelLineHeight: 1.3,
+          labelFontWeight: 'normal',
+          labelFontVariant: 'normal',
+          labelFontStyle: 'normal',
+          labelPadding: 16,
+          labelHorizontalAlign: 'center' as const,
+          labelVerticalAlign: 'middle' as const,
+        };
+      };
+    }
+    if (typeof (this as any).options.getCustomDisplayValues !== 'function') {
+      (this as any).options.getCustomDisplayValues = () => ({});
+    }
+  }
 
   override hideResizeHandles(_shape: TLNoteShape): boolean {
     return false;
@@ -97,6 +134,7 @@ export function isShapeFilteredOut(
       completed: p.completed,
       priority: p.priority,
       status: normalizedStatus,
+      description: p.description,
       groupTitle: p.groupTitle,
       tags: p.tags,
       blockedBy: p.blockedBy,
@@ -118,6 +156,7 @@ export type TaskShapeProps = {
   priority: TaskPriority;
   taskId?: string;
   status?: TaskStatus;
+  description?: string;
   groupTitle?: string;
   groupHeadingId?: string;
   branchTitle?: string;
@@ -126,6 +165,7 @@ export type TaskShapeProps = {
   blockedBy?: string;
   isDuplicateId?: boolean;
   hasMissingId?: boolean;
+  hasMissingStatus?: boolean;
   unresolvedBlockers?: string[];
 };
 
@@ -145,11 +185,13 @@ function TaskCardComponent({
     priority,
     taskId,
     status,
+    description,
     tags,
     subtasks,
     blockedBy,
     isDuplicateId,
     hasMissingId,
+    hasMissingStatus,
     unresolvedBlockers,
     w,
     h,
@@ -432,6 +474,7 @@ function TaskCardComponent({
       completed,
       priority,
       status: normalizedStatus,
+      description,
       groupTitle: shape.props.groupTitle,
       tags,
       blockedBy,
@@ -442,6 +485,8 @@ function TaskCardComponent({
 
   const isHidden = isFilterActive && !isMatch;
   const showTaskIds = globalFilters.showTaskIds !== false;
+  const showTaskStatus = globalFilters.showTaskStatus !== false;
+  const showTaskPriority = globalFilters.showTaskPriority !== false;
 
   useLayoutEffect(() => {
     const container = document.querySelector(`[data-shape-id="${shape.id}"]`) as HTMLElement | null;
@@ -689,17 +734,19 @@ function TaskCardComponent({
 
           <div id={`task-card-actions-${shape.id}`} className="flex items-center gap-1 shrink-0">
             {/* Discreet Priority Indicator */}
-            <button
-              id={`btn-task-card-priority-${shape.id}`}
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={cyclePriority}
-              title={_(msg`Clic para cambiar prioridad (P0-P3)`)}
-              className={`px-1 py-0.5 text-[11px] font-mono font-medium hover:opacity-100 cursor-pointer shrink-0 transition-opacity flex items-center gap-1 ${currentPriority.text}`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${currentPriority.dot}`} />
-              <span><HighlightText text={priority} query={searchQuery} /></span>
-            </button>
+            {showTaskPriority && (
+              <button
+                id={`btn-task-card-priority-${shape.id}`}
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={cyclePriority}
+                title={_(msg`Clic para cambiar prioridad (P0-P3)`)}
+                className={`px-1 py-0.5 text-[11px] font-mono font-medium hover:opacity-100 cursor-pointer shrink-0 transition-opacity flex items-center gap-1 ${currentPriority.text}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${currentPriority.dot}`} />
+                <span><HighlightText text={priority} query={searchQuery} /></span>
+              </button>
+            )}
 
             {/* Quick Central Connector Button */}
             <button
@@ -765,6 +812,17 @@ function TaskCardComponent({
           </div>
         </div>
 
+        {/* Optional Description */}
+        {description && (
+          <p
+            id={`task-card-desc-${shape.id}`}
+            className="text-[11px] text-[var(--on-surface-variant)] leading-snug line-clamp-2 my-0.5 select-none"
+            title={description}
+          >
+            <HighlightText text={description} query={searchQuery} />
+          </p>
+        )}
+
         {/* Popover Contextual Menu */}
         {isMenuOpen && menuCoords && typeof document !== 'undefined' && createPortal(
           <div
@@ -808,6 +866,26 @@ function TaskCardComponent({
               >
                 <span className="material-symbols-outlined text-[14px]">auto_fix_high</span>
                 <span>{_(msg`Generar ID automático`)}</span>
+              </button>
+            )}
+
+            {hasMissingStatus && (
+              <button
+                id={`btn-task-card-menu-assign-status-${shape.id}`}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsMenuOpen(false);
+                  window.dispatchEvent(
+                    new CustomEvent('antask:assign-task-status', {
+                      detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
+                    })
+                  );
+                }}
+                className="px-2 py-1 rounded text-left text-cyan-300 hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer font-medium"
+              >
+                <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                <span>{_(msg`Asignar Estado obligatorio`)}</span>
               </button>
             )}
 
@@ -972,79 +1050,103 @@ function TaskCardComponent({
         )}
 
         {/* Bottom Row: Metadata & Status */}
-        <div id={`task-card-footer-${shape.id}`} className="flex items-center justify-between text-xs text-[var(--on-surface-variant)] pt-1.5 border-t border-[var(--outline)] mt-0.5">
-          <div id={`task-card-footer-meta-${shape.id}`} className="flex items-center gap-1.5 truncate max-w-[200px]">
-            {showTaskIds && (
-              taskId && !hasMissingId ? (
-                <span className="text-[var(--on-surface-variant)] font-mono text-[11px] truncate tracking-tight" title={`ID: ${taskId}`}>
-                  #<HighlightText text={taskId} query={searchQuery} />
-                </span>
-              ) : (
+        {(showTaskIds || isDuplicateId || (unresolvedBlockers && unresolvedBlockers.length > 0) || (blockedBy && !completed) || showTaskStatus) && (
+          <div id={`task-card-footer-${shape.id}`} className="flex items-center justify-between text-xs text-[var(--on-surface-variant)] pt-1.5 border-t border-[var(--outline)] mt-0.5">
+            <div id={`task-card-footer-meta-${shape.id}`} className="flex items-center gap-1.5 truncate max-w-[200px]">
+              {showTaskIds && (
+                taskId && !hasMissingId ? (
+                  <span className="text-[var(--on-surface-variant)] font-mono text-[11px] truncate tracking-tight" title={`ID: ${taskId}`}>
+                    #<HighlightText text={taskId} query={searchQuery} />
+                  </span>
+                ) : (
+                  <button
+                    id={`btn-task-card-generate-id-${shape.id}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.dispatchEvent(
+                        new CustomEvent('antask:assign-task-id', {
+                          detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
+                        })
+                      );
+                    }}
+                    className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
+                    title={_(msg`Tarea sin ID explícito. Clic para generar ID automático en Markdown.`)}
+                  >
+                    <span>+ ID</span>
+                    <span className="material-symbols-outlined text-[10px]">auto_fix_high</span>
+                  </button>
+                )
+              )}
+
+              {isDuplicateId && (
                 <button
-                  id={`btn-task-card-generate-id-${shape.id}`}
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     window.dispatchEvent(
-                      new CustomEvent('antask:assign-task-id', {
-                        detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
+                      new CustomEvent('antask:resolve-single-duplicate-id', {
+                        detail: { taskId: shape.props?.taskId || taskId, taskTitle: title },
                       })
                     );
                   }}
-                  className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
-                  title={_(msg`Tarea sin ID explícito. Clic para generar ID automático en Markdown.`)}
+                  className="flex items-center gap-0.5 text-rose-400 hover:text-rose-300 font-mono text-[10px] font-semibold transition-colors cursor-pointer px-1 py-0.2 rounded bg-rose-950/80 border border-rose-800/80"
+                  title={_(msg`ID duplicado en TASKS.md. Clic para resolver y asignar nuevo ID único.`)}
                 >
-                  <span>+ ID</span>
-                  <span className="material-symbols-outlined text-[10px]">auto_fix_high</span>
+                  <span>dup</span>
+                  <span className="material-symbols-outlined text-[9px]">auto_fix_high</span>
                 </button>
-              )
-            )}
+              )}
 
-            {isDuplicateId && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.dispatchEvent(
-                    new CustomEvent('antask:resolve-single-duplicate-id', {
-                      detail: { taskId: shape.props?.taskId || taskId, taskTitle: title },
-                    })
-                  );
-                }}
-                className="flex items-center gap-0.5 text-rose-400 hover:text-rose-300 font-mono text-[10px] font-semibold transition-colors cursor-pointer px-1 py-0.2 rounded bg-rose-950/80 border border-rose-800/80"
-                title={_(msg`ID duplicado en TASKS.md. Clic para resolver y asignar nuevo ID único.`)}
-              >
-                <span>dup</span>
-                <span className="material-symbols-outlined text-[9px]">auto_fix_high</span>
-              </button>
-            )}
+              {unresolvedBlockers && unresolvedBlockers.length > 0 && (
+                <span
+                  className="text-[10px] font-semibold text-amber-400 font-mono"
+                  title={_(msg`Dependencia no resuelta: #${unresolvedBlockers.join(', #')}`)}
+                >
+                  dep?
+                </span>
+              )}
 
-            {unresolvedBlockers && unresolvedBlockers.length > 0 && (
-              <span
-                className="text-[10px] font-semibold text-amber-400 font-mono"
-                title={_(msg`Dependencia no resuelta: #${unresolvedBlockers.join(', #')}`)}
-              >
-                dep?
-              </span>
-            )}
+              {blockedBy && !completed && !unresolvedBlockers?.length && (
+                <span
+                  className="text-[10px] font-mono text-amber-400 flex items-center gap-0.5"
+                  title={_(msg`Bloqueada por #${blockedBy}`)}
+                >
+                  <span>🔒</span>
+                  <span>#{blockedBy}</span>
+                </span>
+              )}
+            </div>
 
-            {blockedBy && !completed && !unresolvedBlockers?.length && (
-              <span
-                className="text-[10px] font-mono text-amber-400 flex items-center gap-0.5"
-                title={_(msg`Bloqueada por #${blockedBy}`)}
-              >
-                <span>🔒</span>
-                <span>#{blockedBy}</span>
-              </span>
+            {showTaskStatus && (
+              <div id={`task-card-footer-status-${shape.id}`} className="flex items-center gap-1 shrink-0">
+                {hasMissingStatus ? (
+                  <button
+                    id={`btn-task-card-assign-status-${shape.id}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.dispatchEvent(
+                        new CustomEvent('antask:assign-task-status', {
+                          detail: { taskId: shape.props?.taskId || taskId || title, taskTitle: title },
+                        })
+                      );
+                    }}
+                    className="flex items-center gap-0.5 text-cyan-400 hover:text-cyan-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
+                    title={_(msg`Tarea sin Estado obligatorio. Clic para asignar estado.`)}
+                  >
+                    <span>+ Status</span>
+                    <span className="material-symbols-outlined text-[10px]">check_circle</span>
+                  </button>
+                ) : (
+                  <span className={`text-[10px] font-mono uppercase tracking-wider ${currentStatus.text}`}>
+                    {currentStatus.label}
+                  </span>
+                )}
+              </div>
             )}
           </div>
-
-          <div id={`task-card-footer-status-${shape.id}`} className="flex items-center gap-1 shrink-0">
-            <span className={`text-[10px] font-mono uppercase tracking-wider ${currentStatus.text}`}>
-              {currentStatus.label}
-            </span>
-          </div>
-        </div>
+        )}
       </div>
     </HTMLContainer>
   );
@@ -1061,6 +1163,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     priority: T.string,
     taskId: T.string.optional(),
     status: T.string.optional(),
+    description: T.string.optional(),
     groupTitle: T.string.optional(),
     groupHeadingId: T.string.optional(),
     branchTitle: T.string.optional(),
@@ -1073,6 +1176,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
     blockedBy: T.string.optional(),
     isDuplicateId: T.boolean.optional(),
     hasMissingId: T.boolean.optional(),
+    hasMissingStatus: T.boolean.optional(),
     unresolvedBlockers: T.arrayOf(T.string).optional(),
   };
 
@@ -1082,7 +1186,7 @@ export class TaskShapeUtil extends ShapeUtil<any> {
       h: 110,
       title: 'New developer task',
       completed: false,
-      priority: 'P1',
+      priority: 'P3',
       taskId: 'task',
     };
   }
@@ -2231,6 +2335,7 @@ export function populateCanvasWithGroups(
   const validationReport = rawMarkdown ? validateMarkdownDocument(rawMarkdown) : null;
   const duplicateIds = validationReport?.duplicateIds || new Set<string>();
   const missingIdTaskIds = validationReport?.missingIdTaskIds || new Set<string>();
+  const missingStatusTaskIds = validationReport?.missingStatusTaskIds || new Set<string>();
   const unresolvedBlockerMap = validationReport?.unresolvedBlockerMap || new Map<string, string[]>();
 
   const cardWidth = 320;
@@ -2299,7 +2404,8 @@ export function populateCanvasWithGroups(
 
   const getTaskCalculatedHeight = (task: ParsedMarkdownTask) => {
     const subCount = task.subtasks?.items?.length || 0;
-    return subCount > 0 ? cardHeight + 20 + subCount * 22 : cardHeight;
+    const descExtra = task.description ? 24 : 0;
+    return subCount > 0 ? cardHeight + 20 + subCount * 22 + descExtra : cardHeight + descExtra;
   };
 
   // Pass 1: Place groups that already have saved positions in savedGroupMap
@@ -2448,6 +2554,7 @@ export function populateCanvasWithGroups(
       // Only associate for arrow bindings if not duplicated collision
       const isDuplicate = task.taskId ? duplicateIds.has(task.taskId.toLowerCase()) : false;
       const isMissingId = !task.taskId || missingIdTaskIds.has(resolvedTaskId);
+      const isMissingStatus = !task.status || missingStatusTaskIds.has(resolvedTaskId);
       const unresolvedBlockers = unresolvedBlockerMap.get(normalizedId);
 
       if (!isDuplicate) {
@@ -2480,9 +2587,10 @@ export function populateCanvasWithGroups(
           h: taskH,
           title: task.title,
           completed: task.completed,
-          priority: task.priority || 'P1',
+          priority: task.priority || 'P3',
           taskId: resolvedTaskId,
           status: task.status,
+          description: task.description,
           groupTitle: group.title,
           groupHeadingId: group.id,
           branchTitle: group.branchTitle,
@@ -2491,6 +2599,7 @@ export function populateCanvasWithGroups(
           blockedBy: task.blockedBy,
           isDuplicateId: isDuplicate,
           hasMissingId: isMissingId,
+          hasMissingStatus: isMissingStatus,
           unresolvedBlockers,
         },
       });
@@ -2690,17 +2799,22 @@ export function populateCanvasWithGroups(
     (editor.createBindings as any)(bindingsToCreate);
   }
 
-  // Populate note shapes from Markdown "## Notas" section if needed
+  // Populate note shapes from Markdown "## Notas" or "## Comentarios" section if needed
   if (rawMarkdown) {
     const existingNotes = editor
       .getCurrentPageShapes()
       .filter((s) => (s as any).type === 'note' || (s as any).type === 'text');
 
-    if (existingNotes.length === 0 || options?.clearNotes) {
-      if (options?.clearNotes && existingNotes.length > 0) {
-        editor.deleteShapes(existingNotes.map((s) => s.id));
+    const scannedNotes = scanNotesFromMarkdown(rawMarkdown);
+
+    if (options?.clearNotes) {
+      if (existingNotes.length > 0) {
+        try {
+          editor.deleteShapes(existingNotes.map((s) => s.id));
+        } catch {
+          // ignore
+        }
       }
-      const scannedNotes = scanNotesFromMarkdown(rawMarkdown);
       if (scannedNotes.length > 0) {
         let maxRight = 40;
         for (const g of groupShapesToCreate) {
@@ -2720,7 +2834,60 @@ export function populateCanvasWithGroups(
           },
         }));
 
+        try {
+          (editor.createShapes as any)(noteShapesToCreate);
+        } catch (err) {
+          console.error('[TaskShapeUtil] Failed to create note shapes from markdown:', err);
+        }
+      }
+    } else if (existingNotes.length === 0 && scannedNotes.length > 0) {
+      let maxRight = 40;
+      for (const g of groupShapesToCreate) {
+        const right = (g.x || 0) + (g.props?.w || 360);
+        if (right > maxRight) maxRight = right;
+      }
+
+      const noteShapesToCreate = scannedNotes.map((noteText, idx) => ({
+        id: createShapeId(),
+        type: 'note' as const,
+        x: maxRight + 40,
+        y: 40 + idx * 220,
+        props: {
+          richText: toRichTextHelper(noteText),
+          color: 'yellow',
+          size: 'm',
+        },
+      }));
+
+      try {
         (editor.createShapes as any)(noteShapesToCreate);
+      } catch (err) {
+        console.error('[TaskShapeUtil] Failed to create note shapes from markdown:', err);
+      }
+    } else if (existingNotes.length > 0 && scannedNotes.length > existingNotes.length) {
+      // Append newly added notes from markdown
+      let maxRight = 40;
+      for (const g of groupShapesToCreate) {
+        const right = (g.x || 0) + (g.props?.w || 360);
+        if (right > maxRight) maxRight = right;
+      }
+      const extraNotes = scannedNotes.slice(existingNotes.length);
+      const newShapes = extraNotes.map((noteText, idx) => ({
+        id: createShapeId(),
+        type: 'note' as const,
+        x: maxRight + 40,
+        y: 40 + (existingNotes.length + idx) * 220,
+        props: {
+          richText: toRichTextHelper(noteText),
+          color: 'yellow',
+          size: 'm',
+        },
+      }));
+
+      try {
+        (editor.createShapes as any)(newShapes);
+      } catch (err) {
+        console.error('[TaskShapeUtil] Failed to append note shapes from markdown:', err);
       }
     }
   }

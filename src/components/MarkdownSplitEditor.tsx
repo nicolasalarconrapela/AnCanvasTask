@@ -3,8 +3,8 @@ import CodeMirror, { ReactCodeMirrorRef, ExternalChange, Transaction } from '@ui
 import { diffChars } from 'diff';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { EditorView, Decoration, DecorationSet } from '@codemirror/view';
-import { RangeSetBuilder, StateField, EditorState } from '@codemirror/state';
+import { EditorView, Decoration, DecorationSet, keymap, WidgetType } from '@codemirror/view';
+import { RangeSetBuilder, StateField, EditorState, Prec, Extension } from '@codemirror/state';
 import { useLingui } from '@lingui/react';
 import { msg, plural } from '@lingui/core/macro';
 import {
@@ -13,7 +13,15 @@ import {
   validateMarkdownDocument,
   scanTaskBlocks,
   isTaskIdLine,
+  isTaskStatusLine,
+  isTaskPriorityLine,
   stripTaskIdsFromMarkdown,
+  stripStatusFromMarkdown,
+  stripPriorityFromMarkdown,
+  stripMetadataFieldsFromMarkdown,
+  sanitizeTaskMetadataOrder,
+  buildTaskEnterSnippet,
+  generateUniqueTaskId,
 } from '../utils/markdownSync';
 import { SafeMarkdownNormalizerModal } from './SafeMarkdownNormalizerModal';
 
@@ -43,6 +51,283 @@ const hideTaskIdsExtension = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
+function buildHideTaskStatusDeco(state: EditorState): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  for (let l = 1; l <= state.doc.lines; l++) {
+    const line = state.doc.line(l);
+    if (isTaskStatusLine(line.text)) {
+      const lFrom = line.from;
+      const lTo = l < state.doc.lines ? line.to + 1 : line.to;
+      builder.add(lFrom, lTo, Decoration.replace({ block: true }));
+    }
+  }
+  return builder.finish();
+}
+
+const hideTaskStatusExtension = StateField.define<DecorationSet>({
+  create(state) {
+    return buildHideTaskStatusDeco(state);
+  },
+  update(decorations, tr) {
+    if (tr.docChanged) {
+      return buildHideTaskStatusDeco(tr.state);
+    }
+    return decorations.map(tr.changes);
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+function buildHideTaskPriorityDeco(state: EditorState): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  for (let l = 1; l <= state.doc.lines; l++) {
+    const line = state.doc.line(l);
+    if (isTaskPriorityLine(line.text)) {
+      const lFrom = line.from;
+      const lTo = l < state.doc.lines ? line.to + 1 : line.to;
+      builder.add(lFrom, lTo, Decoration.replace({ block: true }));
+    }
+  }
+  return builder.finish();
+}
+
+const hideTaskPriorityExtension = StateField.define<DecorationSet>({
+  create(state) {
+    return buildHideTaskPriorityDeco(state);
+  },
+  update(decorations, tr) {
+    if (tr.docChanged) {
+      return buildHideTaskPriorityDeco(tr.state);
+    }
+    return decorations.map(tr.changes);
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+interface TaskFieldRange {
+  line: number;
+  from: number;
+  to: number;
+}
+
+interface TaskFieldNavigationOptions {
+  showTaskIds?: boolean;
+  showTaskStatus?: boolean;
+  showTaskPriority?: boolean;
+}
+
+function navigateTaskFields(
+  view: EditorView,
+  direction: 'next' | 'prev',
+  opts?: TaskFieldNavigationOptions
+): boolean {
+  const selection = view.state.selection.main;
+  const pos = selection.head;
+  const curLine = view.state.doc.lineAt(pos);
+
+  const isTaskRoot = /^(\s*)[-*+]\s*\[([ xX])\]/.test(curLine.text);
+  const isMetadata = /^\s*[-*]?\s*(?:Description|Descripci[oó]n|Desc|ID|Status|Priority|Blocked|Tags?|Progress)\s*:/i.test(curLine.text);
+
+  if (!isTaskRoot && !isMetadata) return false;
+
+  // Find task root line
+  let taskLineNumber = curLine.number;
+  if (!isTaskRoot) {
+    let found = false;
+    for (let k = curLine.number - 1; k >= Math.max(1, curLine.number - 25); k--) {
+      const prevLine = view.state.doc.line(k);
+      if (/^(\s*)[-*+]\s*\[([ xX])\]/.test(prevLine.text)) {
+        taskLineNumber = k;
+        found = true;
+        break;
+      }
+      if (prevLine.text.startsWith('#') || (prevLine.text.trim().length === 0 && k < curLine.number - 1)) {
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+
+  const taskLine = view.state.doc.line(taskLineNumber);
+  const fields: TaskFieldRange[] = [];
+
+  // 1. Task root title field
+  const checkIdx = taskLine.text.indexOf(']');
+  if (checkIdx !== -1) {
+    let valStart = checkIdx + 1;
+    while (valStart < taskLine.text.length && taskLine.text[valStart] === ' ') valStart++;
+    fields.push({
+      line: taskLine.number,
+      from: taskLine.from + valStart,
+      to: taskLine.to,
+    });
+  }
+
+  // 2. Metadata lines under task
+  for (let k = taskLineNumber + 1; k <= view.state.doc.lines; k++) {
+    const subLine = view.state.doc.line(k);
+    if (subLine.text.trim().length === 0 || /^(\s*)[-*+]\s*\[([ xX])\]/.test(subLine.text) || subLine.text.startsWith('#')) {
+      break;
+    }
+    if (opts?.showTaskIds === false && isTaskIdLine(subLine.text)) {
+      continue;
+    }
+    if (opts?.showTaskStatus === false && isTaskStatusLine(subLine.text)) {
+      continue;
+    }
+    if (opts?.showTaskPriority === false && isTaskPriorityLine(subLine.text)) {
+      continue;
+    }
+    const colonIdx = subLine.text.indexOf(':');
+    if (colonIdx !== -1 && /^\s*[-*]?\s*[a-zA-Z]/i.test(subLine.text)) {
+      let valStart = colonIdx + 1;
+      while (valStart < subLine.text.length && subLine.text[valStart] === ' ') valStart++;
+      fields.push({
+        line: subLine.number,
+        from: subLine.from + valStart,
+        to: subLine.to,
+      });
+    }
+  }
+
+  if (fields.length === 0) return false;
+
+  const curFieldIdx = fields.findIndex((f) => f.line === curLine.number);
+
+  let targetField: TaskFieldRange | null = null;
+  if (direction === 'next') {
+    if (curFieldIdx >= 0 && curFieldIdx < fields.length - 1) {
+      targetField = fields[curFieldIdx + 1];
+    } else if (curFieldIdx === fields.length - 1) {
+      // Look for next task in document
+      for (let m = curLine.number + 1; m <= view.state.doc.lines; m++) {
+        const nextTaskLine = view.state.doc.line(m);
+        if (/^(\s*)[-*+]\s*\[([ xX])\]/.test(nextTaskLine.text)) {
+          const cIdx = nextTaskLine.text.indexOf(']');
+          let vStart = cIdx + 1;
+          while (vStart < nextTaskLine.text.length && nextTaskLine.text[vStart] === ' ') vStart++;
+          targetField = {
+            line: nextTaskLine.number,
+            from: nextTaskLine.from + vStart,
+            to: nextTaskLine.to,
+          };
+          break;
+        }
+      }
+    }
+  } else {
+    // direction === 'prev'
+    if (curFieldIdx > 0) {
+      targetField = fields[curFieldIdx - 1];
+    } else if (curFieldIdx === 0) {
+      // Look for previous task in document
+      for (let m = taskLineNumber - 1; m >= 1; m--) {
+        const prevTaskLine = view.state.doc.line(m);
+        if (/^(\s*)[-*+]\s*\[([ xX])\]/.test(prevTaskLine.text)) {
+          let lastF: TaskFieldRange = {
+            line: prevTaskLine.number,
+            from: prevTaskLine.from + (prevTaskLine.text.indexOf(']') + 2),
+            to: prevTaskLine.to,
+          };
+          for (let p = m + 1; p < taskLineNumber; p++) {
+            const pLine = view.state.doc.line(p);
+            if (pLine.text.trim().length === 0 || pLine.text.startsWith('#')) break;
+            if (opts?.showTaskIds === false && isTaskIdLine(pLine.text)) continue;
+            if (opts?.showTaskStatus === false && isTaskStatusLine(pLine.text)) continue;
+            if (opts?.showTaskPriority === false && isTaskPriorityLine(pLine.text)) continue;
+            const cIdx = pLine.text.indexOf(':');
+            if (cIdx !== -1) {
+              let vStart = cIdx + 1;
+              while (vStart < pLine.text.length && pLine.text[vStart] === ' ') vStart++;
+              lastF = { line: pLine.number, from: pLine.from + vStart, to: pLine.to };
+            }
+          }
+          targetField = lastF;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!targetField) return false;
+
+  if (targetField.from < targetField.to) {
+    view.dispatch({
+      selection: { anchor: targetField.from, head: targetField.to },
+      scrollIntoView: true,
+    });
+  } else {
+    view.dispatch({
+      selection: { anchor: targetField.from },
+      scrollIntoView: true,
+    });
+  }
+
+  return true;
+}
+
+function createEnterTaskSnippetExtension(opts?: TaskFieldNavigationOptions): Extension {
+  return Prec.highest(
+    keymap.of([
+      {
+        key: 'Enter',
+        run(view: EditorView): boolean {
+          const selection = view.state.selection.main;
+          if (!selection.empty) return false;
+
+          const pos = selection.head;
+          const line = view.state.doc.lineAt(pos);
+          const lineText = line.text;
+
+          // Check if line contains a task checkbox
+          const checkboxIndex = lineText.indexOf(']');
+          if (checkboxIndex === -1) return false;
+
+          const col = pos - line.from;
+          // Only trigger if cursor is after the checkbox
+          if (col <= checkboxIndex) return false;
+
+          // Only trigger if cursor is at the end of the line (or only whitespace remains after cursor)
+          const afterCursor = lineText.slice(col);
+          if (afterCursor.trim().length > 0) return false;
+
+          // Prevent duplicate snippet if next line already starts with metadata
+          if (line.number < view.state.doc.lines) {
+            const nextLineText = view.state.doc.line(line.number + 1).text.trim();
+            if (
+              /^(?:[-*]\s*)?(?:Description|Descripci[oó]n|Desc|ID|Status|Priority|Blocked|Tags?|Progress)\s*:/i.test(
+                nextLineText
+              )
+            ) {
+              return false;
+            }
+          }
+
+          const result = buildTaskEnterSnippet(lineText, view.state.doc.toString());
+          if (!result) return false;
+
+          const insertPos = line.to;
+          view.dispatch({
+            changes: { from: insertPos, to: insertPos, insert: result.snippetText },
+            selection: { anchor: insertPos + result.cursorOffset },
+            scrollIntoView: true,
+          });
+
+          return true;
+        },
+      },
+      {
+        key: 'Tab',
+        run(view: EditorView): boolean {
+          return navigateTaskFields(view, 'next', opts);
+        },
+        shift(view: EditorView): boolean {
+          return navigateTaskFields(view, 'prev', opts);
+        },
+      },
+    ])
+  );
+}
+
 interface MarkdownSplitEditorProps {
   value: string;
   fileName: string;
@@ -56,6 +341,10 @@ interface MarkdownSplitEditorProps {
   onOpenNormalizer?: () => void;
   showTaskIds?: boolean;
   onToggleShowTaskIds?: () => void;
+  showTaskStatus?: boolean;
+  onToggleShowTaskStatus?: () => void;
+  showTaskPriority?: boolean;
+  onToggleShowTaskPriority?: () => void;
 }
 
 export function MarkdownSplitEditor({
@@ -71,6 +360,10 @@ export function MarkdownSplitEditor({
   onOpenNormalizer,
   showTaskIds,
   onToggleShowTaskIds,
+  showTaskStatus,
+  onToggleShowTaskStatus,
+  showTaskPriority,
+  onToggleShowTaskPriority,
 }: MarkdownSplitEditorProps) {
   const { i18n } = useLingui();
   const editorRef = useRef<ReactCodeMirrorRef>(null);
@@ -180,10 +473,11 @@ export function MarkdownSplitEditor({
   // Copy markdown to clipboard
   const handleCopy = useCallback(async () => {
     try {
-      const textToCopy =
-        showTaskIds === false
-          ? stripTaskIdsFromMarkdown(value)
-          : value;
+      const textToCopy = stripMetadataFieldsFromMarkdown(value, {
+        stripIds: showTaskIds === false,
+        stripStatus: showTaskStatus === false,
+        stripPriority: showTaskPriority === false,
+      });
       await navigator.clipboard.writeText(textToCopy);
       setCopied(true);
       onShowToast(i18n._(msg`Markdown copiado al portapapeles`), 'success');
@@ -191,7 +485,7 @@ export function MarkdownSplitEditor({
     } catch {
       onShowToast(i18n._(msg`Error al copiar al portapapeles`), 'error');
     }
-  }, [value, showTaskIds, onShowToast, i18n]);
+  }, [value, showTaskIds, showTaskStatus, showTaskPriority, onShowToast, i18n]);
 
   // Open safe normalization dialog
   const handleOpenNormalizer = useCallback(() => {
@@ -201,6 +495,31 @@ export function MarkdownSplitEditor({
       setIsLocalNormalizerOpen(true);
     }
   }, [onOpenNormalizer]);
+
+  // Sanitize task metadata order (Description -> ID -> Status -> Priority)
+  const handleSanitizeMetadataOrder = useCallback(() => {
+    const { updatedMarkdown, reorderedCount } = sanitizeTaskMetadataOrder(value);
+    if (reorderedCount > 0) {
+      onChange(updatedMarkdown);
+      onShowToast(
+        i18n._(msg`Orden sanitizado en ${reorderedCount} tarea(s) (Description / ID / Status / Priority)`),
+        'success'
+      );
+    } else {
+      onShowToast(
+        i18n._(msg`El orden de los metadatos ya está sanitizado (Description / ID / Status / Priority)`),
+        'info'
+      );
+    }
+  }, [value, onChange, onShowToast, i18n]);
+
+  useEffect(() => {
+    const handleEvent = () => handleSanitizeMetadataOrder();
+    window.addEventListener('antask:sanitize-task-metadata-order', handleEvent);
+    return () => {
+      window.removeEventListener('antask:sanitize-task-metadata-order', handleEvent);
+    };
+  }, [handleSanitizeMetadataOrder]);
 
   // Track cursor position
   const cursorTrackerPlugin = useMemo(() => {
@@ -216,8 +535,19 @@ export function MarkdownSplitEditor({
     });
   }, []);
 
+  const navOptions = useMemo(
+    () => ({ showTaskIds, showTaskStatus, showTaskPriority }),
+    [showTaskIds, showTaskStatus, showTaskPriority]
+  );
+
+  const enterTaskSnippetExt = useMemo(
+    () => createEnterTaskSnippetExtension(navOptions),
+    [navOptions]
+  );
+
   const extensions = useMemo(() => {
     const exts = [
+      enterTaskSnippetExt,
       markdown(),
       cursorTrackerPlugin,
       EditorView.lineWrapping,
@@ -225,8 +555,14 @@ export function MarkdownSplitEditor({
     if (showTaskIds === false) {
       exts.push(hideTaskIdsExtension);
     }
+    if (showTaskStatus === false) {
+      exts.push(hideTaskStatusExtension);
+    }
+    if (showTaskPriority === false) {
+      exts.push(hideTaskPriorityExtension);
+    }
     return exts;
-  }, [cursorTrackerPlugin, showTaskIds]);
+  }, [enterTaskSnippetExt, cursorTrackerPlugin, showTaskIds, showTaskStatus, showTaskPriority]);
 
   return (
     <aside
@@ -257,10 +593,10 @@ export function MarkdownSplitEditor({
         </div>
 
         {/* Right: Quick actions & controls */}
-        <div id="div-markdownspliteditor-4" className="flex items-center gap-1.5 shrink-0">
+        <div id="div-markdownspliteditor-4" className="flex items-center gap-1 min-w-0 overflow-x-auto no-scrollbar shrink-0">
           {/* Preset Ratio Selector (35% / 50% / 65%) */}
           {onChangeSplitRatio && (
-            <div id="div-markdownspliteditor-5" className="hidden sm:flex items-center bg-[var(--surface-container)] p-0.5 rounded border border-[var(--outline)] text-[10px]">
+            <div id="div-markdownspliteditor-5" className="hidden sm:flex items-center bg-[var(--surface-container)] p-0.5 rounded border border-[var(--outline)] text-[10px] shrink-0">
               <button
                 id="btn-split-ratio-35"
                 type="button"
@@ -308,12 +644,25 @@ export function MarkdownSplitEditor({
             id="btn-markdown-normalizer"
             type="button"
             onClick={handleOpenNormalizer}
-            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-sky-950/60 text-sky-300 border border-sky-800/80 hover:bg-sky-900/80 cursor-pointer transition-colors flex items-center gap-1 shadow-xs"
+            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-sky-950/60 text-sky-300 border border-sky-800/80 hover:bg-sky-900/80 cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0"
             title={i18n._(msg`Normalización segura de Markdown (Diff Git, AST y prevención de pérdidas)`)}
             aria-label={i18n._(msg`Normalización segura`)}
           >
             <span className="material-symbols-outlined text-[14px] text-sky-400">verified</span>
             <span className="hidden sm:inline">{i18n._(msg`Normalizar`)}</span>
+          </button>
+
+          {/* Sanitize Metadata Order (Description / ID / Status / Priority) */}
+          <button
+            id="btn-markdown-sanitize-order"
+            type="button"
+            onClick={handleSanitizeMetadataOrder}
+            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-950/60 text-indigo-300 border border-indigo-800/80 hover:bg-indigo-900/80 cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0"
+            title={i18n._(msg`Sanitizar orden de metadatos (Description / ID / Status / Priority)`)}
+            aria-label={i18n._(msg`Sanitizar orden`)}
+          >
+            <span className="material-symbols-outlined text-[14px] text-indigo-400">low_priority</span>
+            <span className="hidden sm:inline">{i18n._(msg`Sanitizar orden`)}</span>
           </button>
 
           {/* Toggle Show/Hide Task IDs in Editor */}
@@ -322,7 +671,7 @@ export function MarkdownSplitEditor({
               id="btn-markdown-toggle-ids"
               type="button"
               onClick={onToggleShowTaskIds}
-              className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs ${
+              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
                 showTaskIds !== false
                   ? 'bg-amber-950/40 text-amber-300 border-amber-800/80 hover:bg-amber-900/60'
                   : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
@@ -340,8 +689,68 @@ export function MarkdownSplitEditor({
             >
               <span className="material-symbols-outlined text-[13px]">tag</span>
               <span className="font-mono text-[10px] font-bold">#ID</span>
-              <span className="hidden sm:inline text-[10px]">
+              <span className="hidden 2xl:inline text-[10px]">
                 {showTaskIds !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
+              </span>
+            </button>
+          )}
+
+          {/* Toggle Show/Hide Task Status in Editor */}
+          {onToggleShowTaskStatus && (
+            <button
+              id="btn-markdown-toggle-status"
+              type="button"
+              onClick={onToggleShowTaskStatus}
+              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
+                showTaskStatus !== false
+                  ? 'bg-cyan-950/40 text-cyan-300 border-cyan-800/80 hover:bg-cyan-900/60'
+                  : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+              }`}
+              title={
+                showTaskStatus !== false
+                  ? i18n._(msg`Ocultar estado (Status:) en el editor Markdown`)
+                  : i18n._(msg`Mostrar estado (Status:) en el editor Markdown`)
+              }
+              aria-label={
+                showTaskStatus !== false
+                  ? i18n._(msg`Ocultar Status en Markdown`)
+                  : i18n._(msg`Mostrar Status en Markdown`)
+              }
+            >
+              <span className="material-symbols-outlined text-[13px]">check_circle</span>
+              <span className="font-mono text-[10px] font-bold">#Status</span>
+              <span className="hidden 2xl:inline text-[10px]">
+                {showTaskStatus !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
+              </span>
+            </button>
+          )}
+
+          {/* Toggle Show/Hide Task Priority in Editor */}
+          {onToggleShowTaskPriority && (
+            <button
+              id="btn-markdown-toggle-priority"
+              type="button"
+              onClick={onToggleShowTaskPriority}
+              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
+                showTaskPriority !== false
+                  ? 'bg-rose-950/40 text-rose-300 border-rose-800/80 hover:bg-rose-900/60'
+                  : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+              }`}
+              title={
+                showTaskPriority !== false
+                  ? i18n._(msg`Ocultar prioridad (Priority:) en el editor Markdown`)
+                  : i18n._(msg`Mostrar prioridad (Priority:) en el editor Markdown`)
+              }
+              aria-label={
+                showTaskPriority !== false
+                  ? i18n._(msg`Ocultar Priority en Markdown`)
+                  : i18n._(msg`Mostrar Priority en Markdown`)
+              }
+            >
+              <span className="material-symbols-outlined text-[13px]">flag</span>
+              <span className="font-mono text-[10px] font-bold">#Prio</span>
+              <span className="hidden 2xl:inline text-[10px]">
+                {showTaskPriority !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
               </span>
             </button>
           )}
@@ -394,7 +803,11 @@ export function MarkdownSplitEditor({
           <button
             id="btn-markdown-insert-task"
             type="button"
-            onClick={() => insertText('\n- [ ] Nueva tarea\n  - Priority: P1\n')}
+            onClick={() => {
+              const nextId = generateUniqueTaskId('', value);
+              const snippet = `\n- [ ] \n  - Description: \n  - ID: ${nextId}\n  - Status: backlog\n  - Priority: P3\n`;
+              insertText(snippet, '\n- [ ] '.length);
+            }}
             className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-[var(--on-surface)] flex items-center gap-1 cursor-pointer transition-colors"
             title={i18n._(msg`Insertar nueva tarea pendiente (- [ ])`)}
           >
@@ -405,12 +818,27 @@ export function MarkdownSplitEditor({
           <button
             id="btn-markdown-insert-section"
             type="button"
-            onClick={() => insertText('\n## Nueva Sección\n\n- [ ] Tarea inicial\n  - Priority: P1\n')}
+            onClick={() => {
+              const nextId = generateUniqueTaskId('', value);
+              const snippet = `\n## Nueva Sección\n\n- [ ] \n  - Description: \n  - ID: ${nextId}\n  - Status: backlog\n  - Priority: P3\n`;
+              insertText(snippet, '\n## Nueva Sección\n\n- [ ] '.length);
+            }}
             className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-[var(--on-surface)] flex items-center gap-1 cursor-pointer transition-colors"
             title={i18n._(msg`Insertar nueva sección (## Sección)`)}
           >
             <span className="text-purple-400 font-bold">##</span>
             <span>{i18n._(msg`Sección`)}</span>
+          </button>
+
+          <button
+            id="btn-markdown-insert-comment"
+            type="button"
+            onClick={() => insertText('\n## Comentarios\n- ')}
+            className="px-2 py-1 rounded bg-[var(--surface-container)] hover:bg-[var(--surface-container-highest)] border border-[var(--outline)] text-[11px] font-mono text-amber-300 flex items-center gap-1 cursor-pointer transition-colors"
+            title={i18n._(msg`Insertar sección de comentarios / notas adhesivas (## Comentarios)`)}
+          >
+            <span className="material-symbols-outlined text-[13px]">sticky_note_2</span>
+            <span>{i18n._(msg`Comentario`)}</span>
           </button>
 
           <div id="div-markdownspliteditor-9" className="w-px h-3.5 bg-[var(--outline)] mx-1" />
@@ -443,6 +871,15 @@ export function MarkdownSplitEditor({
               title={i18n._(msg`Insertar Priority: P2 (Media)`)}
             >
               P2
+            </button>
+            <button
+              id="btn-markdown-insert-p3"
+              type="button"
+              onClick={() => insertText('  - Priority: P3\n')}
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800/80 text-slate-300 border border-slate-700/80 hover:bg-slate-700/80 cursor-pointer"
+              title={i18n._(msg`Insertar Priority: P3 (Baja)`)}
+            >
+              P3
             </button>
           </div>
 
@@ -516,6 +953,21 @@ export function MarkdownSplitEditor({
               >
                 <span className="material-symbols-outlined text-[11px]">auto_fix_high</span>
                 <span>{i18n._(msg`Generar IDs (${validationReport.missingIdTaskIds.size})`)}</span>
+              </button>
+            )}
+
+            {validationReport.missingStatusTaskIds.size > 0 && (
+              <button
+                id="btn-markdown-auto-assign-all-statuses"
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('antask:auto-assign-all-statuses'));
+                }}
+                className="px-2 py-0.5 rounded text-[10px] font-sans font-medium bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                title={i18n._(msg`Asignar estado a todas las tareas sin estado`)}
+              >
+                <span className="material-symbols-outlined text-[11px]">check_circle</span>
+                <span>{i18n._(msg`Asignar Status (${validationReport.missingStatusTaskIds.size})`)}</span>
               </button>
             )}
           </div>
@@ -602,6 +1054,24 @@ export function MarkdownSplitEditor({
                     title={i18n._(msg`Asignar ID automático a esta tarea`)}
                   >
                     <span>+ ID</span>
+                  </button>
+                )}
+                {issue.type === 'missing_status' && (
+                  <button
+                    id={`btn-issue-assign-status-${issue.id}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.dispatchEvent(
+                        new CustomEvent('antask:assign-task-status', {
+                          detail: { taskId: issue.taskId, taskTitle: issue.taskTitle },
+                        })
+                      );
+                    }}
+                    className="px-1.5 py-0.2 rounded text-[10px] font-sans font-medium bg-cyan-500/20 hover:bg-cyan-500/35 text-cyan-200 border border-cyan-500/50 cursor-pointer transition-colors flex items-center gap-0.5"
+                    title={i18n._(msg`Asignar estado obligatorio a esta tarea`)}
+                  >
+                    <span>+ Status</span>
                   </button>
                 )}
                 {issue.lineIndex !== undefined && (

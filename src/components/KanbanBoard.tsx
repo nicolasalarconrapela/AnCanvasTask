@@ -15,12 +15,14 @@ export interface KanbanTask {
   completed: boolean;
   priority: TaskPriority;
   status: TaskStatus;
+  description?: string;
   groupTitle: string;
   tags?: string[];
   subtasks?: { total: number; completed: number; items?: SubtaskItem[] };
   blockedBy?: string;
   isDuplicateId?: boolean;
   hasMissingId?: boolean;
+  hasMissingStatus?: boolean;
   unresolvedBlockers?: string[];
 }
 
@@ -33,6 +35,7 @@ export interface KanbanBoardProps {
       completed?: boolean;
       priority?: TaskPriority;
       status?: TaskStatus;
+      description?: string;
       groupTitle?: string;
     }
   ) => void;
@@ -104,6 +107,8 @@ export function KanbanBoard({
 }: KanbanBoardProps) {
   const { i18n } = useLingui();
   const showTaskIds = filters?.showTaskIds !== false;
+  const showTaskStatus = filters?.showTaskStatus !== false;
+  const showTaskPriority = filters?.showTaskPriority !== false;
   const [groupBy, setGroupBy] = useState<GroupByMode>('status');
   const [activeMobileColumn, setActiveMobileColumn] = useState<string>('todo');
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
@@ -177,13 +182,15 @@ export function KanbanBoard({
         temporaryId: b.temporaryId,
         title: b.detectedTitle,
         completed: isCompleted,
-        priority: b.detectedPriority || 'P1',
+        priority: b.detectedPriority || 'P3',
         status,
+        description: b.detectedDescription,
         groupTitle: b.groupTitle || 'General',
         tags: b.detectedTags,
         subtasks: b.detectedSubtasks,
         blockedBy: b.detectedBlockedBy,
         hasMissingId: !b.detectedId,
+        hasMissingStatus: !b.detectedStatus,
       };
     });
 
@@ -213,6 +220,7 @@ export function KanbanBoard({
           completed: t.completed,
           priority: t.priority,
           status: t.status,
+          description: t.description,
           groupTitle: t.groupTitle,
           tags: t.tags,
           blockedBy: t.blockedBy,
@@ -606,7 +614,7 @@ export function KanbanBoard({
                     <button
                       id={`btn-kanban-add-task-${col.id}`}
                       type="button"
-                      onClick={() => onOpenNewTaskModalWithGroup?.(col.label)}
+                      onClick={() => onOpenNewTaskModalWithGroup?.(col.id)}
                       className="btn-m3-icon w-6 h-6 cursor-pointer hover:text-[var(--primary)]"
                       title={i18n._(msg`Añadir tarea a ${col.label}`)}
                     >
@@ -622,7 +630,7 @@ export function KanbanBoard({
                         <button
                           id={`btn-kanban-empty-add-task-${col.id}`}
                           type="button"
-                          onClick={() => onOpenNewTaskModalWithGroup?.(col.label)}
+                          onClick={() => onOpenNewTaskModalWithGroup?.(col.id)}
                           className="text-[11px] font-medium text-[var(--primary)] hover:underline cursor-pointer flex items-center gap-0.5"
                         >
                           <span className="material-symbols-outlined text-[12px]">add</span>
@@ -634,7 +642,7 @@ export function KanbanBoard({
                         const isSelected =
                           selectedTaskId === task.taskId || selectedTaskIds.has(task.taskId);
                         const isDragging = draggedTaskId === task.taskId;
-                        const prio = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.P1;
+                        const prio = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.P3;
                         const isSearchMatch = Boolean(searchQuery.trim()) && checkTaskMatchesQuery(task, searchQuery);
 
                         return (
@@ -747,16 +755,18 @@ export function KanbanBoard({
                               </div>
 
                                 {/* Priority indicator */}
-                                <button
-                                  id={`btn-kanban-cycle-prio-${task.taskId}`}
-                                  type="button"
-                                  onClick={(e) => cyclePriority(task.taskId, task.priority, e)}
-                                  title={i18n._(msg`Clic para cambiar prioridad`)}
-                                  className={`px-1.5 py-0.5 rounded border border-[var(--outline)] bg-[var(--surface)] text-[11px] font-mono font-medium flex items-center gap-1 cursor-pointer transition-colors hover:border-[var(--on-surface-variant)] ${prio.text}`}
-                                >
-                                  <span className={`w-1.5 h-1.5 rounded-full ${prio.dot}`} />
-                                  <span>{task.priority}</span>
-                                </button>
+                                {showTaskPriority && (
+                                  <button
+                                    id={`btn-kanban-cycle-prio-${task.taskId}`}
+                                    type="button"
+                                    onClick={(e) => cyclePriority(task.taskId, task.priority, e)}
+                                    title={i18n._(msg`Clic para cambiar prioridad`)}
+                                    className={`px-1.5 py-0.5 rounded border border-[var(--outline)] bg-[var(--surface)] text-[11px] font-mono font-medium flex items-center gap-1 cursor-pointer transition-colors hover:border-[var(--on-surface-variant)] ${prio.text}`}
+                                  >
+                                    <span className={`w-1.5 h-1.5 rounded-full ${prio.dot}`} />
+                                    <span>{task.priority}</span>
+                                  </button>
+                                )}
 
                                 <button
                                   id={`btn-kanban-menu-trigger-${task.taskId}`}
@@ -842,6 +852,26 @@ export function KanbanBoard({
                                   </button>
                                 )}
 
+                                {task.hasMissingStatus && (
+                                  <button
+                                    id={`btn-kanban-menu-assign-status-${task.taskId}`}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuTaskId(null);
+                                      window.dispatchEvent(
+                                        new CustomEvent('antask:assign-task-status', {
+                                          detail: { taskId: task.taskId, taskTitle: task.title },
+                                        })
+                                      );
+                                    }}
+                                    className="px-2 py-1 rounded text-left text-cyan-300 hover:bg-[var(--surface-container-high)] flex items-center gap-2 cursor-pointer font-medium"
+                                  >
+                                    <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                                    <span>{i18n._(msg`Asignar Estado obligatorio`)}</span>
+                                  </button>
+                                )}
+
                                 <div id="div-kanbanboard-19" className="h-px bg-[var(--outline)] my-0.5" />
 
                                 <button
@@ -858,6 +888,17 @@ export function KanbanBoard({
                                   <span>{i18n._(msg`Eliminar tarea`)}</span>
                                 </button>
                               </div>
+                            )}
+
+                            {/* Optional Description */}
+                            {task.description && (
+                              <p
+                                id={`p-kanban-desc-${task.taskId}`}
+                                className="text-[11px] text-[var(--on-surface-variant)] leading-snug line-clamp-2 my-1 select-none"
+                                title={task.description}
+                              >
+                                <HighlightText text={task.description} query={searchQuery} />
+                              </p>
                             )}
 
                             {/* Subtasks Section (Option A: Checklist Integrado Compacto) */}
@@ -1257,16 +1298,29 @@ export function KanbanBoard({
                                 </span>
                               </div>
 
-                              <button
-                                id={`btn-kanban-sec-cycle-prio-${task.taskId}`}
-                                type="button"
-                                onClick={(e) => cyclePriority(task.taskId, task.priority, e)}
-                                className={`px-1.5 py-0.5 rounded border border-[var(--outline)] bg-[var(--surface)] text-[11px] font-mono font-medium flex items-center gap-1 cursor-pointer shrink-0 transition-colors hover:border-[var(--on-surface-variant)] ${prio.text}`}
-                              >
-                                <span className={`w-1.5 h-1.5 rounded-full ${prio.dot}`} />
-                                <span>{task.priority}</span>
-                              </button>
+                              {showTaskPriority && (
+                                <button
+                                  id={`btn-kanban-sec-cycle-prio-${task.taskId}`}
+                                  type="button"
+                                  onClick={(e) => cyclePriority(task.taskId, task.priority, e)}
+                                  className={`px-1.5 py-0.5 rounded border border-[var(--outline)] bg-[var(--surface)] text-[11px] font-mono font-medium flex items-center gap-1 cursor-pointer shrink-0 transition-colors hover:border-[var(--on-surface-variant)] ${prio.text}`}
+                                >
+                                  <span className={`w-1.5 h-1.5 rounded-full ${prio.dot}`} />
+                                  <span>{task.priority}</span>
+                                </button>
+                              )}
                             </div>
+
+                            {/* Optional Description */}
+                            {task.description && (
+                              <p
+                                id={`p-kanban-sec-desc-${task.taskId}`}
+                                className="text-[11px] text-[var(--on-surface-variant)] leading-snug line-clamp-2 my-1 select-none"
+                                title={task.description}
+                              >
+                                <HighlightText text={task.description} query={searchQuery} />
+                              </p>
+                            )}
 
                             <div id="div-kanbanboard-29" className="flex items-center justify-between text-xs pt-1 border-t border-[var(--outline)] mt-0.5">
                               {showTaskIds ? (
@@ -1296,9 +1350,31 @@ export function KanbanBoard({
                               ) : (
                                 <span />
                               )}
-                              <span className="text-[10px] font-mono text-[var(--on-surface-variant)] uppercase">
-                                {task.completed ? 'DONE' : task.status}
-                              </span>
+                              {showTaskStatus && (
+                                task.hasMissingStatus ? (
+                                  <button
+                                    id={`btn-kanban-sec-assign-status-${task.taskId}`}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      window.dispatchEvent(
+                                        new CustomEvent('antask:assign-task-status', {
+                                          detail: { taskId: task.taskId, taskTitle: task.title },
+                                        })
+                                      );
+                                    }}
+                                    className="flex items-center gap-0.5 text-cyan-400 hover:text-cyan-300 font-mono text-[10px] font-medium transition-colors cursor-pointer"
+                                    title={i18n._(msg`Tarea sin Estado obligatorio. Clic para asignar estado.`)}
+                                  >
+                                    <span>+ Status</span>
+                                    <span className="material-symbols-outlined text-[10px]">check_circle</span>
+                                  </button>
+                                ) : (
+                                  <span className="text-[10px] font-mono text-[var(--on-surface-variant)] uppercase">
+                                    {task.completed ? 'DONE' : task.status}
+                                  </span>
+                                )
+                              )}
                             </div>
                           </div>
                         );

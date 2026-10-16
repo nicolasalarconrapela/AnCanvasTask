@@ -37,7 +37,8 @@ export const NewFolderModal: React.FC<NewFolderModalProps> = ({
 
     const cleanDocName = docName.trim() || 'TASKS.md';
 
-    const starterContent = `# ${cleanDocName} - ${cleanFolder}\n\n## Tareas Iniciales\n- [ ] Configurar módulo ${cleanFolder}\n  id: ${cleanFolder.replace(/[^a-zA-Z0-9]/g, '_')}_init\n  priority: P0\n`;
+    const cleanId = `${cleanFolder.replace(/[^a-zA-Z0-9]/g, '-')}-init`.toLowerCase();
+    const starterContent = `# ${cleanDocName} - ${cleanFolder}\n\n## Tareas Iniciales\n- [ ] Configurar módulo ${cleanFolder}\n  - Description: Configuración inicial del módulo ${cleanFolder}\n  - ID: ${cleanId}\n  - Status: backlog\n  - Priority: P0\n`;
 
     const newDoc = createTaskDocument(cleanDocName, starterContent, cleanFolder);
 

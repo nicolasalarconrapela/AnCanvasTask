@@ -3,6 +3,7 @@ import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
 import remarkStringify from 'remark-stringify';
 import * as Diff from 'diff';
+import { sanitizeTaskMetadataOrder } from './markdownSync';
 
 export type ChangeCategory =
   | 'formato_seguro'
@@ -121,7 +122,7 @@ function postProcessCanonicalMarkdown(stringified: string, original: string): st
   let prevBlank = false;
 
   // Extract known metadata keys from original if any were indented
-  const metadataKeyRegex = /^(\s*)(id|priority|blockedBy|status|tags|description|assignee):\s*(.*)$/i;
+  const metadataKeyRegex = /^(\s*)(id|priority|blockedBy|status|tags|description|descripci[oó]n|desc|assignee):\s*(.*)$/i;
 
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
@@ -132,7 +133,9 @@ function postProcessCanonicalMarkdown(stringified: string, original: string): st
     // Standardize metadata indentation under tasks to 2 spaces
     const metaMatch = line.match(metadataKeyRegex);
     if (metaMatch) {
-      line = `  ${metaMatch[2].toLowerCase()}: ${metaMatch[3].trim()}`;
+      const rawKey = metaMatch[2].toLowerCase();
+      const normKey = /^desc/i.test(rawKey) ? 'description' : rawKey;
+      line = `  ${normKey}: ${metaMatch[3].trim()}`;
     }
 
     // Standardize task checkboxes: '- [ ]' or '- [x]'
@@ -158,7 +161,7 @@ function postProcessCanonicalMarkdown(stringified: string, original: string): st
   if (finalContent.length > 0) {
     finalContent += '\n';
   }
-  return finalContent;
+  return sanitizeTaskMetadataOrder(finalContent).updatedMarkdown;
 }
 
 /**

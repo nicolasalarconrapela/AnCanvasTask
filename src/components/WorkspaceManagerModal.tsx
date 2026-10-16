@@ -161,8 +161,8 @@ export const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
         name: 'TASKS.md',
         folder: '',
         path: 'TASKS.md',
-        content: `# ${name.trim()} - Tareas\n\n## Tareas Iniciales\n- [ ] Configurar entorno y estructura del proyecto\n  id: init_task_1\n  priority: P0\n- [ ] Definir arquitectura y tareas principales\n  id: init_task_2\n  priority: P1\n`,
-        lastSavedContent: `# ${name.trim()} - Tareas\n\n## Tareas Iniciales\n- [ ] Configurar entorno y estructura del proyecto\n  id: init_task_1\n  priority: P0\n- [ ] Definir arquitectura y tareas principales\n  id: init_task_2\n  priority: P1\n`,
+        content: `# ${name.trim()} - Tareas\n\n## Tareas Iniciales\n- [ ] Configurar entorno y estructura del proyecto\n  id: init_task_1\n  priority: P0\n- [ ] Definir arquitectura y tareas principales\n  id: init_task_2\n  priority: P3\n`,
+        lastSavedContent: `# ${name.trim()} - Tareas\n\n## Tareas Iniciales\n- [ ] Configurar entorno y estructura del proyecto\n  id: init_task_1\n  priority: P0\n- [ ] Definir arquitectura y tareas principales\n  id: init_task_2\n  priority: P3\n`,
         updatedAt: new Date().toISOString(),
       },
     ];
