@@ -241,8 +241,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   const priorityStyles: Record<TaskPriority, string> = {
     P0: 'text-rose-400 bg-rose-950/40 border-rose-800/60',
-    P1: 'text-amber-400 bg-amber-950/40 border-amber-800/60',
-    P2: 'text-sky-400 bg-sky-950/40 border-sky-800/60',
+    P1: 'text-orange-400 bg-orange-950/40 border-orange-800/60',
+    P2: 'text-amber-400 bg-amber-950/40 border-amber-800/60',
     P3: 'text-zinc-400 bg-zinc-800/40 border-zinc-700/60',
   };
 

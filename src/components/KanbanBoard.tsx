@@ -82,8 +82,8 @@ const STATUS_COLUMNS: StatusColumnConfig[] = [
 
 const PRIORITY_CONFIG: Record<TaskPriority, { label: string; dot: string; text: string }> = {
   P0: { label: 'P0 · Critical', dot: 'bg-rose-500', text: 'text-rose-400' },
-  P1: { label: 'P1 · High', dot: 'bg-amber-500', text: 'text-amber-400' },
-  P2: { label: 'P2 · Medium', dot: 'bg-blue-500', text: 'text-blue-400' },
+  P1: { label: 'P1 · High', dot: 'bg-orange-500', text: 'text-orange-400' },
+  P2: { label: 'P2 · Medium', dot: 'bg-amber-500', text: 'text-amber-400' },
   P3: { label: 'P3 · Low', dot: 'bg-zinc-500', text: 'text-zinc-400' },
 };
 

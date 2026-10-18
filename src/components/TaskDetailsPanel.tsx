@@ -241,8 +241,8 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
 
   const priorityOptions: Array<{ id: TaskPriority; label: string; desc: string; text: string; bg: string; border: string }> = [
     { id: 'P0', label: i18n._(msg`P0 · Crítica`), desc: i18n._(msg`Urgente`), text: 'text-rose-400', bg: 'bg-rose-950/40', border: 'border-rose-800/60' },
-    { id: 'P1', label: i18n._(msg`P1 · Alta`), desc: i18n._(msg`Alta`), text: 'text-amber-400', bg: 'bg-amber-950/40', border: 'border-amber-800/60' },
-    { id: 'P2', label: i18n._(msg`P2 · Media`), desc: i18n._(msg`Media`), text: 'text-sky-400', bg: 'bg-sky-950/40', border: 'border-sky-800/60' },
+    { id: 'P1', label: i18n._(msg`P1 · Alta`), desc: i18n._(msg`Alta`), text: 'text-orange-400', bg: 'bg-orange-950/40', border: 'border-orange-800/60' },
+    { id: 'P2', label: i18n._(msg`P2 · Media`), desc: i18n._(msg`Media`), text: 'text-amber-400', bg: 'bg-amber-950/40', border: 'border-amber-800/60' },
     { id: 'P3', label: i18n._(msg`P3 · Baja`), desc: i18n._(msg`Baja`), text: 'text-zinc-400', bg: 'bg-zinc-800/40', border: 'border-zinc-700/60' },
   ];
 

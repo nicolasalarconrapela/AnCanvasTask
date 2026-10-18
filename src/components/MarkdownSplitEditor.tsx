@@ -38,9 +38,9 @@ export function getPriorityBadgeClasses(labelOrRaw: string): string {
     case 'P0':
       return 'bg-rose-500/10 text-rose-500 border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80';
     case 'P1':
-      return 'bg-amber-500/10 text-amber-600 border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80';
+      return 'bg-orange-500/10 text-orange-600 border-orange-500/30 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800/80';
     case 'P2':
-      return 'bg-sky-500/10 text-sky-600 border-sky-500/30 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800/80';
+      return 'bg-amber-500/10 text-amber-600 border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80';
     case 'P3':
     default:
       return 'bg-zinc-500/10 text-zinc-600 border-zinc-500/30 dark:bg-zinc-800/40 dark:text-zinc-300 dark:border-zinc-700/60';
