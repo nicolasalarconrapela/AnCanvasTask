@@ -445,8 +445,8 @@ function TaskCardComponent({
 
   const priorityConfig: Record<TaskPriority, { label: string; dot: string; text: string }> = {
     P0: { label: _(msg`P0 · Crítica`), dot: 'bg-rose-500', text: 'text-rose-400' },
-    P1: { label: _(msg`P1 · Alta`), dot: 'bg-amber-500', text: 'text-amber-400' },
-    P2: { label: _(msg`P2 · Media`), dot: 'bg-blue-500', text: 'text-blue-400' },
+    P1: { label: _(msg`P1 · Alta`), dot: 'bg-orange-500', text: 'text-orange-400' },
+    P2: { label: _(msg`P2 · Media`), dot: 'bg-amber-500', text: 'text-amber-400' },
     P3: { label: _(msg`P3 · Baja`), dot: 'bg-zinc-500', text: 'text-zinc-400' },
   };
 

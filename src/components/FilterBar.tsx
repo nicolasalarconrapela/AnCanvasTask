@@ -17,6 +17,12 @@ export interface TaskFilterState {
   showTaskIds?: boolean;
   showTaskStatus?: boolean;
   showTaskPriority?: boolean;
+  showHiddenItemLabels?: boolean;
+  hiddenItemLabelTypes?: {
+    id: boolean;
+    status: boolean;
+    priority: boolean;
+  };
 }
 
 interface FilterBarProps {
@@ -42,6 +48,7 @@ interface FilterBarProps {
   onToggleShowIds?: () => void;
   onToggleShowStatus?: () => void;
   onToggleShowPriority?: () => void;
+  onToggleShowHiddenLabels?: () => void;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -67,6 +74,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onToggleShowIds,
   onToggleShowStatus,
   onToggleShowPriority,
+  onToggleShowHiddenLabels,
 }) => {
   const { i18n } = useLingui();
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
@@ -338,6 +346,26 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                       />
                       <span className="text-xs text-[var(--on-surface)] font-medium">
                         {i18n._(msg`Mostrar prioridad (Priority)`)}
+                      </span>
+                    </label>
+
+                    {/* 9. Mostrar etiquetas de items ocultos */}
+                    <label className="flex items-center gap-2 cursor-pointer pt-0.5">
+                      <input
+                        type="checkbox"
+                        id="checkbox-filter-show-hidden-labels"
+                        checked={filters.showHiddenItemLabels !== false}
+                        onChange={(e) => {
+                          if (onToggleShowHiddenLabels) {
+                            onToggleShowHiddenLabels();
+                          } else {
+                            onFilterChange({ ...filters, showHiddenItemLabels: e.target.checked });
+                          }
+                        }}
+                        className="w-3.5 h-3.5 rounded text-[var(--primary)] focus:ring-0 cursor-pointer"
+                      />
+                      <span className="text-xs text-[var(--on-surface)] font-medium">
+                        {i18n._(msg`Mostrar etiquetas de items ocultos`)}
                       </span>
                     </label>
 
@@ -731,6 +759,24 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 }}
                 className="text-[var(--on-surface-variant)] hover:text-emerald-400 cursor-pointer font-bold"
                 title={i18n._(msg`Mostrar prioridad (Priority)`)}
+              >
+                ×
+              </button>
+            </span>
+          )}
+
+          {filters.showHiddenItemLabels === false && (
+            <span className="px-2 py-0.5 rounded bg-[var(--surface)] border border-[var(--outline)] text-[11px] text-[var(--on-surface-variant)] font-medium flex items-center gap-1">
+              <span>{i18n._(msg`Etiquetas de items ocultas`)}</span>
+              <button
+                id="btn-chip-restore-hidden-labels"
+                type="button"
+                onClick={() => {
+                  if (onToggleShowHiddenLabels) onToggleShowHiddenLabels();
+                  else onFilterChange({ ...filters, showHiddenItemLabels: true });
+                }}
+                className="text-[var(--on-surface-variant)] hover:text-emerald-400 cursor-pointer font-bold"
+                title={i18n._(msg`Mostrar etiquetas de items ocultos`)}
               >
                 ×
               </button>

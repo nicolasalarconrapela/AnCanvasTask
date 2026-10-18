@@ -350,6 +350,7 @@ export default function App() {
     showTaskIds: userSettings.showTaskIds ?? true,
     showTaskStatus: userSettings.showTaskStatus ?? true,
     showTaskPriority: userSettings.showTaskPriority ?? true,
+    showHiddenItemLabels: userSettings.showHiddenItemLabels ?? true,
   }));
 
   // Sync React taskFilters state into global filter store for canvas shapes & listeners
@@ -365,6 +366,7 @@ export default function App() {
       showTaskIds: newSettings.showTaskIds ?? prev.showTaskIds,
       showTaskStatus: newSettings.showTaskStatus ?? prev.showTaskStatus,
       showTaskPriority: newSettings.showTaskPriority ?? prev.showTaskPriority,
+      showHiddenItemLabels: newSettings.showHiddenItemLabels ?? prev.showHiddenItemLabels,
     }));
   }, []);
 
@@ -404,6 +406,32 @@ export default function App() {
     });
   }, []);
 
+  const handleToggleShowHiddenItemLabels = useCallback(() => {
+    setTaskFilters((prev) => {
+      const nextShow = prev.showHiddenItemLabels === false ? true : false;
+      setUserSettings((currSettings) => {
+        const updated = { ...currSettings, showHiddenItemLabels: nextShow };
+        saveUserSettings(updated);
+        return updated;
+      });
+      return { ...prev, showHiddenItemLabels: nextShow };
+    });
+  }, []);
+
+  const handleChangeHiddenItemLabelTypes = useCallback(
+    (types: { id: boolean; status: boolean; priority: boolean }) => {
+      setTaskFilters((prev) => {
+        setUserSettings((currSettings) => {
+          const updated = { ...currSettings, hiddenItemLabelTypes: types };
+          saveUserSettings(updated);
+          return updated;
+        });
+        return { ...prev, hiddenItemLabelTypes: types };
+      });
+    },
+    []
+  );
+
   useEffect(() => {
     const handleToggleIdsEvent = () => {
       handleToggleShowTaskIds();
@@ -414,17 +442,30 @@ export default function App() {
     const handleTogglePriorityEvent = () => {
       handleToggleShowTaskPriority();
     };
+    const handleToggleHiddenLabelsEvent = () => {
+      handleToggleShowHiddenItemLabels();
+    };
+    const handleSetHiddenLabelTypesEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ id: boolean; status: boolean; priority: boolean }>;
+      if (custom.detail) {
+        handleChangeHiddenItemLabelTypes(custom.detail);
+      }
+    };
 
     window.addEventListener('antask:toggle-show-ids', handleToggleIdsEvent);
     window.addEventListener('antask:toggle-show-status', handleToggleStatusEvent);
     window.addEventListener('antask:toggle-show-priority', handleTogglePriorityEvent);
+    window.addEventListener('antask:toggle-show-hidden-labels', handleToggleHiddenLabelsEvent);
+    window.addEventListener('antask:set-hidden-label-types', handleSetHiddenLabelTypesEvent);
 
     return () => {
       window.removeEventListener('antask:toggle-show-ids', handleToggleIdsEvent);
       window.removeEventListener('antask:toggle-show-status', handleToggleStatusEvent);
       window.removeEventListener('antask:toggle-show-priority', handleTogglePriorityEvent);
+      window.removeEventListener('antask:toggle-show-hidden-labels', handleToggleHiddenLabelsEvent);
+      window.removeEventListener('antask:set-hidden-label-types', handleSetHiddenLabelTypesEvent);
     };
-  }, [handleToggleShowTaskIds, handleToggleShowTaskStatus, handleToggleShowTaskPriority]);
+  }, [handleToggleShowTaskIds, handleToggleShowTaskStatus, handleToggleShowTaskPriority, handleToggleShowHiddenItemLabels, handleChangeHiddenItemLabelTypes]);
 
   // Command Palette & Recent Tasks State (DESIGN.md Section 12 & 15)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
@@ -4568,6 +4609,18 @@ export default function App() {
         },
       },
       {
+        id: 'toggle-show-hidden-labels',
+        title:
+          taskFilters.showHiddenItemLabels === false
+            ? 'Mostrar etiquetas de items ocultos en Markdown'
+            : 'Ocultar etiquetas de items ocultos en Markdown',
+        icon: 'label',
+        category: 'action',
+        perform: () => {
+          handleToggleShowHiddenItemLabels();
+        },
+      },
+      {
         id: 'open-settings',
         title: 'Abrir configuración y preferencias',
         shortcut: '⌘,',
@@ -5614,12 +5667,14 @@ export default function App() {
                 showTaskIds: userSettings.showTaskIds ?? true,
                 showTaskStatus: userSettings.showTaskStatus ?? true,
                 showTaskPriority: userSettings.showTaskPriority ?? true,
+                showHiddenItemLabels: userSettings.showHiddenItemLabels ?? true,
               });
               setActiveFilter('all');
             }}
             onToggleShowIds={handleToggleShowTaskIds}
             onToggleShowStatus={handleToggleShowTaskStatus}
             onToggleShowPriority={handleToggleShowTaskPriority}
+            onToggleShowHiddenLabels={handleToggleShowHiddenItemLabels}
             searchQuery={searchQuery}
             onSearchChange={(q) => setSearchQuery(q)}
             availableSections={existingSections}
@@ -6226,6 +6281,10 @@ export default function App() {
                   onToggleShowTaskStatus={handleToggleShowTaskStatus}
                   showTaskPriority={taskFilters.showTaskPriority}
                   onToggleShowTaskPriority={handleToggleShowTaskPriority}
+                  showHiddenItemLabels={taskFilters.showHiddenItemLabels}
+                  onToggleShowHiddenItemLabels={handleToggleShowHiddenItemLabels}
+                  hiddenItemLabelTypes={taskFilters.hiddenItemLabelTypes}
+                  onChangeHiddenItemLabelTypes={handleChangeHiddenItemLabelTypes}
                 />
               </div>
             )}

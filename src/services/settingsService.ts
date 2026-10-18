@@ -23,6 +23,12 @@ export interface AppUserSettings {
   showTaskIds: boolean;
   showTaskStatus: boolean;
   showTaskPriority: boolean;
+  showHiddenItemLabels: boolean;
+  hiddenItemLabelTypes?: {
+    id: boolean;
+    status: boolean;
+    priority: boolean;
+  };
   workspaceShowSidebar: boolean;
   kanbanDefaultGroupBy: 'status' | 'section';
   kanbanShowTags: boolean;
@@ -46,6 +52,12 @@ export const DEFAULT_USER_SETTINGS: AppUserSettings = {
   showTaskIds: true,
   showTaskStatus: true,
   showTaskPriority: true,
+  showHiddenItemLabels: true,
+  hiddenItemLabelTypes: {
+    id: true,
+    status: true,
+    priority: true,
+  },
   workspaceShowSidebar: true,
   kanbanDefaultGroupBy: 'status',
   kanbanShowTags: true,
@@ -70,6 +82,12 @@ export function loadUserSettings(): AppUserSettings {
       showTaskIds: parsed.showTaskIds !== undefined ? Boolean(parsed.showTaskIds) : DEFAULT_USER_SETTINGS.showTaskIds,
       showTaskStatus: parsed.showTaskStatus !== undefined ? Boolean(parsed.showTaskStatus) : DEFAULT_USER_SETTINGS.showTaskStatus,
       showTaskPriority: parsed.showTaskPriority !== undefined ? Boolean(parsed.showTaskPriority) : DEFAULT_USER_SETTINGS.showTaskPriority,
+      showHiddenItemLabels: parsed.showHiddenItemLabels !== undefined ? Boolean(parsed.showHiddenItemLabels) : DEFAULT_USER_SETTINGS.showHiddenItemLabels,
+      hiddenItemLabelTypes: {
+        id: parsed.hiddenItemLabelTypes?.id !== undefined ? Boolean(parsed.hiddenItemLabelTypes.id) : true,
+        status: parsed.hiddenItemLabelTypes?.status !== undefined ? Boolean(parsed.hiddenItemLabelTypes.status) : true,
+        priority: parsed.hiddenItemLabelTypes?.priority !== undefined ? Boolean(parsed.hiddenItemLabelTypes.priority) : true,
+      },
       recentFiles: Array.isArray(parsed.recentFiles) ? parsed.recentFiles : DEFAULT_USER_SETTINGS.recentFiles,
     };
   } catch (e) {

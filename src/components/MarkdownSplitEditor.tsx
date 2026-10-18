@@ -25,6 +25,201 @@ import {
 } from '../utils/markdownSync';
 import { SafeMarkdownNormalizerModal } from './SafeMarkdownNormalizerModal';
 
+export interface HiddenTaskItemInfo {
+  type: 'id' | 'status' | 'priority' | 'metadata';
+  label: string;
+  rawText: string;
+}
+
+export function getPriorityBadgeClasses(labelOrRaw: string): string {
+  const match = labelOrRaw.match(/Priority\s*:\s*(P[0-3])/i) || labelOrRaw.match(/\b(P[0-3])\b/i);
+  const p = match ? match[1].toUpperCase() : 'P3';
+  switch (p) {
+    case 'P0':
+      return 'bg-rose-500/10 text-rose-500 border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80';
+    case 'P1':
+      return 'bg-orange-500/10 text-orange-600 border-orange-500/30 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800/80';
+    case 'P2':
+      return 'bg-amber-500/10 text-amber-600 border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80';
+    case 'P3':
+    default:
+      return 'bg-zinc-500/10 text-zinc-600 border-zinc-500/30 dark:bg-zinc-800/40 dark:text-zinc-300 dark:border-zinc-700/60';
+  }
+}
+
+export class InlineHiddenTaskLabelsWidget extends WidgetType {
+  constructor(
+    readonly items: HiddenTaskItemInfo[],
+    readonly onToggleLabels?: () => void
+  ) {
+    super();
+  }
+
+  toDOM(): HTMLElement {
+    const wrap = document.createElement('span');
+    wrap.className =
+      'cm-inline-task-labels inline-flex items-center gap-1 ml-1.5 align-middle select-none';
+
+    for (const item of this.items) {
+      const badge = document.createElement('span');
+      badge.className =
+        'inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none border transition-colors ' +
+        (item.type === 'id'
+          ? 'bg-slate-500/10 text-slate-600 border-slate-400/30 dark:bg-slate-800/40 dark:text-slate-300 dark:border-slate-700/60'
+          : item.type === 'status'
+          ? 'bg-sky-100/50 text-sky-900 border-sky-200/80 dark:bg-sky-950/30 dark:text-sky-200/90 dark:border-sky-700/40'
+          : item.type === 'priority'
+          ? getPriorityBadgeClasses(item.rawText || item.label)
+          : 'bg-stone-100/60 text-stone-700 border-stone-200 dark:bg-stone-900/40 dark:text-stone-300 dark:border-stone-800');
+      badge.style.fontSize = '8px';
+      badge.style.padding = '1px 3px';
+      badge.style.lineHeight = '1';
+      badge.style.borderRadius = '3px';
+
+      // Subtle Icon
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-outlined text-[8.5px] opacity-70 shrink-0';
+      icon.style.fontSize = '8.5px';
+      icon.style.lineHeight = '1';
+      icon.textContent =
+        item.type === 'id'
+          ? 'tag'
+          : item.type === 'status'
+          ? 'check_circle'
+          : item.type === 'priority'
+          ? 'flag'
+          : 'label';
+      badge.appendChild(icon);
+
+      // Label Text: e.g. "ID: auth-01", "Status: todo", "Priority: P1"
+      const text = document.createElement('span');
+      text.className = 'font-medium tracking-tight';
+      text.style.fontSize = '8px';
+      text.style.lineHeight = '1';
+      text.textContent = item.label;
+      badge.appendChild(text);
+
+      wrap.appendChild(badge);
+    }
+
+    return wrap;
+  }
+
+  eq(other: InlineHiddenTaskLabelsWidget): boolean {
+    if (this.items.length !== other.items.length) return false;
+    return this.items.every(
+      (it, i) => it.label === other.items[i].label && it.type === other.items[i].type
+    );
+  }
+}
+
+// Backwards compatibility alias
+export const HiddenItemWidget = InlineHiddenTaskLabelsWidget;
+
+export interface HideTaskMetadataOptions {
+  hideIds: boolean;
+  hideStatus: boolean;
+  hidePriority: boolean;
+  showLabels: boolean;
+  labelTypes?: {
+    id?: boolean;
+    status?: boolean;
+    priority?: boolean;
+  };
+  onToggleLabels?: () => void;
+}
+
+export function buildHideTaskMetadataDeco(
+  state: EditorState,
+  opts: HideTaskMetadataOptions
+): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  let l = 1;
+  while (l <= state.doc.lines) {
+    const line = state.doc.line(l);
+    const isTaskRoot = /^(\s*)[-*+]\s*\[([ xX])\]/.test(line.text);
+    if (isTaskRoot) {
+      const taskLine = line;
+      const hiddenItems: HiddenTaskItemInfo[] = [];
+      const hiddenRanges: Array<{ from: number; to: number }> = [];
+      let subL = l + 1;
+      while (subL <= state.doc.lines) {
+        const subLine = state.doc.line(subL);
+        const subText = subLine.text;
+        if (
+          subText.trim().length === 0 ||
+          /^(\s*)[-*+]\s*\[([ xX])\]/.test(subText) ||
+          subText.startsWith('#')
+        ) {
+          break;
+        }
+        let type: 'id' | 'status' | 'priority' | null = null;
+        if (opts.hideIds && isTaskIdLine(subText)) type = 'id';
+        else if (opts.hideStatus && isTaskStatusLine(subText)) type = 'status';
+        else if (opts.hidePriority && isTaskPriorityLine(subText)) type = 'priority';
+
+        if (type) {
+          const isLabelAllowed =
+            opts.showLabels &&
+            (opts.labelTypes ? opts.labelTypes[type] !== false : true);
+          if (isLabelAllowed) {
+            const cleanLabel = subText.trim().replace(/^[-*]\s*/, '');
+            hiddenItems.push({ type, label: cleanLabel, rawText: subText });
+          }
+          const lFrom = subLine.from;
+          const lTo = subL < state.doc.lines ? subLine.to + 1 : subLine.to;
+          hiddenRanges.push({ from: lFrom, to: lTo });
+        }
+        subL++;
+      }
+
+      if (opts.showLabels && hiddenItems.length > 0) {
+        builder.add(
+          taskLine.to,
+          taskLine.to,
+          Decoration.widget({
+            widget: new InlineHiddenTaskLabelsWidget(hiddenItems, opts.onToggleLabels),
+            side: 1,
+          })
+        );
+      }
+
+      for (const r of hiddenRanges) {
+        builder.add(r.from, r.to, Decoration.replace({ block: true }));
+      }
+
+      l = subL;
+    } else {
+      let type: 'id' | 'status' | 'priority' | null = null;
+      if (opts.hideIds && isTaskIdLine(line.text)) type = 'id';
+      else if (opts.hideStatus && isTaskStatusLine(line.text)) type = 'status';
+      else if (opts.hidePriority && isTaskPriorityLine(line.text)) type = 'priority';
+      if (type) {
+        const lFrom = line.from;
+        const lTo = l < state.doc.lines ? line.to + 1 : line.to;
+        builder.add(lFrom, lTo, Decoration.replace({ block: true }));
+      }
+      l++;
+    }
+  }
+  return builder.finish();
+}
+
+export function createHideTaskMetadataExtension(opts: HideTaskMetadataOptions): Extension {
+  return StateField.define<DecorationSet>({
+    create(state) {
+      return buildHideTaskMetadataDeco(state, opts);
+    },
+    update(decorations, tr) {
+      if (tr.docChanged) {
+        return buildHideTaskMetadataDeco(tr.state, opts);
+      }
+      return decorations.map(tr.changes);
+    },
+    provide: (field) => EditorView.decorations.from(field),
+  });
+}
+
 function buildHideTaskIdsDeco(state: EditorState): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (let l = 1; l <= state.doc.lines; l++) {
@@ -345,6 +540,10 @@ interface MarkdownSplitEditorProps {
   onToggleShowTaskStatus?: () => void;
   showTaskPriority?: boolean;
   onToggleShowTaskPriority?: () => void;
+  showHiddenItemLabels?: boolean;
+  onToggleShowHiddenItemLabels?: () => void;
+  hiddenItemLabelTypes?: { id: boolean; status: boolean; priority: boolean };
+  onChangeHiddenItemLabelTypes?: (types: { id: boolean; status: boolean; priority: boolean }) => void;
 }
 
 export function MarkdownSplitEditor({
@@ -364,6 +563,10 @@ export function MarkdownSplitEditor({
   onToggleShowTaskStatus,
   showTaskPriority,
   onToggleShowTaskPriority,
+  showHiddenItemLabels,
+  onToggleShowHiddenItemLabels,
+  hiddenItemLabelTypes,
+  onChangeHiddenItemLabelTypes,
 }: MarkdownSplitEditorProps) {
   const { i18n } = useLingui();
   const editorRef = useRef<ReactCodeMirrorRef>(null);
@@ -373,6 +576,96 @@ export function MarkdownSplitEditor({
   const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
   const [isTyping, setIsTyping] = useState(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [localShowHiddenLabels, setLocalShowHiddenLabels] = useState(true);
+  const showHiddenLabels = showHiddenItemLabels !== undefined ? showHiddenItemLabels : localShowHiddenLabels;
+  const handleToggleHiddenLabels = useCallback(() => {
+    if (onToggleShowHiddenItemLabels) {
+      onToggleShowHiddenItemLabels();
+    } else {
+      setLocalShowHiddenLabels((prev) => !prev);
+    }
+  }, [onToggleShowHiddenItemLabels]);
+
+  const [localLabelTypes, setLocalLabelTypes] = useState<{ id: boolean; status: boolean; priority: boolean }>({
+    id: true,
+    status: true,
+    priority: true,
+  });
+
+  const effectiveLabelTypes = useMemo(() => ({
+    id: hiddenItemLabelTypes?.id !== undefined ? hiddenItemLabelTypes.id : localLabelTypes.id,
+    status: hiddenItemLabelTypes?.status !== undefined ? hiddenItemLabelTypes.status : localLabelTypes.status,
+    priority: hiddenItemLabelTypes?.priority !== undefined ? hiddenItemLabelTypes.priority : localLabelTypes.priority,
+  }), [hiddenItemLabelTypes, localLabelTypes]);
+
+  const [isLabelsDropdownOpen, setIsLabelsDropdownOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
+  const labelsDropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleToggleLabelsDropdown = useCallback(() => {
+    setIsLabelsDropdownOpen((prev) => {
+      const next = !prev;
+      if (next && labelsDropdownRef.current) {
+        const rect = labelsDropdownRef.current.getBoundingClientRect();
+        setDropdownPos({
+          top: rect.bottom + 4,
+          right: Math.max(8, window.innerWidth - rect.right),
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isLabelsDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const menuEl = document.getElementById('menu-markdown-hidden-labels-dropdown');
+      if (
+        labelsDropdownRef.current &&
+        !labelsDropdownRef.current.contains(target) &&
+        (!menuEl || !menuEl.contains(target))
+      ) {
+        setIsLabelsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isLabelsDropdownOpen]);
+
+  const handleToggleLabelType = useCallback(
+    (type: 'id' | 'status' | 'priority') => {
+      const next = {
+        ...effectiveLabelTypes,
+        [type]: !effectiveLabelTypes[type],
+      };
+      if (onChangeHiddenItemLabelTypes) {
+        onChangeHiddenItemLabelTypes(next);
+      } else {
+        setLocalLabelTypes(next);
+      }
+      if (!effectiveLabelTypes[type] && showHiddenLabels === false && onToggleShowHiddenItemLabels) {
+        onToggleShowHiddenItemLabels();
+      }
+    },
+    [effectiveLabelTypes, onChangeHiddenItemLabelTypes, showHiddenLabels, onToggleShowHiddenItemLabels]
+  );
+
+  const handleSetAllLabelTypes = useCallback(
+    (enabled: boolean) => {
+      const next = { id: enabled, status: enabled, priority: enabled };
+      if (onChangeHiddenItemLabelTypes) {
+        onChangeHiddenItemLabelTypes(next);
+      } else {
+        setLocalLabelTypes(next);
+      }
+      if (enabled && showHiddenLabels === false && onToggleShowHiddenItemLabels) {
+        onToggleShowHiddenItemLabels();
+      }
+    },
+    [onChangeHiddenItemLabelTypes, showHiddenLabels, onToggleShowHiddenItemLabels]
+  );
 
   // Apply remote changes before the controlled editor replaces its whole value.
   // CodeMirror maps the cursor through these edits and excludes them from undo.
@@ -552,17 +845,30 @@ export function MarkdownSplitEditor({
       cursorTrackerPlugin,
       EditorView.lineWrapping,
     ];
-    if (showTaskIds === false) {
-      exts.push(hideTaskIdsExtension);
-    }
-    if (showTaskStatus === false) {
-      exts.push(hideTaskStatusExtension);
-    }
-    if (showTaskPriority === false) {
-      exts.push(hideTaskPriorityExtension);
+    const hasHiddenFields = showTaskIds === false || showTaskStatus === false || showTaskPriority === false;
+    if (hasHiddenFields) {
+      exts.push(
+        createHideTaskMetadataExtension({
+          hideIds: showTaskIds === false,
+          hideStatus: showTaskStatus === false,
+          hidePriority: showTaskPriority === false,
+          showLabels: showHiddenLabels !== false,
+          labelTypes: effectiveLabelTypes,
+          onToggleLabels: handleToggleHiddenLabels,
+        })
+      );
     }
     return exts;
-  }, [enterTaskSnippetExt, cursorTrackerPlugin, showTaskIds, showTaskStatus, showTaskPriority]);
+  }, [
+    enterTaskSnippetExt,
+    cursorTrackerPlugin,
+    showTaskIds,
+    showTaskStatus,
+    showTaskPriority,
+    showHiddenLabels,
+    effectiveLabelTypes,
+    handleToggleHiddenLabels,
+  ]);
 
   return (
     <aside
@@ -662,7 +968,7 @@ export function MarkdownSplitEditor({
             aria-label={i18n._(msg`Sanitizar orden`)}
           >
             <span className="material-symbols-outlined text-[14px] text-indigo-400">low_priority</span>
-            <span className="hidden sm:inline">{i18n._(msg`Sanitizar orden`)}</span>
+            <span className="hidden lg:inline">{i18n._(msg`Sanitizar`)}</span>
           </button>
 
           {/* Toggle Show/Hide Task IDs in Editor */}
@@ -673,7 +979,7 @@ export function MarkdownSplitEditor({
               onClick={onToggleShowTaskIds}
               className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
                 showTaskIds !== false
-                  ? 'bg-amber-950/40 text-amber-300 border-amber-800/80 hover:bg-amber-900/60'
+                  ? 'bg-slate-800/40 text-slate-300 border-slate-700/80 hover:bg-slate-800/60'
                   : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
               }`}
               title={
@@ -689,9 +995,6 @@ export function MarkdownSplitEditor({
             >
               <span className="material-symbols-outlined text-[13px]">tag</span>
               <span className="font-mono text-[10px] font-bold">#ID</span>
-              <span className="hidden 2xl:inline text-[10px]">
-                {showTaskIds !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
-              </span>
             </button>
           )}
 
@@ -719,9 +1022,6 @@ export function MarkdownSplitEditor({
             >
               <span className="material-symbols-outlined text-[13px]">check_circle</span>
               <span className="font-mono text-[10px] font-bold">#Status</span>
-              <span className="hidden 2xl:inline text-[10px]">
-                {showTaskStatus !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
-              </span>
             </button>
           )}
 
@@ -749,10 +1049,268 @@ export function MarkdownSplitEditor({
             >
               <span className="material-symbols-outlined text-[13px]">flag</span>
               <span className="font-mono text-[10px] font-bold">#Prio</span>
-              <span className="hidden 2xl:inline text-[10px]">
-                {showTaskPriority !== false ? i18n._(msg`Visible`) : i18n._(msg`Oculto`)}
-              </span>
             </button>
+          )}
+
+          {/* Dropdown to select which hidden item labels to show */}
+          {(showTaskIds === false || showTaskStatus === false || showTaskPriority === false) && (
+            <div className="relative shrink-0" ref={labelsDropdownRef}>
+              <button
+                id="btn-markdown-toggle-hidden-labels"
+                type="button"
+                onClick={handleToggleLabelsDropdown}
+                className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
+                  showHiddenLabels && (effectiveLabelTypes.id || effectiveLabelTypes.status || effectiveLabelTypes.priority)
+                    ? 'bg-sky-950/40 text-sky-300 border-sky-800/80 hover:bg-sky-900/60'
+                    : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+                }`}
+                title={i18n._(msg`Elegir qué etiquetas mostrar para items ocultos`)}
+                aria-label={i18n._(msg`Elegir etiquetas de items ocultos`)}
+                aria-expanded={isLabelsDropdownOpen}
+                aria-haspopup="true"
+              >
+                <span className="material-symbols-outlined text-[13px]">
+                  {showHiddenLabels && (effectiveLabelTypes.id || effectiveLabelTypes.status || effectiveLabelTypes.priority)
+                    ? 'visibility'
+                    : 'visibility_off'}
+                </span>
+                <span className="font-mono text-[10px] font-bold">Labels</span>
+                <span className="material-symbols-outlined text-[12px] opacity-75">
+                  {isLabelsDropdownOpen ? 'expand_less' : 'expand_more'}
+                </span>
+              </button>
+
+              {isLabelsDropdownOpen && (
+                <div
+                  id="menu-markdown-hidden-labels-dropdown"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'fixed',
+                    top: `${dropdownPos.top}px`,
+                    right: `${dropdownPos.right}px`,
+                    zIndex: 9999,
+                  }}
+                  className="w-72 bg-[var(--surface-container-high)] border border-[var(--outline)] rounded-md shadow-xl p-2 flex flex-col gap-1.5 text-xs select-none"
+                >
+                  <div className="flex items-center justify-between pb-1 border-b border-[var(--outline)]">
+                    <span className="font-semibold text-[var(--on-surface)] text-[11px] flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[13px] text-[var(--primary)]">label</span>
+                      <span>{i18n._(msg`Mostrar etiquetas de:`)}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsLabelsDropdownOpen(false)}
+                      className="text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] text-[12px] p-0.5 rounded cursor-pointer leading-none"
+                      title={i18n._(msg`Cerrar`)}
+                      aria-label={i18n._(msg`Cerrar menú`)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* ID Option */}
+                  <label
+                    id="label-opt-hidden-id"
+                    className={`flex items-center justify-between px-2 py-1.5 rounded border transition-all cursor-pointer ${
+                      effectiveLabelTypes.id
+                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/35 text-[var(--on-surface)] shadow-2xs'
+                        : 'border-transparent text-[var(--on-surface-variant)] opacity-75 hover:opacity-100 hover:bg-[var(--surface-container)]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={effectiveLabelTypes.id}
+                        onChange={() => handleToggleLabelType('id')}
+                        className="sr-only"
+                      />
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-all shrink-0 ${
+                          effectiveLabelTypes.id
+                            ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)] shadow-2xs'
+                            : 'bg-[var(--surface)] border-[var(--outline)] hover:border-[var(--primary)]'
+                        }`}
+                      >
+                        {effectiveLabelTypes.id && (
+                          <svg className="w-2.5 h-2.5 stroke-current stroke-[3]" fill="none" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-slate-500/10 text-slate-600 border border-slate-400/30 dark:bg-slate-800/40 dark:text-slate-300 dark:border-slate-700/60 shrink-0 transition-opacity ${
+                          effectiveLabelTypes.id ? 'opacity-100' : 'opacity-40 grayscale'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[8.5px]">tag</span>
+                        <span>ID</span>
+                      </span>
+                      <span className={`text-[11px] truncate transition-colors ${effectiveLabelTypes.id ? 'font-medium text-[var(--on-surface)]' : 'text-[var(--on-surface-variant)]'}`}>
+                        {i18n._(msg`Identificador`)}
+                      </span>
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
+                      {showTaskIds !== false && (
+                        <span className="text-[9px] text-[var(--on-surface-variant)] italic">
+                          ({i18n._(msg`no oculto`)})
+                        </span>
+                      )}
+                      {effectiveLabelTypes.id ? (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
+                          <span className="material-symbols-outlined text-[10px]">check</span>
+                          <span>{i18n._(msg`Activo`)}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-[var(--surface-container-highest)]/50 text-[var(--on-surface-variant)] opacity-60 border border-[var(--outline)]/40">
+                          <span>{i18n._(msg`Inactivo`)}</span>
+                        </span>
+                      )}
+                    </div>
+                  </label>
+
+                  {/* Status Option */}
+                  <label
+                    id="label-opt-hidden-status"
+                    className={`flex items-center justify-between px-2 py-1.5 rounded border transition-all cursor-pointer ${
+                      effectiveLabelTypes.status
+                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/35 text-[var(--on-surface)] shadow-2xs'
+                        : 'border-transparent text-[var(--on-surface-variant)] opacity-75 hover:opacity-100 hover:bg-[var(--surface-container)]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={effectiveLabelTypes.status}
+                        onChange={() => handleToggleLabelType('status')}
+                        className="sr-only"
+                      />
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-all shrink-0 ${
+                          effectiveLabelTypes.status
+                            ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)] shadow-2xs'
+                            : 'bg-[var(--surface)] border-[var(--outline)] hover:border-[var(--primary)]'
+                        }`}
+                      >
+                        {effectiveLabelTypes.status && (
+                          <svg className="w-2.5 h-2.5 stroke-current stroke-[3]" fill="none" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-sky-100/50 text-sky-900 border border-sky-200/80 dark:bg-sky-950/30 dark:text-sky-200/90 dark:border-sky-700/40 shrink-0 transition-opacity ${
+                          effectiveLabelTypes.status ? 'opacity-100' : 'opacity-40 grayscale'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[8.5px]">check_circle</span>
+                        <span>Status</span>
+                      </span>
+                      <span className={`text-[11px] truncate transition-colors ${effectiveLabelTypes.status ? 'font-medium text-[var(--on-surface)]' : 'text-[var(--on-surface-variant)]'}`}>
+                        {i18n._(msg`Estado`)}
+                      </span>
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
+                      {showTaskStatus !== false && (
+                        <span className="text-[9px] text-[var(--on-surface-variant)] italic">
+                          ({i18n._(msg`no oculto`)})
+                        </span>
+                      )}
+                      {effectiveLabelTypes.status ? (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
+                          <span className="material-symbols-outlined text-[10px]">check</span>
+                          <span>{i18n._(msg`Activo`)}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-[var(--surface-container-highest)]/50 text-[var(--on-surface-variant)] opacity-60 border border-[var(--outline)]/40">
+                          <span>{i18n._(msg`Inactivo`)}</span>
+                        </span>
+                      )}
+                    </div>
+                  </label>
+
+                  {/* Priority Option */}
+                  <label
+                    id="label-opt-hidden-priority"
+                    className={`flex items-center justify-between px-2 py-1.5 rounded border transition-all cursor-pointer ${
+                      effectiveLabelTypes.priority
+                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/35 text-[var(--on-surface)] shadow-2xs'
+                        : 'border-transparent text-[var(--on-surface-variant)] opacity-75 hover:opacity-100 hover:bg-[var(--surface-container)]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={effectiveLabelTypes.priority}
+                        onChange={() => handleToggleLabelType('priority')}
+                        className="sr-only"
+                      />
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-all shrink-0 ${
+                          effectiveLabelTypes.priority
+                            ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)] shadow-2xs'
+                            : 'bg-[var(--surface)] border-[var(--outline)] hover:border-[var(--primary)]'
+                        }`}
+                      >
+                        {effectiveLabelTypes.priority && (
+                          <svg className="w-2.5 h-2.5 stroke-current stroke-[3]" fill="none" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-rose-500/10 text-rose-400 border border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80 shrink-0 transition-opacity ${
+                          effectiveLabelTypes.priority ? 'opacity-100' : 'opacity-40 grayscale'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[8.5px]">flag</span>
+                        <span>Prio</span>
+                      </span>
+                      <span className={`text-[11px] truncate transition-colors ${effectiveLabelTypes.priority ? 'font-medium text-[var(--on-surface)]' : 'text-[var(--on-surface-variant)]'}`}>
+                        {i18n._(msg`Prioridad`)}
+                      </span>
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
+                      {showTaskPriority !== false && (
+                        <span className="text-[9px] text-[var(--on-surface-variant)] italic">
+                          ({i18n._(msg`no oculto`)})
+                        </span>
+                      )}
+                      {effectiveLabelTypes.priority ? (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
+                          <span className="material-symbols-outlined text-[10px]">check</span>
+                          <span>{i18n._(msg`Activo`)}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-[var(--surface-container-highest)]/50 text-[var(--on-surface-variant)] opacity-60 border border-[var(--outline)]/40">
+                          <span>{i18n._(msg`Inactivo`)}</span>
+                        </span>
+                      )}
+                    </div>
+                  </label>
+
+                  {/* Quick actions */}
+                  <div className="pt-1 mt-0.5 border-t border-[var(--outline)] flex items-center justify-between text-[10px]">
+                    <button
+                      id="btn-hidden-labels-select-all"
+                      type="button"
+                      onClick={() => handleSetAllLabelTypes(true)}
+                      className="text-[var(--primary)] hover:underline cursor-pointer font-medium"
+                    >
+                      {i18n._(msg`Mostrar todas`)}
+                    </button>
+                    <button
+                      id="btn-hidden-labels-select-none"
+                      type="button"
+                      onClick={() => handleSetAllLabelTypes(false)}
+                      className="text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:underline cursor-pointer"
+                    >
+                      {i18n._(msg`Ocultar todas`)}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Copy Markdown */}

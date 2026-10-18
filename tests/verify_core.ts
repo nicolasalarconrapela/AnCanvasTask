@@ -41,6 +41,14 @@ import {
   taskFields,
   applyTaskToMarkdown,
 } from '../src/services/documentSyncService';
+import { EditorState } from '@codemirror/state';
+import {
+  InlineHiddenTaskLabelsWidget,
+  buildHideTaskMetadataDeco,
+  getPriorityBadgeClasses,
+} from '../src/components/MarkdownSplitEditor';
+import { DEFAULT_USER_SETTINGS } from '../src/services/settingsService';
+import { DEFAULT_TASK_FILTERS } from '../src/utils/filterStore';
 
 console.log('--- Iniciando suite de pruebas de AnTaskCanvas (Core sin GitHub) ---');
 
@@ -1079,6 +1087,91 @@ console.log('25. Verificando detección y ocultamiento de Status y Priority en M
   assert(strippedAll.includes('- Description: Detalle de tarea'), 'stripMetadataFieldsFromMarkdown debe conservar Description');
 }
 console.log('   ✓ Detección y ocultamiento de Status y Priority verificado correctamente.');
+
+// 26. Verificando etiquetas lineales (inline pastel) de items ocultos en LiveMarkdowns
+console.log('26. Verificando etiquetas lineales (inline pastel) de items ocultos en LiveMarkdowns...');
+{
+  assert.strictEqual(DEFAULT_USER_SETTINGS.showHiddenItemLabels, true, 'DEFAULT_USER_SETTINGS.showHiddenItemLabels debe ser true');
+  assert.strictEqual(DEFAULT_TASK_FILTERS.showHiddenItemLabels, true, 'DEFAULT_TASK_FILTERS.showHiddenItemLabels debe ser true');
+
+  const testDoc = `# Tareas
+- [ ] Tarea Alpha
+  - Description: Tarea de prueba
+  - ID: alpha-1
+  - Status: in_progress
+  - Priority: P1
+- [ ] Tarea Beta
+  - ID: beta-2
+`;
+
+  const state = EditorState.create({ doc: testDoc });
+
+  // 26.1 Con showLabels: true, se generan etiquetas lineales asociadas al task root y se colapsan las líneas ocultas
+  const decoWithLabels = buildHideTaskMetadataDeco(state, {
+    hideIds: true,
+    hideStatus: true,
+    hidePriority: true,
+    showLabels: true,
+  });
+
+  // Tarea Alpha: 1 widget inline lineal + 3 líneas ocultas; Tarea Beta: 1 widget inline lineal + 1 línea oculta = 6
+  assert.strictEqual(decoWithLabels.size, 6, 'Debe generar 6 decoraciones (2 widgets inline lineales + 4 líneas ocultas colapsadas)');
+
+  // 26.2 Con showLabels: false, solo se colapsan las líneas sin generar widgets inline
+  const decoWithoutLabels = buildHideTaskMetadataDeco(state, {
+    hideIds: true,
+    hideStatus: true,
+    hidePriority: true,
+    showLabels: false,
+  });
+
+  // Solo las 4 líneas ocultas (alpha-1, in_progress, P1, beta-2)
+  assert.strictEqual(decoWithoutLabels.size, 4, 'Debe generar 4 decoraciones (solo las 4 líneas ocultas colapsadas)');
+
+  // 26.3 InlineHiddenTaskLabelsWidget guarda la información de items y tipos
+  const widget = new InlineHiddenTaskLabelsWidget([
+    { type: 'id', label: 'ID: alpha-1', rawText: '  - ID: alpha-1' },
+    { type: 'status', label: 'Status: in_progress', rawText: '  - Status: in_progress' },
+    { type: 'priority', label: 'Priority: P1', rawText: '  - Priority: P1' },
+  ]);
+  assert.strictEqual(widget.items.length, 3, 'El widget debe contener 3 items');
+  assert.strictEqual(widget.items[0].type, 'id');
+  assert.strictEqual(widget.items[1].type, 'status');
+  assert.strictEqual(widget.items[2].type, 'priority');
+  assert.ok(getPriorityBadgeClasses('Priority: P0').includes('rose'), 'P0 debe tener color rose');
+  assert.ok(getPriorityBadgeClasses('Priority: P1').includes('orange'), 'P1 debe tener color orange');
+  assert.ok(getPriorityBadgeClasses('Priority: P2').includes('amber'), 'P2 debe tener color amber');
+  assert.ok(getPriorityBadgeClasses('Priority: P3').includes('zinc'), 'P3 debe tener color zinc');
+
+  // 26.4 Con labelTypes selectivo (solo ID), únicamente el ID genera label visual en el widget
+  const decoOnlyIdLabels = buildHideTaskMetadataDeco(state, {
+    hideIds: true,
+    hideStatus: true,
+    hidePriority: true,
+    showLabels: true,
+    labelTypes: { id: true, status: false, priority: false },
+  });
+  // 2 widgets inline lineales (uno para Tarea Alpha y uno para Tarea Beta) + 4 líneas colapsadas = 6
+  assert.strictEqual(decoOnlyIdLabels.size, 6, 'Debe generar 6 decoraciones');
+
+  // 26.5 Con labelTypes todos en false, no se generan widgets inline
+  const decoNoLabelsThroughTypes = buildHideTaskMetadataDeco(state, {
+    hideIds: true,
+    hideStatus: true,
+    hidePriority: true,
+    showLabels: true,
+    labelTypes: { id: false, status: false, priority: false },
+  });
+  assert.strictEqual(decoNoLabelsThroughTypes.size, 4, 'No debe generar widgets inline si todos los labelTypes están en false');
+
+  // 26.6 DEFAULT_USER_SETTINGS y DEFAULT_TASK_FILTERS incluyen hiddenItemLabelTypes
+  assert(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes, 'DEFAULT_USER_SETTINGS debe tener hiddenItemLabelTypes');
+  assert.strictEqual(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes.id, true);
+  assert.strictEqual(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes.status, true);
+  assert.strictEqual(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes.priority, true);
+  assert(DEFAULT_TASK_FILTERS.hiddenItemLabelTypes, 'DEFAULT_TASK_FILTERS debe tener hiddenItemLabelTypes');
+}
+console.log('   ✓ Etiquetas lineales de items ocultos y desplegable de selección verificados correctamente.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 process.exit(0);
