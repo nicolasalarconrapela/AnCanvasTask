@@ -53,7 +53,7 @@ export class InlineHiddenTaskLabelsWidget extends WidgetType {
           : item.type === 'status'
           ? 'bg-sky-100/50 text-sky-900 border-sky-200/80 dark:bg-sky-950/30 dark:text-sky-200/90 dark:border-sky-700/40'
           : item.type === 'priority'
-          ? 'bg-rose-100/50 text-rose-900 border-rose-200/80 dark:bg-rose-950/30 dark:text-rose-200/90 dark:border-rose-700/40'
+          ? 'bg-rose-500/10 text-rose-400 border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80'
           : 'bg-stone-100/60 text-stone-700 border-stone-200 dark:bg-stone-900/40 dark:text-stone-300 dark:border-stone-800');
       badge.style.fontSize = '8px';
       badge.style.padding = '1px 3px';
@@ -1192,7 +1192,7 @@ export function MarkdownSplitEditor({
                         onChange={() => handleToggleLabelType('priority')}
                         className="rounded text-[var(--primary)] focus:ring-0 cursor-pointer w-3.5 h-3.5 shrink-0"
                       />
-                      <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-rose-100/50 text-rose-900 border border-rose-200/80 dark:bg-rose-950/30 dark:text-rose-200/90 dark:border-rose-700/40 shrink-0">
+                      <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-rose-500/10 text-rose-400 border border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80 shrink-0">
                         <span className="material-symbols-outlined text-[8.5px]">flag</span>
                         <span>Prio</span>
                       </span>
