@@ -960,7 +960,7 @@ export async function fetchSanityDocumentsList(configOverride?: Partial<SanityCo
   const config = { ...getSanityConfig(), ...configOverride };
   const session = getSyncSession(config);
   if (!session) throw new Error('La sesión de Sanity todavía no está preparada');
-  const client = createClient({ ...config, useCdn: false, perspective: 'raw' });
+  const client = createClient({ ...config, useCdn: true, perspective: 'raw' });
   let docs = await client.fetch<any[]>(`*[(syncOwner == $owner || ($legacy && !defined(syncOwner))) && _type in ["task", "canvasVisualState", "workspace", "syncDeletion"] && !(_id in path("drafts.**"))] | order(_id)`,
     { owner: session.owner, legacy: includeLegacy }, { signal: session.controller.signal });
   assertSyncSession(session);
