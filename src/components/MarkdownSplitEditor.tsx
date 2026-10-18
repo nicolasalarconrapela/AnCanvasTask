@@ -58,7 +58,7 @@ export class InlineHiddenTaskLabelsWidget extends WidgetType {
   toDOM(): HTMLElement {
     const wrap = document.createElement('span');
     wrap.className =
-      'cm-inline-task-labels inline-flex items-center gap-1 ml-1.5 align-middle select-none pointer-events-auto';
+      'cm-inline-task-labels inline-flex items-center gap-1 ml-1.5 align-middle select-none';
 
     for (const item of this.items) {
       const badge = document.createElement('span');
@@ -93,47 +93,14 @@ export class InlineHiddenTaskLabelsWidget extends WidgetType {
 
       // Label Text: e.g. "ID: auth-01", "Status: todo", "Priority: P1"
       const text = document.createElement('span');
-      text.className = 'font-medium cursor-pointer hover:underline tracking-tight';
+      text.className = 'font-medium tracking-tight';
       text.style.fontSize = '8px';
       text.style.lineHeight = '1';
       text.textContent = item.label;
-      text.title = 'Clic para mostrar este campo en Markdown';
-      text.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (item.type === 'id') {
-          window.dispatchEvent(new CustomEvent('antask:toggle-show-ids'));
-        } else if (item.type === 'status') {
-          window.dispatchEvent(new CustomEvent('antask:toggle-show-status'));
-        } else if (item.type === 'priority') {
-          window.dispatchEvent(new CustomEvent('antask:toggle-show-priority'));
-        }
-      });
       badge.appendChild(text);
 
       wrap.appendChild(badge);
     }
-
-    // Gentle button to hide visual labels
-    const toggleBtn = document.createElement('button');
-    toggleBtn.type = 'button';
-    toggleBtn.className =
-      'text-[8px] opacity-40 hover:opacity-100 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-opacity cursor-pointer flex items-center leading-none px-0.5 ml-0.5';
-    toggleBtn.style.fontSize = '8px';
-    toggleBtn.style.lineHeight = '1';
-    toggleBtn.title = 'Ocultar estas etiquetas visuales';
-    toggleBtn.setAttribute('aria-label', 'Ocultar etiquetas');
-    toggleBtn.textContent = '×';
-    toggleBtn.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (this.onToggleLabels) {
-        this.onToggleLabels();
-      } else {
-        window.dispatchEvent(new CustomEvent('antask:toggle-show-hidden-labels'));
-      }
-    });
-    wrap.appendChild(toggleBtn);
 
     return wrap;
   }
@@ -1124,7 +1091,7 @@ export function MarkdownSplitEditor({
                     right: `${dropdownPos.right}px`,
                     zIndex: 9999,
                   }}
-                  className="w-56 bg-[var(--surface-container-high)] border border-[var(--outline)] rounded-md shadow-xl p-2 flex flex-col gap-1.5 text-xs select-none"
+                  className="w-72 bg-[var(--surface-container-high)] border border-[var(--outline)] rounded-md shadow-xl p-2 flex flex-col gap-1.5 text-xs select-none"
                 >
                   <div className="flex items-center justify-between pb-1 border-b border-[var(--outline)]">
                     <span className="font-semibold text-[var(--on-surface)] text-[11px] flex items-center gap-1">
@@ -1145,82 +1112,181 @@ export function MarkdownSplitEditor({
                   {/* ID Option */}
                   <label
                     id="label-opt-hidden-id"
-                    className="flex items-center justify-between px-1.5 py-1 rounded cursor-pointer hover:bg-[var(--surface-container)] transition-colors"
+                    className={`flex items-center justify-between px-2 py-1.5 rounded border transition-all cursor-pointer ${
+                      effectiveLabelTypes.id
+                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/35 text-[var(--on-surface)] shadow-2xs'
+                        : 'border-transparent text-[var(--on-surface-variant)] opacity-75 hover:opacity-100 hover:bg-[var(--surface-container)]'
+                    }`}
                   >
-                    <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="flex items-center gap-2 min-w-0">
                       <input
                         type="checkbox"
                         checked={effectiveLabelTypes.id}
                         onChange={() => handleToggleLabelType('id')}
-                        className="rounded text-[var(--primary)] focus:ring-0 cursor-pointer w-3.5 h-3.5 shrink-0"
+                        className="sr-only"
                       />
-                      <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-slate-500/10 text-slate-600 border border-slate-400/30 dark:bg-slate-800/40 dark:text-slate-300 dark:border-slate-700/60 shrink-0">
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-all shrink-0 ${
+                          effectiveLabelTypes.id
+                            ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)] shadow-2xs'
+                            : 'bg-[var(--surface)] border-[var(--outline)] hover:border-[var(--primary)]'
+                        }`}
+                      >
+                        {effectiveLabelTypes.id && (
+                          <svg className="w-2.5 h-2.5 stroke-current stroke-[3]" fill="none" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-slate-500/10 text-slate-600 border border-slate-400/30 dark:bg-slate-800/40 dark:text-slate-300 dark:border-slate-700/60 shrink-0 transition-opacity ${
+                          effectiveLabelTypes.id ? 'opacity-100' : 'opacity-40 grayscale'
+                        }`}
+                      >
                         <span className="material-symbols-outlined text-[8.5px]">tag</span>
                         <span>ID</span>
                       </span>
-                      <span className="text-[11px] text-[var(--on-surface)] truncate">
+                      <span className={`text-[11px] truncate transition-colors ${effectiveLabelTypes.id ? 'font-medium text-[var(--on-surface)]' : 'text-[var(--on-surface-variant)]'}`}>
                         {i18n._(msg`Identificador`)}
                       </span>
                     </span>
-                    {showTaskIds !== false && (
-                      <span className="text-[9px] text-[var(--on-surface-variant)] italic shrink-0 ml-1">
-                        ({i18n._(msg`no oculto`)})
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
+                      {showTaskIds !== false && (
+                        <span className="text-[9px] text-[var(--on-surface-variant)] italic">
+                          ({i18n._(msg`no oculto`)})
+                        </span>
+                      )}
+                      {effectiveLabelTypes.id ? (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
+                          <span className="material-symbols-outlined text-[10px]">check</span>
+                          <span>{i18n._(msg`Activo`)}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-[var(--surface-container-highest)]/50 text-[var(--on-surface-variant)] opacity-60 border border-[var(--outline)]/40">
+                          <span>{i18n._(msg`Inactivo`)}</span>
+                        </span>
+                      )}
+                    </div>
                   </label>
 
                   {/* Status Option */}
                   <label
                     id="label-opt-hidden-status"
-                    className="flex items-center justify-between px-1.5 py-1 rounded cursor-pointer hover:bg-[var(--surface-container)] transition-colors"
+                    className={`flex items-center justify-between px-2 py-1.5 rounded border transition-all cursor-pointer ${
+                      effectiveLabelTypes.status
+                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/35 text-[var(--on-surface)] shadow-2xs'
+                        : 'border-transparent text-[var(--on-surface-variant)] opacity-75 hover:opacity-100 hover:bg-[var(--surface-container)]'
+                    }`}
                   >
-                    <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="flex items-center gap-2 min-w-0">
                       <input
                         type="checkbox"
                         checked={effectiveLabelTypes.status}
                         onChange={() => handleToggleLabelType('status')}
-                        className="rounded text-[var(--primary)] focus:ring-0 cursor-pointer w-3.5 h-3.5 shrink-0"
+                        className="sr-only"
                       />
-                      <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-sky-100/50 text-sky-900 border border-sky-200/80 dark:bg-sky-950/30 dark:text-sky-200/90 dark:border-sky-700/40 shrink-0">
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-all shrink-0 ${
+                          effectiveLabelTypes.status
+                            ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)] shadow-2xs'
+                            : 'bg-[var(--surface)] border-[var(--outline)] hover:border-[var(--primary)]'
+                        }`}
+                      >
+                        {effectiveLabelTypes.status && (
+                          <svg className="w-2.5 h-2.5 stroke-current stroke-[3]" fill="none" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-sky-100/50 text-sky-900 border border-sky-200/80 dark:bg-sky-950/30 dark:text-sky-200/90 dark:border-sky-700/40 shrink-0 transition-opacity ${
+                          effectiveLabelTypes.status ? 'opacity-100' : 'opacity-40 grayscale'
+                        }`}
+                      >
                         <span className="material-symbols-outlined text-[8.5px]">check_circle</span>
                         <span>Status</span>
                       </span>
-                      <span className="text-[11px] text-[var(--on-surface)] truncate">
+                      <span className={`text-[11px] truncate transition-colors ${effectiveLabelTypes.status ? 'font-medium text-[var(--on-surface)]' : 'text-[var(--on-surface-variant)]'}`}>
                         {i18n._(msg`Estado`)}
                       </span>
                     </span>
-                    {showTaskStatus !== false && (
-                      <span className="text-[9px] text-[var(--on-surface-variant)] italic shrink-0 ml-1">
-                        ({i18n._(msg`no oculto`)})
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
+                      {showTaskStatus !== false && (
+                        <span className="text-[9px] text-[var(--on-surface-variant)] italic">
+                          ({i18n._(msg`no oculto`)})
+                        </span>
+                      )}
+                      {effectiveLabelTypes.status ? (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
+                          <span className="material-symbols-outlined text-[10px]">check</span>
+                          <span>{i18n._(msg`Activo`)}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-[var(--surface-container-highest)]/50 text-[var(--on-surface-variant)] opacity-60 border border-[var(--outline)]/40">
+                          <span>{i18n._(msg`Inactivo`)}</span>
+                        </span>
+                      )}
+                    </div>
                   </label>
 
                   {/* Priority Option */}
                   <label
                     id="label-opt-hidden-priority"
-                    className="flex items-center justify-between px-1.5 py-1 rounded cursor-pointer hover:bg-[var(--surface-container)] transition-colors"
+                    className={`flex items-center justify-between px-2 py-1.5 rounded border transition-all cursor-pointer ${
+                      effectiveLabelTypes.priority
+                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/35 text-[var(--on-surface)] shadow-2xs'
+                        : 'border-transparent text-[var(--on-surface-variant)] opacity-75 hover:opacity-100 hover:bg-[var(--surface-container)]'
+                    }`}
                   >
-                    <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="flex items-center gap-2 min-w-0">
                       <input
                         type="checkbox"
                         checked={effectiveLabelTypes.priority}
                         onChange={() => handleToggleLabelType('priority')}
-                        className="rounded text-[var(--primary)] focus:ring-0 cursor-pointer w-3.5 h-3.5 shrink-0"
+                        className="sr-only"
                       />
-                      <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-rose-500/10 text-rose-400 border border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80 shrink-0">
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-all shrink-0 ${
+                          effectiveLabelTypes.priority
+                            ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)] shadow-2xs'
+                            : 'bg-[var(--surface)] border-[var(--outline)] hover:border-[var(--primary)]'
+                        }`}
+                      >
+                        {effectiveLabelTypes.priority && (
+                          <svg className="w-2.5 h-2.5 stroke-current stroke-[3]" fill="none" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-rose-500/10 text-rose-400 border border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80 shrink-0 transition-opacity ${
+                          effectiveLabelTypes.priority ? 'opacity-100' : 'opacity-40 grayscale'
+                        }`}
+                      >
                         <span className="material-symbols-outlined text-[8.5px]">flag</span>
                         <span>Prio</span>
                       </span>
-                      <span className="text-[11px] text-[var(--on-surface)] truncate">
+                      <span className={`text-[11px] truncate transition-colors ${effectiveLabelTypes.priority ? 'font-medium text-[var(--on-surface)]' : 'text-[var(--on-surface-variant)]'}`}>
                         {i18n._(msg`Prioridad`)}
                       </span>
                     </span>
-                    {showTaskPriority !== false && (
-                      <span className="text-[9px] text-[var(--on-surface-variant)] italic shrink-0 ml-1">
-                        ({i18n._(msg`no oculto`)})
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
+                      {showTaskPriority !== false && (
+                        <span className="text-[9px] text-[var(--on-surface-variant)] italic">
+                          ({i18n._(msg`no oculto`)})
+                        </span>
+                      )}
+                      {effectiveLabelTypes.priority ? (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
+                          <span className="material-symbols-outlined text-[10px]">check</span>
+                          <span>{i18n._(msg`Activo`)}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-[var(--surface-container-highest)]/50 text-[var(--on-surface-variant)] opacity-60 border border-[var(--outline)]/40">
+                          <span>{i18n._(msg`Inactivo`)}</span>
+                        </span>
+                      )}
+                    </div>
                   </label>
 
                   {/* Quick actions */}
