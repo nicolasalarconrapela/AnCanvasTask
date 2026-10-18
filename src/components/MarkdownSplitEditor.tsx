@@ -65,7 +65,7 @@ export class InlineHiddenTaskLabelsWidget extends WidgetType {
       badge.className =
         'inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none border transition-colors ' +
         (item.type === 'id'
-          ? 'bg-amber-100/50 text-amber-900 border-amber-200/80 dark:bg-amber-950/30 dark:text-amber-200/90 dark:border-amber-700/40'
+          ? 'bg-slate-500/10 text-slate-600 border-slate-400/30 dark:bg-slate-800/40 dark:text-slate-300 dark:border-slate-700/60'
           : item.type === 'status'
           ? 'bg-sky-100/50 text-sky-900 border-sky-200/80 dark:bg-sky-950/30 dark:text-sky-200/90 dark:border-sky-700/40'
           : item.type === 'priority'
@@ -1012,7 +1012,7 @@ export function MarkdownSplitEditor({
               onClick={onToggleShowTaskIds}
               className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
                 showTaskIds !== false
-                  ? 'bg-amber-950/40 text-amber-300 border-amber-800/80 hover:bg-amber-900/60'
+                  ? 'bg-slate-800/40 text-slate-300 border-slate-700/80 hover:bg-slate-800/60'
                   : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
               }`}
               title={
@@ -1154,7 +1154,7 @@ export function MarkdownSplitEditor({
                         onChange={() => handleToggleLabelType('id')}
                         className="rounded text-[var(--primary)] focus:ring-0 cursor-pointer w-3.5 h-3.5 shrink-0"
                       />
-                      <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-amber-100/50 text-amber-900 border border-amber-200/80 dark:bg-amber-950/30 dark:text-amber-200/90 dark:border-amber-700/40 shrink-0">
+                      <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-slate-500/10 text-slate-600 border border-slate-400/30 dark:bg-slate-800/40 dark:text-slate-300 dark:border-slate-700/60 shrink-0">
                         <span className="material-symbols-outlined text-[8.5px]">tag</span>
                         <span>ID</span>
                       </span>
