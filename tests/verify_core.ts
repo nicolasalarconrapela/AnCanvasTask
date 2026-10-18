@@ -45,6 +45,7 @@ import { EditorState } from '@codemirror/state';
 import {
   InlineHiddenTaskLabelsWidget,
   buildHideTaskMetadataDeco,
+  getPriorityBadgeClasses,
 } from '../src/components/MarkdownSplitEditor';
 import { DEFAULT_USER_SETTINGS } from '../src/services/settingsService';
 import { DEFAULT_TASK_FILTERS } from '../src/utils/filterStore';
@@ -1137,6 +1138,10 @@ console.log('26. Verificando etiquetas lineales (inline pastel) de items ocultos
   assert.strictEqual(widget.items[0].type, 'id');
   assert.strictEqual(widget.items[1].type, 'status');
   assert.strictEqual(widget.items[2].type, 'priority');
+  assert.ok(getPriorityBadgeClasses('Priority: P0').includes('rose'), 'P0 debe tener color rose');
+  assert.ok(getPriorityBadgeClasses('Priority: P1').includes('amber'), 'P1 debe tener color amber');
+  assert.ok(getPriorityBadgeClasses('Priority: P2').includes('sky'), 'P2 debe tener color sky');
+  assert.ok(getPriorityBadgeClasses('Priority: P3').includes('zinc'), 'P3 debe tener color zinc');
 
   // 26.4 Con labelTypes selectivo (solo ID), únicamente el ID genera label visual en el widget
   const decoOnlyIdLabels = buildHideTaskMetadataDeco(state, {
