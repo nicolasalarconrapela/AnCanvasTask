@@ -457,21 +457,22 @@ export class DocumentSync {
   }
 
   private async commitDocument(pending: Pending, storageKey: string, session: SyncSession, event: SyncLogEvent): Promise<Document> {
-    const client = this.clientFactory(session.config);
+    const client = this.clientFactory({ ...session.config, useCdn: false });
     for (let attempt = 0; attempt < 3; attempt++) {
       assertSyncSession(session);
-      const deletion = await client.getDocument(deletionMarkerId(pending.document._id), {
+      const docId = pending.document._id;
+      const markerId = deletionMarkerId(docId);
+      const preDocs: Array<Document | null> = await client.getDocuments([markerId, docId], {
         signal: session.controller.signal,
       });
       assertSyncSession(session);
+      const deletion = preDocs.find(d => d?._id === markerId) || null;
       if (deletion && !pending.document.syncDeleted &&
         (isActiveDeletion(deletion) || deletion.syncRestorationId !== pending.base?.syncRestorationId)) {
         throw new SyncConflict('El documento fue eliminado remotamente o requiere una restauración manual');
       }
       // GROQ can lag behind committed writes, including our previous save.
-      const remote = await client.getDocument(pending.document._id, {
-        signal: session.controller.signal,
-      });
+      const remote = preDocs.find(d => d?._id === docId) || null;
       event.remoteRev = remote?._rev ?? null;
       if (!pending.document.syncDeleted && remote && pending.base && !equal(remote, pending.base) && !equal(pending.document, pending.base)) {
         event.operation = 'merge';
@@ -551,6 +552,18 @@ export class DocumentSync {
       .filter((task: Document | null) => task && task.workspaceId === workspace.workspaceId && (!task.syncOwner || task.syncOwner === session.owner)) : [];
     assertSyncSession(session);
     const retained = new Set<string>();
+    const markerIds = new Set<string>();
+    for (const branch of workspace.syncDeleted ? [] : workspace.branches || []) for (const doc of branch.taskDocuments || []) {
+      const documentKey = `${branch.name}::${doc.id}`;
+      for (const fields of taskFields(doc.content)) {
+        markerIds.add(deletionMarkerId(buildTaskDocumentId(fields.taskId, workspace.workspaceId, documentKey)));
+      }
+    }
+    for (const task of tasks) if (task._id) markerIds.add(deletionMarkerId(task._id));
+    const markers: Array<Document | null> = markerIds.size ? await client.getDocuments([...markerIds], { signal: session.controller.signal }) : [];
+    assertSyncSession(session);
+    const markerMap = new Map<string, Document>((markers || []).filter((d): d is Document => !!d).map(m => [m._id, m]));
+
     for (const branch of workspace.syncDeleted ? [] : workspace.branches || []) for (const doc of branch.taskDocuments || []) {
       const documentKey = `${branch.name}::${doc.id}`;
       const baseContent = remote?.branches?.find((b: any) => b.name === branch.name)?.taskDocuments?.find((d: any) => d.id === doc.id)?.content || '';
@@ -573,8 +586,8 @@ export class DocumentSync {
           if (baseFields && equal(fields, baseFields)) { doc.content = deleteTaskFromMarkdown(doc.content, fields.taskId); retained.add(existing._id); continue; }
           throw new SyncConflict(`La tarea ${fields.taskId} fue eliminada remotamente`);
         }
-        const marker = await client.getDocument(deletionMarkerId(existing?._id || buildTaskDocumentId(fields.taskId, workspace.workspaceId, documentKey)), { signal: session.controller.signal });
-        assertSyncSession(session);
+        const targetMarkerId = deletionMarkerId(existing?._id || buildTaskDocumentId(fields.taskId, workspace.workspaceId, documentKey));
+        const marker = markerMap.get(targetMarkerId) || null;
         if (marker && !restoreDeleted && (isActiveDeletion(marker) || marker.syncRestorationId !== existing?.syncRestorationId)) {
           throw new SyncConflict(`La tarea ${fields.taskId} fue eliminada remotamente`);
         }
@@ -610,15 +623,17 @@ export class DocumentSync {
     const indexedWorkspace = await client.fetch('*[_type == "workspace" && workspaceId == $id && syncOwner == $owner][0]',
       { id: task.workspaceId, owner: session.owner }, { signal: session.controller.signal });
     assertSyncSession(session);
-    const workspace = await client.getDocument(indexedWorkspace?._id || `workspace-${task.workspaceId}`, { signal: session.controller.signal });
+    const wsId = indexedWorkspace?._id || `workspace-${task.workspaceId}`;
+    const wsMarkerId = deletionMarkerId(wsId);
+    const wsDocs: Array<Document | null> = await client.getDocuments([wsId, wsMarkerId], { signal: session.controller.signal });
     assertSyncSession(session);
+    const workspace = wsDocs.find(d => d?._id === wsId) || null;
     if (workspace?.syncOwner && workspace.syncOwner !== session.owner) throw new SyncConflict('El documento pertenece a otra cuenta');
     if (!workspace || workspace.syncDeleted) {
       if (task.syncDeleted) return;
       throw new SyncConflict('El workspace de la tarea fue eliminado');
     }
-    const deletion = await client.getDocument(deletionMarkerId(workspace._id), { signal: session.controller.signal });
-    assertSyncSession(session);
+    const deletion = wsDocs.find(d => d?._id === wsMarkerId) || null;
     if (deletion && (isActiveDeletion(deletion) || deletion.syncRestorationId !== workspace.syncRestorationId)) {
       throw new SyncConflict('El workspace de la tarea fue eliminado');
     }

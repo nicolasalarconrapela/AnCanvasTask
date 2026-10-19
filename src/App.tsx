@@ -1372,7 +1372,7 @@ export default function App() {
         refreshRemoteRef.current = refresh;
         unsubscribe = subscribeToSanityLiveChanges((event) => {
           setIsLiveSyncActive(event.type !== 'connection_error');
-          if (event.type !== 'connection_error') void refresh();
+          // No ejecutar refresh() ante cada mutation para evitar bucles de consumo de API
         }, session.config);
         await refresh();
       } catch (error: any) {
@@ -1413,18 +1413,14 @@ export default function App() {
       } else if (event.key?.startsWith('antask_sync_pending:')) catchUp();
     };
     window.addEventListener('online', catchUp);
-    window.addEventListener('focus', catchUp);
     window.addEventListener('storage', storageChanged);
-    const poll = setInterval(catchUp, 30000);
     return () => {
       cancelled = true;
       unsubscribe();
       invalidateSyncSession();
       syncReadyRef.current = false;
       refreshRemoteRef.current = async () => {};
-      clearInterval(poll);
       window.removeEventListener('online', catchUp);
-      window.removeEventListener('focus', catchUp);
       window.removeEventListener('storage', storageChanged);
       setIsLiveSyncActive(false);
     };
@@ -1673,7 +1669,7 @@ export default function App() {
     const scheduledKey = currentDocKey;
     const scheduledConfig = getSanityConfig();
     setSyncStatus('saving');
-    debouncedSaveRef.current = setTimeout(async () => {
+    debouncedSaveRef.current = setTimeout(() => {
       if (getSyncSession() !== scheduledSession || workspaceStoreRef.current.scope !== scheduledScope || activeDocKeyRef.current !== scheduledKey) return;
       const visualState = extractVisualStateFromEditor(editorInstance);
       {
@@ -1711,9 +1707,9 @@ export default function App() {
           return nextStore;
         });
 
-        // 2. Persist to canvas visual state cache and remote if configured
-        const res = await saveCanvasVisualState(visualState, currentDocKey, scheduledConfig);
-        if (getSyncSession() === scheduledSession) { setSyncStatus('local'); if (res.remote) void refreshRemoteRef.current(); }
+        // 2. Persistir inmediatamente solo en localStorage (sin enviar a Sanity después de cada movimiento)
+        void saveCanvasVisualState(visualState, currentDocKey, scheduledConfig, false);
+        setSyncStatus('local');
       }
     }, 700);
   }, [currentDocKey]);
@@ -1850,30 +1846,7 @@ export default function App() {
           return prevStore;
         });
 
-        // 2. If Sanity Cloud is configured, check for differences and notify on conflicts
-        const sanityConfig = getSanityConfig();
-        if (sanityConfig.projectId && sanityConfig.dataset) {
-          const session = getSyncSession(sanityConfig);
-          const diffResult = await analyzeSyncDifferences(workspaceStore);
-          if (getSyncSession() !== session) return;
-          const totalConflicts = diffResult.counts.conflicts;
-          if (totalConflicts > 0) {
-            const now = Date.now();
-            // Throttle notifications to at most once per 60 seconds
-            if (now - lastConflictNotifiedTimeRef.current > 60000) {
-              lastConflictNotifiedTimeRef.current = now;
-              pushToast(
-                i18n._(msg`Conflicto detectado en la sincronización (${totalConflicts})`),
-                'warning',
-                {
-                  label: i18n._(msg`Resolver conflicto`),
-                  onClick: () => setIsSyncOverrideModalOpen(true),
-                },
-                8000
-              );
-            }
-          }
-        }
+        // Auto-guardado completado localmente sin sondeo remoto a Sanity Cloud
       } catch (e) {
         console.warn('Error during auto-save conflict check:', e);
       } finally {

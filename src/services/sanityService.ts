@@ -80,7 +80,7 @@ const DEFAULT_SANITY_CONFIG: SanityConfig = {
   dataset: envObj.VITE_SANITY_DATASET || 'production',
   apiVersion: '2024-03-01',
   token: envObj.VITE_SANITY_API_TOKEN || '',
-  useCdn: false,
+  useCdn: true,
 };
 
 export function getSanityConfig(): SanityConfig {
@@ -731,7 +731,7 @@ function getSanityClient() {
     dataset: config.dataset,
     apiVersion: config.apiVersion || '2024-03-01',
     token: config.token || undefined,
-    useCdn: config.useCdn ?? false,
+    useCdn: config.useCdn ?? true,
   });
 }
 
@@ -767,21 +767,39 @@ export async function loadCanvasVisualState(projectId: string = 'default'): Prom
  */
 export async function saveCanvasVisualState(
   state: { tasks: TaskVisualState[]; groups: GroupVisualState[] },
-  projectId: string = 'default', configOverride?: SanityConfig
+  projectId: string = 'default',
+  configOverride?: SanityConfig,
+  saveRemote: boolean = false
 ): Promise<{ success: boolean; remote: boolean }> {
-  const config = configOverride || getSanityConfig();
-  const session = getSyncSession(config);
-  if (config.projectId && !session) return { success: false, remote: false };
   const cleanId = sanitizeSanityDocId(projectId.replace(/^canvasVisualState-/, ''));
   const cacheKey = `${LOCAL_STORAGE_KEY_VISUAL_STATE}:${getStorageScope()}:${projectId}`;
   const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
-  if (cached?._rev && session) documentSync.observe(cached, session);
-  const doc = { _id: `canvasVisualState-${cleanId}`, _type: 'canvasVisualState', projectId: cleanId,
-    tasks: state.tasks, groups: state.groups, ...(cached?._rev ? { _rev: cached._rev } : {}), updatedAt: new Date().toISOString() };
+  const doc = {
+    _id: `canvasVisualState-${cleanId}`,
+    _type: 'canvasVisualState',
+    projectId: cleanId,
+    tasks: state.tasks,
+    groups: state.groups,
+    ...(cached?._rev ? { _rev: cached._rev } : {}),
+    updatedAt: new Date().toISOString(),
+  };
   localStorage.setItem(cacheKey, JSON.stringify(doc));
+
+  // No enviar a Sanity después de cada movimiento a menos que sea explícito
+  if (!saveRemote) {
+    return { success: true, remote: false };
+  }
+
+  const config = configOverride || getSanityConfig();
+  const session = getSyncSession(config);
+  if (config.projectId && !session) return { success: false, remote: false };
   if (!config.token) return { success: true, remote: false };
+  if (cached?._rev && session) documentSync.observe(cached, session);
   const result = await saveSanityDocument(doc, config);
-  if (result.ok && session) { assertSyncSession(session); localStorage.setItem(cacheKey, JSON.stringify(result.document)); }
+  if (result.ok && session) {
+    assertSyncSession(session);
+    localStorage.setItem(cacheKey, JSON.stringify(result.document));
+  }
   return { success: result.ok, remote: result.ok };
 }
 
@@ -1001,12 +1019,17 @@ export async function fetchSanityDocumentById(id: string, configOverride?: Parti
   const config = { ...getSanityConfig(), ...configOverride };
   const session = getSyncSession(config);
   if (!session) throw new Error('La sesión de Sanity todavía no está preparada');
-  const client = createClient({ ...config, useCdn: false, perspective: 'raw' });
-  const marker = await client.fetch('*[_id == $id][0]', { id: deletionMarkerId(id) }, { signal: session.controller.signal });
+  const client = createClient({ ...config, useCdn: config.useCdn ?? true, perspective: 'raw' });
+  const markerId = deletionMarkerId(id);
+  const results = await client.fetch<any[]>(
+    `*[_id in [$markerId, $id] && (syncOwner == $owner || !defined(syncOwner))]`,
+    { markerId, id, owner: session.owner },
+    { signal: session.controller.signal }
+  );
   assertSyncSession(session);
+  const marker = results.find(d => d._id === markerId);
   if (isActiveDeletion(marker)) return null;
-  const doc = await client.fetch(`*[_id == $id && syncOwner == $owner][0]`, { id, owner: session.owner }, { signal: session.controller.signal });
-  assertSyncSession(session);
+  const doc = results.find(d => d._id === id);
   if (doc) documentSync.observe(doc, session);
   return doc?.syncDeleted ? null : doc;
 }

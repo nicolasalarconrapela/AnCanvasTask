@@ -118,14 +118,10 @@ export const SanityStudioEmbed: React.FC<SanityStudioEmbedProps> = ({
     window.addEventListener('focus', handleWindowFocus);
     window.addEventListener('storage', handleWindowFocus);
 
-    // Periodic check while Studio is open (every 4 seconds)
-    const interval = setInterval(checkForLogin, 4000);
-
     return () => {
       isCancelled = true;
       window.removeEventListener('focus', handleWindowFocus);
       window.removeEventListener('storage', handleWindowFocus);
-      clearInterval(interval);
     };
   }, [config.token, config.projectId]);
 

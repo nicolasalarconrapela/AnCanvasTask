@@ -93,7 +93,7 @@ export async function beginSyncSession(config: SanityConfig): Promise<SyncSessio
   }
   current = {
     id: crypto.randomUUID(),
-    generation, owner, config: { ...config, useCdn: false }, controller,
+    generation, owner, config: { ...config, useCdn: config.useCdn ?? true }, controller,
     scope: encodeURIComponent(JSON.stringify([config.projectId, config.dataset, owner])),
   };
   initializing = null;
