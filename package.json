@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "1.6.1-beta",
+  "version": "1.6.3-beta",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -17,7 +17,7 @@
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "tsx tests/verify_core.ts && tsx --test tests/sync.test.ts tests/sync.audit.test.ts",
+    "test": "tsx tests/verify_core.ts && tsx tests/verify_fase0_consumption.ts && tsx --test tests/sync.test.ts tests/sync.audit.test.ts",
     "test:sync-browser": "npm run build && node tests/sync.browser.mjs && node tests/sync.audit.browser.mjs",
     "i18n:extract": "lingui extract",
     "i18n:compile": "lingui compile",
