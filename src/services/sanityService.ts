@@ -171,7 +171,7 @@ export function saveSanityProfile(
     dataset: profile.dataset.trim() || 'production',
     token: profile.token?.trim() || '',
     apiVersion: profile.apiVersion || '2024-03-01',
-    useCdn: profile.useCdn ?? false,
+    useCdn: profile.useCdn ?? true,
     createdAt: profiles.find((p) => p.id === profileId)?.createdAt || now,
     lastUsedAt: now,
   };
@@ -198,7 +198,7 @@ export function saveSanityProfile(
         dataset: cleanProfile.dataset,
         token: cleanProfile.token || '',
         apiVersion: cleanProfile.apiVersion || '2024-03-01',
-        useCdn: cleanProfile.useCdn ?? false,
+        useCdn: cleanProfile.useCdn ?? true,
       });
     }
     if (typeof window !== 'undefined') {
@@ -258,7 +258,7 @@ export function activateSanityProfile(profileId: string): SanityConfig | null {
     dataset: target.dataset,
     token: target.token || '',
     apiVersion: target.apiVersion || '2024-03-01',
-    useCdn: target.useCdn ?? false,
+    useCdn: target.useCdn ?? true,
   });
 
   return applied;
@@ -282,13 +282,22 @@ export function duplicateSanityProfile(profileId: string): SanityLocalProfile | 
   );
 }
 
-export function exportSanityProfilesJson(includeTokens = true): string {
+export function exportSanityProfilesJson(includeTokens = false): string {
   const profiles = getSavedSanityProfiles();
   const clean = profiles.map((p) => ({
     ...p,
     token: includeTokens ? p.token : '',
   }));
-  return JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), profiles: clean }, null, 2);
+  return JSON.stringify(
+    {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      includesTokens: includeTokens,
+      profiles: clean,
+    },
+    null,
+    2
+  );
 }
 
 export function importSanityProfilesJson(jsonStr: string): { importedCount: number; message: string } {
@@ -408,11 +417,12 @@ export async function fetchSanityCurrentUser(configOverride?: SanityConfig): Pro
       }
       return user;
     } else if (res.status === 401 || res.status === 403) {
-      // Token exists and works for dataset operations, but has restricted user/project scope (e.g. specialized deploy token)
+      // Do not invalidate the token here: some Content Lake tokens can access
+      // the configured dataset but not user/account Management API information.
       const robotUser: SanityUserProfile = {
         id: 'service-token',
         name: `Token de Servicio (${config.projectId})`,
-        role: 'Robot / Service Token',
+        role: 'Token Content Lake',
         isRobot: true,
         authType: 'robot_token',
       };
@@ -442,6 +452,19 @@ export interface SanityUserProjectInfo {
   organizationId?: string;
 }
 
+export type SanityProjectsLookupStatus =
+  | 'ok'
+  | 'forbidden'
+  | 'unauthorized'
+  | 'unavailable';
+
+export interface SanityProjectsLookupResult {
+  status: SanityProjectsLookupStatus;
+  projects: SanityUserProjectInfo[];
+  httpStatus?: number;
+  message?: string;
+}
+
 export interface SanityAccountStatus {
   user: SanityUserProfile | null;
   authType: SanityAuthType;
@@ -451,57 +474,146 @@ export interface SanityAccountStatus {
   isProjectMismatch: boolean;
   projectDisplayName?: string;
   userProjects: SanityUserProjectInfo[];
+  projectLookupStatus?: SanityProjectsLookupStatus;
+  managementApiAvailable: boolean;
   mismatchReason?: string;
 }
 
-export async function fetchSanityUserProjects(token?: string): Promise<SanityUserProjectInfo[]> {
+/**
+ * Attempts to enumerate Sanity projects.
+ *
+ * IMPORTANT:
+ * Being unable to call the Management API /projects does NOT mean
+ * that the configured token is invalid for Content Lake.
+ *
+ * A token can be valid for dataset reads/writes while lacking permission
+ * to enumerate account projects.
+ */
+export async function fetchSanityUserProjectsDetailed(
+  token?: string
+): Promise<SanityProjectsLookupResult> {
   const t = token?.trim() || getSanityConfig().token?.trim();
-  
-  // 1. If token is provided, fetch with Bearer token
+
   if (t) {
     try {
       const res = await fetch('https://api.sanity.io/v2021-06-07/projects', {
         headers: {
           Authorization: `Bearer ${t}`,
+          Accept: 'application/json',
         },
       });
 
       if (res.ok) {
         const data = await res.json();
-        const list = Array.isArray(data) ? data : Array.isArray(data?.projects) ? data.projects : [];
-        if (list.length > 0) {
-          return list.map((p: any) => ({
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.projects)
+            ? data.projects
+            : [];
+
+        return {
+          status: 'ok',
+          httpStatus: res.status,
+          projects: list.map((p: any) => ({
             id: p.id || p._id,
-            displayName: p.displayName || p.name || p.title || p.id,
+            displayName: p.displayName || p.name || p.title || p.id || p._id,
             organizationId: p.organizationId,
-          }));
-        }
+          })),
+        };
       }
-    } catch (err) {
-      console.warn('Could not fetch user projects with token:', err);
+
+      if (res.status === 401) {
+        return {
+          status: 'unauthorized',
+          httpStatus: 401,
+          projects: [],
+          message: 'El token no puede autenticarse contra la Sanity Management API.',
+        };
+      }
+
+      if (res.status === 403) {
+        return {
+          status: 'forbidden',
+          httpStatus: 403,
+          projects: [],
+          message:
+            'El token puede seguir siendo válido para Content Lake, pero no tiene permiso para enumerar proyectos mediante la Management API.',
+        };
+      }
+
+      return {
+        status: 'unavailable',
+        httpStatus: res.status,
+        projects: [],
+        message: `Sanity Management API respondió con HTTP ${res.status}.`,
+      };
+    } catch (error: any) {
+      return {
+        status: 'unavailable',
+        projects: [],
+        message: error?.message || 'No se pudo consultar la Sanity Management API.',
+      };
     }
   }
 
-  // 2. Try fetching with browser cookies / studio session
+  // Browser/studio session is optional metadata only.
   try {
     const res = await fetch('https://api.sanity.io/v2021-06-07/projects', {
       credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+      },
     });
 
     if (res.ok) {
       const data = await res.json();
-      const list = Array.isArray(data) ? data : Array.isArray(data?.projects) ? data.projects : [];
-      if (list.length > 0) {
-        return list.map((p: any) => ({
-          id: p.id || p._id,
-          displayName: p.displayName || p.name || p.title || p.id,
-          organizationId: p.organizationId,
-        }));
-      }
-    }
-  } catch {}
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.projects)
+          ? data.projects
+          : [];
 
-  return [];
+      return {
+        status: 'ok',
+        httpStatus: res.status,
+        projects: list.map((p: any) => ({
+          id: p.id || p._id,
+          displayName: p.displayName || p.name || p.title || p.id || p._id,
+          organizationId: p.organizationId,
+        })),
+      };
+    }
+
+    if (res.status === 401) {
+      return { status: 'unauthorized', httpStatus: 401, projects: [] };
+    }
+
+    if (res.status === 403) {
+      return { status: 'forbidden', httpStatus: 403, projects: [] };
+    }
+
+    return {
+      status: 'unavailable',
+      httpStatus: res.status,
+      projects: [],
+    };
+  } catch (error: any) {
+    return {
+      status: 'unavailable',
+      projects: [],
+      message: error?.message || 'La sesión web de Sanity no está disponible.',
+    };
+  }
+}
+
+/**
+ * Backwards-compatible helper.
+ */
+export async function fetchSanityUserProjects(
+  token?: string
+): Promise<SanityUserProjectInfo[]> {
+  const result = await fetchSanityUserProjectsDetailed(token);
+  return result.projects;
 }
 
 /**
@@ -511,88 +623,84 @@ export async function detectSanityStudioSession(): Promise<{
   loggedIn: boolean;
   user?: SanityUserProfile;
   projects?: SanityUserProjectInfo[];
-  token?: string;
+  projectLookupStatus?: SanityProjectsLookupStatus;
 }> {
-  // 1. Try with session credentials from Sanity Studio / sanity.io
   try {
     const res = await fetch('https://api.sanity.io/v2021-06-07/users/me', {
       credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+      },
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && (data.id || data.email || data.name)) {
-        const user: SanityUserProfile = {
-          id: data.id || 'user',
-          name: data.name || data.displayName || 'Usuario Sanity',
-          email: data.email || '',
-          profileImage: data.profileImage || data.imageUrl || '',
-          role: data.role || 'Editor',
-          authType: 'user_token',
-        };
-        const projects = await fetchSanityUserProjects();
-        return { loggedIn: true, user, projects };
-      }
-    }
-  } catch {}
 
-  // 2. Scan localStorage for Sanity Studio auth tokens
-  try {
-    if (typeof localStorage !== 'undefined') {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.includes('__sanity_auth') || key.includes('sanitySession') || key.startsWith('sanity.auth.'))) {
-          const val = localStorage.getItem(key);
-          if (val) {
-            try {
-              const parsed = JSON.parse(val);
-              const extractedToken =
-                parsed.token || parsed.sessionToken || parsed.accessToken || (typeof parsed === 'string' ? parsed : null);
-              if (extractedToken && typeof extractedToken === 'string' && extractedToken.length > 20) {
-                const profile = await fetchSanityCurrentUser({
-                  projectId: 'temp',
-                  dataset: 'production',
-                  apiVersion: '2024-03-01',
-                  token: extractedToken,
-                  useCdn: false,
-                });
-                const projects = await fetchSanityUserProjects(extractedToken);
-                if (profile && profile.name) {
-                  return { loggedIn: true, user: profile, projects, token: extractedToken };
-                }
-              }
-            } catch {}
-          }
-        }
-      }
+    if (!res.ok) {
+      return { loggedIn: false };
     }
-  } catch {}
 
-  return { loggedIn: false };
+    const data = await res.json();
+    if (!data || !(data.id || data.email || data.name)) {
+      return { loggedIn: false };
+    }
+
+    const user: SanityUserProfile = {
+      id: data.id || 'user',
+      name: data.name || data.displayName || data.label || 'Usuario Sanity',
+      email: data.email || '',
+      profileImage: data.profileImage || data.imageUrl || '',
+      role: data.role || 'Editor',
+      authType: 'user_token',
+    };
+
+    const projectLookup = await fetchSanityUserProjectsDetailed();
+
+    return {
+      loggedIn: true,
+      user,
+      projects: projectLookup.projects,
+      projectLookupStatus: projectLookup.status,
+    };
+  } catch {
+    return { loggedIn: false };
+  }
 }
 
-export async function checkSanityAccountStatus(configOverride?: SanityConfig): Promise<SanityAccountStatus> {
+export async function checkSanityAccountStatus(
+  configOverride?: SanityConfig
+): Promise<SanityAccountStatus> {
   const config = configOverride || getSanityConfig();
-  const user = await fetchSanityCurrentUser(config);
-  const authType = determineSanityAuthType(config, user);
   const configuredProjectId = config.projectId?.trim() || '';
   const configuredDataset = config.dataset?.trim() || '';
   const isConfigured = Boolean(configuredProjectId && configuredDataset);
 
+  const user = await fetchSanityCurrentUser(config);
+  const authType = determineSanityAuthType(config, user);
+
   let userProjects: SanityUserProjectInfo[] = [];
+  let projectLookupStatus: SanityProjectsLookupStatus | undefined;
+  let managementApiAvailable = false;
   let isProjectMismatch = false;
-  let projectDisplayName: string | undefined = undefined;
-  let mismatchReason: string | undefined = undefined;
+  let projectDisplayName: string | undefined;
+  let mismatchReason: string | undefined;
 
-  if (config.token && isConfigured) {
-    userProjects = await fetchSanityUserProjects(config.token);
+  // Project enumeration is optional metadata only.
+  // A 401/403 from /projects does not invalidate Content Lake access.
+  if (config.token?.trim() && isConfigured) {
+    const lookup = await fetchSanityUserProjectsDetailed(config.token);
 
-    if (userProjects.length > 0) {
+    userProjects = lookup.projects;
+    projectLookupStatus = lookup.status;
+    managementApiAvailable = lookup.status === 'ok';
+
+    if (lookup.status === 'ok' && userProjects.length > 0) {
       const matchedProject = userProjects.find((p) => p.id === configuredProjectId);
+
       if (matchedProject) {
         projectDisplayName = matchedProject.displayName;
       } else {
         isProjectMismatch = true;
-        mismatchReason = `Has iniciado sesión como "${user?.name || user?.email || 'Usuario'}", pero el Project ID configurado ("${configuredProjectId}") pertenece a otro usuario o no figura entre tus proyectos.`;
+        mismatchReason =
+          `El Project ID configurado ("${configuredProjectId}") ` +
+          'no figura entre los proyectos visibles para la cuenta actual.';
       }
     }
   }
@@ -606,6 +714,8 @@ export async function checkSanityAccountStatus(configOverride?: SanityConfig): P
     isProjectMismatch,
     projectDisplayName,
     userProjects,
+    projectLookupStatus,
+    managementApiAvailable,
     mismatchReason,
   };
 }
@@ -664,7 +774,9 @@ export async function testSanityConnection(config: {
       dataset: ds,
       apiVersion,
       token: token || undefined,
-      useCdn: false,
+      // Public/cacheable validation can use CDN. Authenticated validation
+      // uses origin so the token is actually checked against the dataset.
+      useCdn: !token,
     });
 
     const query = `count(*[_type == "canvasVisualState"])`;
@@ -675,8 +787,8 @@ export async function testSanityConnection(config: {
       return {
         ok: true,
         mode: 'authenticated',
-        message: 'Conexión exitosa con Sanity (Lectura y Escritura)',
-        details: `Dataset "${ds}" alcanzado correctamente en ${latencyMs}ms. Documentos de canvas encontrados: ${count}.`,
+        message: 'Conexión autenticada con Sanity correcta',
+        details: `Dataset "${ds}" accesible con el token configurado en ${latencyMs}ms. Documentos de canvas encontrados: ${count}.`,
         latencyMs,
         existingDocsCount: count,
       };
