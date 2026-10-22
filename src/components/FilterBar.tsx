@@ -23,6 +23,7 @@ export interface TaskFilterState {
     status: boolean;
     priority: boolean;
   };
+  hideCompletedTasks?: boolean;
 }
 
 interface FilterBarProps {
@@ -49,6 +50,7 @@ interface FilterBarProps {
   onToggleShowStatus?: () => void;
   onToggleShowPriority?: () => void;
   onToggleShowHiddenLabels?: () => void;
+  onToggleHideCompleted?: () => void;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -75,6 +77,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onToggleShowStatus,
   onToggleShowPriority,
   onToggleShowHiddenLabels,
+  onToggleHideCompleted,
 }) => {
   const { i18n } = useLingui();
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
@@ -105,6 +108,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     (filters.showTaskIds === false ? 1 : 0) +
     (filters.showTaskStatus === false ? 1 : 0) +
     (filters.showTaskPriority === false ? 1 : 0) +
+    (filters.hideCompletedTasks ? 1 : 0) +
     (searchQuery.trim() ? 1 : 0);
 
   const hasActiveFilters = activeFiltersCount > 0;
@@ -366,6 +370,26 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                       />
                       <span className="text-xs text-[var(--on-surface)] font-medium">
                         {i18n._(msg`Mostrar etiquetas de items ocultos`)}
+                      </span>
+                    </label>
+
+                    {/* 10. Ocultar tareas ya realizadas en Markdown */}
+                    <label className="flex items-center gap-2 cursor-pointer pt-0.5">
+                      <input
+                        type="checkbox"
+                        id="checkbox-filter-hide-completed-tasks"
+                        checked={Boolean(filters.hideCompletedTasks)}
+                        onChange={(e) => {
+                          if (onToggleHideCompleted) {
+                            onToggleHideCompleted();
+                          } else {
+                            onFilterChange({ ...filters, hideCompletedTasks: e.target.checked });
+                          }
+                        }}
+                        className="w-3.5 h-3.5 rounded text-[var(--primary)] focus:ring-0 cursor-pointer"
+                      />
+                      <span className="text-xs text-[var(--on-surface)] font-medium">
+                        {i18n._(msg`Ocultar tareas realizadas en Markdown`)}
                       </span>
                     </label>
 

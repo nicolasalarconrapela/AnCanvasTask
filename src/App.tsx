@@ -351,6 +351,7 @@ export default function App() {
     showTaskStatus: userSettings.showTaskStatus ?? true,
     showTaskPriority: userSettings.showTaskPriority ?? true,
     showHiddenItemLabels: userSettings.showHiddenItemLabels ?? true,
+    hideCompletedTasks: userSettings.hideCompletedTasks ?? false,
   }));
 
   // Sync React taskFilters state into global filter store for canvas shapes & listeners
@@ -367,6 +368,7 @@ export default function App() {
       showTaskStatus: newSettings.showTaskStatus ?? prev.showTaskStatus,
       showTaskPriority: newSettings.showTaskPriority ?? prev.showTaskPriority,
       showHiddenItemLabels: newSettings.showHiddenItemLabels ?? prev.showHiddenItemLabels,
+      hideCompletedTasks: newSettings.hideCompletedTasks ?? prev.hideCompletedTasks,
     }));
   }, []);
 
@@ -418,6 +420,18 @@ export default function App() {
     });
   }, []);
 
+  const handleToggleHideCompletedTasks = useCallback(() => {
+    setTaskFilters((prev) => {
+      const nextHide = !prev.hideCompletedTasks;
+      setUserSettings((currSettings) => {
+        const updated = { ...currSettings, hideCompletedTasks: nextHide };
+        saveUserSettings(updated);
+        return updated;
+      });
+      return { ...prev, hideCompletedTasks: nextHide };
+    });
+  }, []);
+
   const handleChangeHiddenItemLabelTypes = useCallback(
     (types: { id: boolean; status: boolean; priority: boolean }) => {
       setTaskFilters((prev) => {
@@ -445,6 +459,9 @@ export default function App() {
     const handleToggleHiddenLabelsEvent = () => {
       handleToggleShowHiddenItemLabels();
     };
+    const handleToggleHideCompletedEvent = () => {
+      handleToggleHideCompletedTasks();
+    };
     const handleSetHiddenLabelTypesEvent = (e: Event) => {
       const custom = e as CustomEvent<{ id: boolean; status: boolean; priority: boolean }>;
       if (custom.detail) {
@@ -456,6 +473,7 @@ export default function App() {
     window.addEventListener('antask:toggle-show-status', handleToggleStatusEvent);
     window.addEventListener('antask:toggle-show-priority', handleTogglePriorityEvent);
     window.addEventListener('antask:toggle-show-hidden-labels', handleToggleHiddenLabelsEvent);
+    window.addEventListener('antask:toggle-hide-completed-tasks', handleToggleHideCompletedEvent);
     window.addEventListener('antask:set-hidden-label-types', handleSetHiddenLabelTypesEvent);
 
     return () => {
@@ -463,9 +481,17 @@ export default function App() {
       window.removeEventListener('antask:toggle-show-status', handleToggleStatusEvent);
       window.removeEventListener('antask:toggle-show-priority', handleTogglePriorityEvent);
       window.removeEventListener('antask:toggle-show-hidden-labels', handleToggleHiddenLabelsEvent);
+      window.removeEventListener('antask:toggle-hide-completed-tasks', handleToggleHideCompletedEvent);
       window.removeEventListener('antask:set-hidden-label-types', handleSetHiddenLabelTypesEvent);
     };
-  }, [handleToggleShowTaskIds, handleToggleShowTaskStatus, handleToggleShowTaskPriority, handleToggleShowHiddenItemLabels, handleChangeHiddenItemLabelTypes]);
+  }, [
+    handleToggleShowTaskIds,
+    handleToggleShowTaskStatus,
+    handleToggleShowTaskPriority,
+    handleToggleShowHiddenItemLabels,
+    handleToggleHideCompletedTasks,
+    handleChangeHiddenItemLabelTypes,
+  ]);
 
   // Command Palette & Recent Tasks State (DESIGN.md Section 12 & 15)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
@@ -5641,6 +5667,7 @@ export default function App() {
                 showTaskStatus: userSettings.showTaskStatus ?? true,
                 showTaskPriority: userSettings.showTaskPriority ?? true,
                 showHiddenItemLabels: userSettings.showHiddenItemLabels ?? true,
+                hideCompletedTasks: false,
               });
               setActiveFilter('all');
             }}
@@ -5648,6 +5675,7 @@ export default function App() {
             onToggleShowStatus={handleToggleShowTaskStatus}
             onToggleShowPriority={handleToggleShowTaskPriority}
             onToggleShowHiddenLabels={handleToggleShowHiddenItemLabels}
+            onToggleHideCompleted={handleToggleHideCompletedTasks}
             searchQuery={searchQuery}
             onSearchChange={(q) => setSearchQuery(q)}
             availableSections={existingSections}
@@ -6258,6 +6286,8 @@ export default function App() {
                   onToggleShowHiddenItemLabels={handleToggleShowHiddenItemLabels}
                   hiddenItemLabelTypes={taskFilters.hiddenItemLabelTypes}
                   onChangeHiddenItemLabelTypes={handleChangeHiddenItemLabelTypes}
+                  hideCompletedTasks={taskFilters.hideCompletedTasks}
+                  onToggleHideCompletedTasks={handleToggleHideCompletedTasks}
                 />
               </div>
             )}

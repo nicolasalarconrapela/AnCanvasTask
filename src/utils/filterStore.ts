@@ -30,6 +30,7 @@ export const DEFAULT_TASK_FILTERS: TaskFilterState = {
     status: true,
     priority: true,
   },
+  hideCompletedTasks: false,
 };
 
 let currentGlobalFilters: TaskFilterState = { ...DEFAULT_TASK_FILTERS };

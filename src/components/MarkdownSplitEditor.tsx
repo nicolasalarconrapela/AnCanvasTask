@@ -116,10 +116,121 @@ export class InlineHiddenTaskLabelsWidget extends WidgetType {
 // Backwards compatibility alias
 export const HiddenItemWidget = InlineHiddenTaskLabelsWidget;
 
+export class PrecedingHiddenTasksBadgeWidget extends WidgetType {
+  constructor(
+    readonly count: number,
+    readonly onToggle?: () => void
+  ) {
+    super();
+  }
+
+  toDOM(): HTMLElement {
+    if (typeof document === 'undefined') return {} as HTMLElement;
+    const badge = document.createElement('span');
+    badge.className =
+      'cm-preceding-hidden-tasks-badge inline-flex items-center gap-1 ml-1.5 px-1.5 py-[0.5px] rounded-[3px] text-[8.5px] font-mono leading-none border transition-colors select-none cursor-pointer align-middle ' +
+      'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/20 ' +
+      'dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80 dark:hover:bg-emerald-900/60';
+    badge.style.fontSize = '8.5px';
+    badge.style.padding = '1px 4px';
+    badge.style.lineHeight = '1';
+    badge.style.borderRadius = '3px';
+    badge.title = `${this.count} tarea${this.count > 1 ? 's' : ''} completada${this.count > 1 ? 's' : ''} oculta${this.count > 1 ? 's' : ''}. Clic para mostrar.`;
+
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined text-[9px] opacity-80 shrink-0';
+    icon.style.fontSize = '9px';
+    icon.style.lineHeight = '1';
+    icon.textContent = 'check_circle';
+    badge.appendChild(icon);
+
+    const text = document.createElement('span');
+    text.className = 'font-semibold tracking-tight';
+    text.style.fontSize = '8.5px';
+    text.style.lineHeight = '1';
+    text.textContent = `${this.count} oculta${this.count > 1 ? 's' : ''}`;
+    badge.appendChild(text);
+
+    badge.onmousedown = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    badge.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.onToggle) {
+        this.onToggle();
+      } else {
+        window.dispatchEvent(new CustomEvent('antask:toggle-hide-completed-tasks'));
+      }
+    };
+
+    return badge;
+  }
+
+  eq(other: PrecedingHiddenTasksBadgeWidget): boolean {
+    return this.count === other.count;
+  }
+}
+
+export class BlockHiddenTasksPlaceholderWidget extends WidgetType {
+  constructor(
+    readonly count: number,
+    readonly onToggle?: () => void
+  ) {
+    super();
+  }
+
+  toDOM(): HTMLElement {
+    if (typeof document === 'undefined') return {} as HTMLElement;
+    const container = document.createElement('div');
+    container.className = 'cm-block-hidden-tasks-placeholder py-0.5 select-none';
+
+    const badge = document.createElement('span');
+    badge.className =
+      'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border cursor-pointer transition-colors ' +
+      'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/20 ' +
+      'dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80 dark:hover:bg-emerald-900/60';
+    badge.title = `${this.count} tarea${this.count > 1 ? 's' : ''} completada${this.count > 1 ? 's' : ''} oculta${this.count > 1 ? 's' : ''}. Clic para mostrar.`;
+
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined text-[11px] opacity-80 shrink-0';
+    icon.textContent = 'check_circle';
+    badge.appendChild(icon);
+
+    const text = document.createElement('span');
+    text.className = 'font-semibold tracking-tight';
+    text.textContent = `${this.count} tarea${this.count > 1 ? 's' : ''} completada${this.count > 1 ? 's' : ''} oculta${this.count > 1 ? 's' : ''} (clic para mostrar)`;
+    badge.appendChild(text);
+
+    badge.onmousedown = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    badge.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.onToggle) {
+        this.onToggle();
+      } else {
+        window.dispatchEvent(new CustomEvent('antask:toggle-hide-completed-tasks'));
+      }
+    };
+
+    container.appendChild(badge);
+    return container;
+  }
+
+  eq(other: BlockHiddenTasksPlaceholderWidget): boolean {
+    return this.count === other.count;
+  }
+}
+
 export interface HideTaskMetadataOptions {
   hideIds: boolean;
   hideStatus: boolean;
   hidePriority: boolean;
+  hideCompletedTasks?: boolean;
   showLabels: boolean;
   labelTypes?: {
     id?: boolean;
@@ -127,32 +238,164 @@ export interface HideTaskMetadataOptions {
     priority?: boolean;
   };
   onToggleLabels?: () => void;
+  onToggleHideCompleted?: () => void;
+}
+
+interface CompletedTaskGroup {
+  startLine: number;
+  endLine: number;
+  taskCount: number;
 }
 
 export function buildHideTaskMetadataDeco(
   state: EditorState,
   opts: HideTaskMetadataOptions
 ): DecorationSet {
+  // Step 1: Scan all tasks to detect completed tasks and line spans
+  interface TaskSpan {
+    rootLine: number;
+    startLine: number;
+    endLine: number;
+    isCompleted: boolean;
+  }
+  const allTasks: TaskSpan[] = [];
+  if (opts.hideCompletedTasks) {
+    let l = 1;
+    while (l <= state.doc.lines) {
+      const line = state.doc.line(l);
+      const rootTaskMatch = line.text.match(/^(\s*)([-*+]\s*\[([ xX])\])/);
+      if (rootTaskMatch) {
+        const baseIndent = rootTaskMatch[1].length;
+        let isCompleted = rootTaskMatch[3].toLowerCase() === 'x';
+        let subL = l + 1;
+
+        while (subL <= state.doc.lines) {
+          const subLine = state.doc.line(subL);
+          const subText = subLine.text;
+          if (subText.trim().length === 0 || subText.startsWith('#')) break;
+          const subIndent = (subText.match(/^(\s*)/)?.[1] || '').length;
+          if (subIndent <= baseIndent && /^(\s*)[-*+]\s*\[([ xX])\]/.test(subText)) break;
+
+          if (isTaskStatusLine(subText)) {
+            const statusMatch = subText.match(/Status\s*:\s*(.+)$/i);
+            if (statusMatch) {
+              const clean = statusMatch[1].trim().toLowerCase();
+              if (clean === 'done' || clean === 'completed') isCompleted = true;
+            }
+          }
+          subL++;
+        }
+
+        allTasks.push({
+          rootLine: l,
+          startLine: l,
+          endLine: subL - 1,
+          isCompleted,
+        });
+        l = subL;
+      } else {
+        l++;
+      }
+    }
+  }
+
+  // Group contiguous completed tasks
+  const completedGroups: CompletedTaskGroup[] = [];
+  if (opts.hideCompletedTasks) {
+    const completedTasks = allTasks.filter((t) => t.isCompleted);
+    let currentGroup: CompletedTaskGroup | null = null;
+
+    for (const task of completedTasks) {
+      if (!currentGroup) {
+        currentGroup = {
+          startLine: task.startLine,
+          endLine: task.endLine,
+          taskCount: 1,
+        };
+      } else {
+        let onlyBlank = true;
+        for (let k = currentGroup.endLine + 1; k < task.startLine; k++) {
+          if (state.doc.line(k).text.trim().length > 0) {
+            onlyBlank = false;
+            break;
+          }
+        }
+        if (onlyBlank) {
+          currentGroup.endLine = task.endLine;
+          currentGroup.taskCount += 1;
+        } else {
+          completedGroups.push(currentGroup);
+          currentGroup = {
+            startLine: task.startLine,
+            endLine: task.endLine,
+            taskCount: 1,
+          };
+        }
+      }
+    }
+    if (currentGroup) completedGroups.push(currentGroup);
+  }
+
+  // Preceding line badges mapping: line index (1-based) -> taskCount
+  const precedingBadges = new Map<number, number>();
+
+  for (const group of completedGroups) {
+    if (group.startLine > 1) {
+      let prevLineNum = group.startLine - 1;
+      while (prevLineNum > 1 && state.doc.line(prevLineNum).text.trim().length === 0) {
+        prevLineNum--;
+      }
+      const containingTask = allTasks.find(
+        (t) => !t.isCompleted && prevLineNum >= t.startLine && prevLineNum <= t.endLine
+      );
+      const targetLine = containingTask ? containingTask.rootLine : prevLineNum;
+      precedingBadges.set(targetLine, (precedingBadges.get(targetLine) || 0) + group.taskCount);
+    }
+  }
+
   const builder = new RangeSetBuilder<Decoration>();
   let l = 1;
   while (l <= state.doc.lines) {
     const line = state.doc.line(l);
-    const isTaskRoot = /^(\s*)[-*+]\s*\[([ xX])\]/.test(line.text);
-    if (isTaskRoot) {
+
+    // Check if l is the start of a completed group
+    const completedGroup = completedGroups.find((g) => g.startLine === l);
+    if (completedGroup) {
+      const from = line.from;
+      const endLine = state.doc.line(completedGroup.endLine);
+      const to = completedGroup.endLine < state.doc.lines ? state.doc.line(completedGroup.endLine + 1).from : endLine.to;
+
+      if (completedGroup.startLine === 1) {
+        builder.add(
+          from,
+          to,
+          Decoration.replace({
+            block: true,
+            widget: new BlockHiddenTasksPlaceholderWidget(completedGroup.taskCount, opts.onToggleHideCompleted),
+          })
+        );
+      } else {
+        builder.add(from, to, Decoration.replace({ block: true }));
+      }
+      l = completedGroup.endLine + 1;
+      continue;
+    }
+
+    const rootTaskMatch = line.text.match(/^(\s*)([-*+]\s*\[([ xX])\])/);
+    if (rootTaskMatch) {
+      const baseIndent = rootTaskMatch[1].length;
       const taskLine = line;
       const hiddenItems: HiddenTaskItemInfo[] = [];
       const hiddenRanges: Array<{ from: number; to: number }> = [];
       let subL = l + 1;
+
       while (subL <= state.doc.lines) {
         const subLine = state.doc.line(subL);
         const subText = subLine.text;
-        if (
-          subText.trim().length === 0 ||
-          /^(\s*)[-*+]\s*\[([ xX])\]/.test(subText) ||
-          subText.startsWith('#')
-        ) {
-          break;
-        }
+        if (subText.trim().length === 0 || subText.startsWith('#')) break;
+        const subIndent = (subText.match(/^(\s*)/)?.[1] || '').length;
+        if (subIndent <= baseIndent && /^(\s*)[-*+]\s*\[([ xX])\]/.test(subText)) break;
+
         let type: 'id' | 'status' | 'priority' | null = null;
         if (opts.hideIds && isTaskIdLine(subText)) type = 'id';
         else if (opts.hideStatus && isTaskStatusLine(subText)) type = 'status';
@@ -173,6 +416,7 @@ export function buildHideTaskMetadataDeco(
         subL++;
       }
 
+      // Add labels widget for pending task
       if (opts.showLabels && hiddenItems.length > 0) {
         builder.add(
           taskLine.to,
@@ -184,12 +428,38 @@ export function buildHideTaskMetadataDeco(
         );
       }
 
+      // If this task line has a preceding badge for hidden completed tasks right after it
+      const badgeCount = precedingBadges.get(l);
+      if (badgeCount) {
+        builder.add(
+          taskLine.to,
+          taskLine.to,
+          Decoration.widget({
+            widget: new PrecedingHiddenTasksBadgeWidget(badgeCount, opts.onToggleHideCompleted),
+            side: 2,
+          })
+        );
+      }
+
       for (const r of hiddenRanges) {
         builder.add(r.from, r.to, Decoration.replace({ block: true }));
       }
 
       l = subL;
     } else {
+      // Non-task line (e.g. heading or plain text line)
+      const badgeCount = precedingBadges.get(l);
+      if (badgeCount) {
+        builder.add(
+          line.to,
+          line.to,
+          Decoration.widget({
+            widget: new PrecedingHiddenTasksBadgeWidget(badgeCount, opts.onToggleHideCompleted),
+            side: 1,
+          })
+        );
+      }
+
       let type: 'id' | 'status' | 'priority' | null = null;
       if (opts.hideIds && isTaskIdLine(line.text)) type = 'id';
       else if (opts.hideStatus && isTaskStatusLine(line.text)) type = 'status';
@@ -202,7 +472,18 @@ export function buildHideTaskMetadataDeco(
       l++;
     }
   }
+
   return builder.finish();
+}
+
+export function buildHideCompletedTasksDeco(state: EditorState): DecorationSet {
+  return buildHideTaskMetadataDeco(state, {
+    hideIds: false,
+    hideStatus: false,
+    hidePriority: false,
+    hideCompletedTasks: true,
+    showLabels: false,
+  });
 }
 
 export function createHideTaskMetadataExtension(opts: HideTaskMetadataOptions): Extension {
@@ -308,6 +589,30 @@ interface TaskFieldNavigationOptions {
   showTaskIds?: boolean;
   showTaskStatus?: boolean;
   showTaskPriority?: boolean;
+  hideCompletedTasks?: boolean;
+}
+
+function isCompletedTaskLine(state: EditorState, lineNumber: number): boolean {
+  const line = state.doc.line(lineNumber);
+  const match = line.text.match(/^(\s*)([-*+]\s*\[([ xX])\])/);
+  if (!match) return false;
+  if (match[3].toLowerCase() === 'x') return true;
+  const baseIndent = match[1].length;
+  for (let k = lineNumber + 1; k <= state.doc.lines; k++) {
+    const subLine = state.doc.line(k);
+    const subText = subLine.text;
+    if (subText.trim().length === 0 || subText.startsWith('#')) break;
+    const subIndent = (subText.match(/^(\s*)/)?.[1] || '').length;
+    if (subIndent <= baseIndent && /^(\s*)[-*+]\s*\[([ xX])\]/.test(subText)) break;
+    if (isTaskStatusLine(subText)) {
+      const statusMatch = subText.match(/Status\s*:\s*(.+)$/i);
+      if (statusMatch) {
+        const clean = statusMatch[1].trim().toLowerCase();
+        if (clean === 'done' || clean === 'completed') return true;
+      }
+    }
+  }
+  return false;
 }
 
 function navigateTaskFields(
@@ -397,6 +702,9 @@ function navigateTaskFields(
       for (let m = curLine.number + 1; m <= view.state.doc.lines; m++) {
         const nextTaskLine = view.state.doc.line(m);
         if (/^(\s*)[-*+]\s*\[([ xX])\]/.test(nextTaskLine.text)) {
+          if (opts?.hideCompletedTasks && isCompletedTaskLine(view.state, m)) {
+            continue;
+          }
           const cIdx = nextTaskLine.text.indexOf(']');
           let vStart = cIdx + 1;
           while (vStart < nextTaskLine.text.length && nextTaskLine.text[vStart] === ' ') vStart++;
@@ -418,6 +726,9 @@ function navigateTaskFields(
       for (let m = taskLineNumber - 1; m >= 1; m--) {
         const prevTaskLine = view.state.doc.line(m);
         if (/^(\s*)[-*+]\s*\[([ xX])\]/.test(prevTaskLine.text)) {
+          if (opts?.hideCompletedTasks && isCompletedTaskLine(view.state, m)) {
+            continue;
+          }
           let lastF: TaskFieldRange = {
             line: prevTaskLine.number,
             from: prevTaskLine.from + (prevTaskLine.text.indexOf(']') + 2),
@@ -544,6 +855,8 @@ interface MarkdownSplitEditorProps {
   onToggleShowHiddenItemLabels?: () => void;
   hiddenItemLabelTypes?: { id: boolean; status: boolean; priority: boolean };
   onChangeHiddenItemLabelTypes?: (types: { id: boolean; status: boolean; priority: boolean }) => void;
+  hideCompletedTasks?: boolean;
+  onToggleHideCompletedTasks?: () => void;
 }
 
 export function MarkdownSplitEditor({
@@ -567,6 +880,8 @@ export function MarkdownSplitEditor({
   onToggleShowHiddenItemLabels,
   hiddenItemLabelTypes,
   onChangeHiddenItemLabelTypes,
+  hideCompletedTasks,
+  onToggleHideCompletedTasks,
 }: MarkdownSplitEditorProps) {
   const { i18n } = useLingui();
   const editorRef = useRef<ReactCodeMirrorRef>(null);
@@ -576,6 +891,24 @@ export function MarkdownSplitEditor({
   const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
   const [isTyping, setIsTyping] = useState(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [localHideCompleted, setLocalHideCompleted] = useState(false);
+  const hideCompleted = hideCompletedTasks !== undefined ? hideCompletedTasks : localHideCompleted;
+  const handleToggleHideCompleted = useCallback(() => {
+    if (onToggleHideCompletedTasks) {
+      onToggleHideCompletedTasks();
+    } else {
+      setLocalHideCompleted((prev) => !prev);
+    }
+  }, [onToggleHideCompletedTasks]);
+
+  useEffect(() => {
+    const handleToggleHideCompletedEvent = () => handleToggleHideCompleted();
+    window.addEventListener('antask:toggle-hide-completed-tasks', handleToggleHideCompletedEvent);
+    return () => {
+      window.removeEventListener('antask:toggle-hide-completed-tasks', handleToggleHideCompletedEvent);
+    };
+  }, [handleToggleHideCompleted]);
 
   const [localShowHiddenLabels, setLocalShowHiddenLabels] = useState(true);
   const showHiddenLabels = showHiddenItemLabels !== undefined ? showHiddenItemLabels : localShowHiddenLabels;
@@ -829,8 +1162,8 @@ export function MarkdownSplitEditor({
   }, []);
 
   const navOptions = useMemo(
-    () => ({ showTaskIds, showTaskStatus, showTaskPriority }),
-    [showTaskIds, showTaskStatus, showTaskPriority]
+    () => ({ showTaskIds, showTaskStatus, showTaskPriority, hideCompletedTasks: hideCompleted }),
+    [showTaskIds, showTaskStatus, showTaskPriority, hideCompleted]
   );
 
   const enterTaskSnippetExt = useMemo(
@@ -845,16 +1178,22 @@ export function MarkdownSplitEditor({
       cursorTrackerPlugin,
       EditorView.lineWrapping,
     ];
-    const hasHiddenFields = showTaskIds === false || showTaskStatus === false || showTaskPriority === false;
+    const hasHiddenFields =
+      showTaskIds === false ||
+      showTaskStatus === false ||
+      showTaskPriority === false ||
+      hideCompleted;
     if (hasHiddenFields) {
       exts.push(
         createHideTaskMetadataExtension({
           hideIds: showTaskIds === false,
           hideStatus: showTaskStatus === false,
           hidePriority: showTaskPriority === false,
+          hideCompletedTasks: hideCompleted,
           showLabels: showHiddenLabels !== false,
           labelTypes: effectiveLabelTypes,
           onToggleLabels: handleToggleHiddenLabels,
+          onToggleHideCompleted: handleToggleHideCompleted,
         })
       );
     }
@@ -865,9 +1204,11 @@ export function MarkdownSplitEditor({
     showTaskIds,
     showTaskStatus,
     showTaskPriority,
+    hideCompleted,
     showHiddenLabels,
     effectiveLabelTypes,
     handleToggleHiddenLabels,
+    handleToggleHideCompleted,
   ]);
 
   return (
@@ -1051,6 +1392,39 @@ export function MarkdownSplitEditor({
               <span className="font-mono text-[10px] font-bold">#Prio</span>
             </button>
           )}
+
+          {/* Toggle Hide/Show Completed Tasks in Editor */}
+          <button
+            id="btn-markdown-toggle-completed"
+            type="button"
+            onClick={handleToggleHideCompleted}
+            className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
+              hideCompleted
+                ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/80 hover:bg-emerald-900/60'
+                : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+            }`}
+            title={
+              hideCompleted
+                ? i18n._(msg`Mostrar tareas ya realizadas en el editor Markdown`)
+                : i18n._(msg`Ocultar tareas ya realizadas en el editor Markdown`)
+            }
+            aria-label={
+              hideCompleted
+                ? i18n._(msg`Mostrar tareas realizadas en Markdown`)
+                : i18n._(msg`Ocultar tareas realizadas en Markdown`)
+            }
+            aria-pressed={hideCompleted}
+          >
+            <span className="material-symbols-outlined text-[13px]">
+              {hideCompleted ? 'visibility_off' : 'check_circle'}
+            </span>
+            <span className="font-mono text-[10px] font-bold">#Done</span>
+            {hideCompleted && stats.completedTasks > 0 && (
+              <span className="text-[9px] px-1 py-0 rounded bg-emerald-900/60 text-emerald-200 border border-emerald-700/60 font-mono">
+                {stats.completedTasks}
+              </span>
+            )}
+          </button>
 
           {/* Dropdown to select which hidden item labels to show */}
           {(showTaskIds === false || showTaskStatus === false || showTaskPriority === false) && (
@@ -1687,7 +2061,9 @@ export function MarkdownSplitEditor({
         <div id="div-markdownspliteditor-17" className="flex items-center gap-3">
           <span>
             {i18n._(msg`Tareas`)}: <strong className="text-[var(--on-surface)]">{stats.totalTasks}</strong> (
-            <span className="text-emerald-400">{stats.completedTasks} {i18n._(msg`completadas`)}</span> /{' '}
+            <span className="text-emerald-400">
+              {stats.completedTasks} {hideCompleted ? i18n._(msg`completadas (ocultas)`) : i18n._(msg`completadas`)}
+            </span> /{' '}
             <span className="text-amber-400">{stats.pendingTasks} {i18n._(msg`pendientes`)}</span>)
           </span>
           <span className="hidden sm:inline">

@@ -29,6 +29,7 @@ export interface AppUserSettings {
     status: boolean;
     priority: boolean;
   };
+  hideCompletedTasks: boolean;
   workspaceShowSidebar: boolean;
   kanbanDefaultGroupBy: 'status' | 'section';
   kanbanShowTags: boolean;
@@ -58,6 +59,7 @@ export const DEFAULT_USER_SETTINGS: AppUserSettings = {
     status: true,
     priority: true,
   },
+  hideCompletedTasks: false,
   workspaceShowSidebar: true,
   kanbanDefaultGroupBy: 'status',
   kanbanShowTags: true,
@@ -88,6 +90,7 @@ export function loadUserSettings(): AppUserSettings {
         status: parsed.hiddenItemLabelTypes?.status !== undefined ? Boolean(parsed.hiddenItemLabelTypes.status) : true,
         priority: parsed.hiddenItemLabelTypes?.priority !== undefined ? Boolean(parsed.hiddenItemLabelTypes.priority) : true,
       },
+      hideCompletedTasks: parsed.hideCompletedTasks !== undefined ? Boolean(parsed.hideCompletedTasks) : DEFAULT_USER_SETTINGS.hideCompletedTasks,
       recentFiles: Array.isArray(parsed.recentFiles) ? parsed.recentFiles : DEFAULT_USER_SETTINGS.recentFiles,
     };
   } catch (e) {

@@ -44,7 +44,10 @@ import {
 import { EditorState } from '@codemirror/state';
 import {
   InlineHiddenTaskLabelsWidget,
+  PrecedingHiddenTasksBadgeWidget,
+  BlockHiddenTasksPlaceholderWidget,
   buildHideTaskMetadataDeco,
+  buildHideCompletedTasksDeco,
   getPriorityBadgeClasses,
 } from '../src/components/MarkdownSplitEditor';
 import { DEFAULT_USER_SETTINGS } from '../src/services/settingsService';
@@ -1172,6 +1175,100 @@ console.log('26. Verificando etiquetas lineales (inline pastel) de items ocultos
   assert(DEFAULT_TASK_FILTERS.hiddenItemLabelTypes, 'DEFAULT_TASK_FILTERS debe tener hiddenItemLabelTypes');
 }
 console.log('   ✓ Etiquetas lineales de items ocultos y desplegable de selección verificados correctamente.');
+
+// 27. Verificando ocultamiento de tareas ya realizadas e indicador en línea antecesora
+console.log('27. Verificando ocultamiento de tareas ya realizadas e indicador en línea antecesora...');
+{
+  assert.strictEqual(DEFAULT_USER_SETTINGS.hideCompletedTasks, false, 'DEFAULT_USER_SETTINGS.hideCompletedTasks debe ser false por defecto');
+  assert.strictEqual(DEFAULT_TASK_FILTERS.hideCompletedTasks, false, 'DEFAULT_TASK_FILTERS.hideCompletedTasks debe ser false por defecto');
+
+  const testDoc = `# Proyecto
+- [x] Tarea Alpha Completada
+  - Description: Tarea 1
+  - ID: alpha-1
+  - Status: done
+  - Priority: P1
+- [ ] Tarea Beta Pendiente
+  - Description: Tarea 2
+  - ID: beta-2
+  - Status: todo
+  - Priority: P2
+  - [x] Subtarea lista
+  - [ ] Subtarea pendiente
+- [ ] Tarea Gamma con status done
+  - ID: gamma-3
+  - Status: done
+- [x] Tarea Delta al final
+  - ID: delta-4
+`;
+
+  const state = EditorState.create({ doc: testDoc });
+
+  // 27.1 buildHideCompletedTasksDeco:
+  // - Badge en '# Proyecto' (línea 1) indicando 1 oculta (Alpha)
+  // - Reemplazo en bloque para Alpha (líneas 2-6)
+  // - Badge en 'Tarea Beta Pendiente' (línea 7) indicando 2 ocultas (Gamma + Delta contiguas)
+  // - Reemplazo en bloque para Gamma + Delta (líneas 14-18)
+  const decoCompletedOnly = buildHideCompletedTasksDeco(state);
+  assert.strictEqual(decoCompletedOnly.size, 4, 'Debe generar 4 decoraciones: 2 badges antecesores y 2 bloques reemplazados');
+
+  // Validar widgets antecesores e inspeccionar conteos
+  const precedingBadges: PrecedingHiddenTasksBadgeWidget[] = [];
+  decoCompletedOnly.between(0, state.doc.length, (_from, _to, deco) => {
+    if (deco.spec.widget instanceof PrecedingHiddenTasksBadgeWidget) {
+      precedingBadges.push(deco.spec.widget);
+    }
+  });
+
+  assert.strictEqual(precedingBadges.length, 2, 'Debe haber exactamente 2 widgets antecesores');
+  assert.strictEqual(precedingBadges[0].count, 1, 'Primer badge antecesor en encabezado debe indicar 1 tarea oculta');
+  assert.strictEqual(precedingBadges[1].count, 2, 'Segundo badge antecesor en Tarea Beta debe indicar 2 tareas ocultas (Gamma + Delta agrupadas)');
+
+  // Validar propiedades e igualdad de PrecedingHiddenTasksBadgeWidget
+  assert.strictEqual(precedingBadges[0].eq(new PrecedingHiddenTasksBadgeWidget(1)), true);
+  assert.strictEqual(precedingBadges[0].eq(new PrecedingHiddenTasksBadgeWidget(2)), false);
+
+  // 27.2 Integrado con buildHideTaskMetadataDeco({ hideCompletedTasks: true, ... })
+  const decoBoth = buildHideTaskMetadataDeco(state, {
+    hideIds: true,
+    hideStatus: true,
+    hidePriority: true,
+    hideCompletedTasks: true,
+    showLabels: true,
+  });
+  // 4 decoraciones de completadas (2 badges + 2 bloques) + Beta con 3 líneas de metadatos ocultas y 1 widget inline = 8
+  assert.strictEqual(decoBoth.size, 8, 'Debe generar 8 decoraciones combinando tareas completadas ocultas y metadatos');
+
+  // 27.3 Caso borde: Tareas completadas en la línea 1 (sin línea antecesora)
+  const docTop = `- [x] Tarea inicial completada 1
+- [x] Tarea inicial completada 2
+- [ ] Tarea 3
+`;
+  const stateTop = EditorState.create({ doc: docTop });
+  const decoTop = buildHideCompletedTasksDeco(stateTop);
+  assert.strictEqual(decoTop.size, 1, 'Al inicio del documento debe generar 1 decoración de reemplazo con widget');
+  let topPlaceholderWidget: BlockHiddenTasksPlaceholderWidget | null = null;
+  decoTop.between(0, stateTop.doc.length, (_from, _to, deco) => {
+    if (deco.spec.widget instanceof BlockHiddenTasksPlaceholderWidget) {
+      topPlaceholderWidget = deco.spec.widget;
+    }
+  });
+  assert(topPlaceholderWidget !== null, 'Debe haber un BlockHiddenTasksPlaceholderWidget para la línea 1');
+  assert.strictEqual((topPlaceholderWidget as BlockHiddenTasksPlaceholderWidget).count, 2, 'Debe indicar 2 tareas ocultas');
+  assert.strictEqual((topPlaceholderWidget as BlockHiddenTasksPlaceholderWidget).eq(new BlockHiddenTasksPlaceholderWidget(2)), true);
+  assert.strictEqual((topPlaceholderWidget as BlockHiddenTasksPlaceholderWidget).eq(new BlockHiddenTasksPlaceholderWidget(1)), false);
+
+  // 27.4 Cuando hideCompletedTasks es false, las tareas completadas se muestran normalmente
+  const decoNormal = buildHideTaskMetadataDeco(state, {
+    hideIds: false,
+    hideStatus: false,
+    hidePriority: false,
+    hideCompletedTasks: false,
+    showLabels: false,
+  });
+  assert.strictEqual(decoNormal.size, 0, 'No debe generar decoraciones cuando no hay ocultamientos activos');
+}
+console.log('   ✓ Ocultamiento de tareas ya realizadas e indicador en línea antecesora verificados correctamente.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 process.exit(0);
