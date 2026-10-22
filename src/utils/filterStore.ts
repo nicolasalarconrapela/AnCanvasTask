@@ -29,6 +29,7 @@ export const DEFAULT_TASK_FILTERS: TaskFilterState = {
     id: true,
     status: true,
     priority: true,
+    completed: true,
   },
   hideCompletedTasks: false,
 };

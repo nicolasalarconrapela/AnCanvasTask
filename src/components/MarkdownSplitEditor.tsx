@@ -267,6 +267,7 @@ export interface HideTaskMetadataOptions {
     id?: boolean;
     status?: boolean;
     priority?: boolean;
+    completed?: boolean;
   };
   onToggleLabels?: () => void;
   onToggleHideCompleted?: () => void;
@@ -277,6 +278,10 @@ export function buildHideTaskMetadataDeco(
   state: EditorState,
   opts: HideTaskMetadataOptions
 ): DecorationSet {
+  const isCompletedBadgeAllowed =
+    opts.showLabels !== false &&
+    (opts.labelTypes ? opts.labelTypes.completed !== false : true);
+
   // Step 1: Scan all tasks to detect completed tasks and line spans
   interface TaskSpan {
     rootLine: number;
@@ -461,12 +466,14 @@ export function buildHideTaskMetadataDeco(
           to,
           Decoration.replace({
             block: true,
-            widget: new BlockHiddenTasksPlaceholderWidget(
-              completedGroup.taskCount,
-              opts.onToggleHideCompleted,
-              completedGroup,
-              opts.onOpenHiddenTasksModal
-            ),
+            widget: isCompletedBadgeAllowed
+              ? new BlockHiddenTasksPlaceholderWidget(
+                  completedGroup.taskCount,
+                  opts.onToggleHideCompleted,
+                  completedGroup,
+                  opts.onOpenHiddenTasksModal
+                )
+              : undefined,
           })
         );
       } else {
@@ -525,7 +532,7 @@ export function buildHideTaskMetadataDeco(
 
       // If this task line has a preceding badge for hidden completed tasks right after it
       const badgeGroup = precedingBadges.get(l);
-      if (badgeGroup) {
+      if (badgeGroup && isCompletedBadgeAllowed) {
         builder.add(
           taskLine.to,
           taskLine.to,
@@ -549,7 +556,7 @@ export function buildHideTaskMetadataDeco(
     } else {
       // Non-task line (e.g. heading or plain text line)
       const badgeGroup = precedingBadges.get(l);
-      if (badgeGroup) {
+      if (badgeGroup && isCompletedBadgeAllowed) {
         builder.add(
           line.to,
           line.to,
@@ -587,7 +594,7 @@ export function buildHideCompletedTasksDeco(state: EditorState): DecorationSet {
     hideStatus: false,
     hidePriority: false,
     hideCompletedTasks: true,
-    showLabels: false,
+    showLabels: true,
   });
 }
 
@@ -958,8 +965,8 @@ interface MarkdownSplitEditorProps {
   onToggleShowTaskPriority?: () => void;
   showHiddenItemLabels?: boolean;
   onToggleShowHiddenItemLabels?: () => void;
-  hiddenItemLabelTypes?: { id: boolean; status: boolean; priority: boolean };
-  onChangeHiddenItemLabelTypes?: (types: { id: boolean; status: boolean; priority: boolean }) => void;
+  hiddenItemLabelTypes?: { id: boolean; status: boolean; priority: boolean; completed?: boolean };
+  onChangeHiddenItemLabelTypes?: (types: { id: boolean; status: boolean; priority: boolean; completed: boolean }) => void;
   hideCompletedTasks?: boolean;
   onToggleHideCompletedTasks?: () => void;
 }
@@ -1040,16 +1047,18 @@ export function MarkdownSplitEditor({
     }
   }, [onToggleShowHiddenItemLabels]);
 
-  const [localLabelTypes, setLocalLabelTypes] = useState<{ id: boolean; status: boolean; priority: boolean }>({
+  const [localLabelTypes, setLocalLabelTypes] = useState<{ id: boolean; status: boolean; priority: boolean; completed: boolean }>({
     id: true,
     status: true,
     priority: true,
+    completed: true,
   });
 
   const effectiveLabelTypes = useMemo(() => ({
     id: hiddenItemLabelTypes?.id !== undefined ? hiddenItemLabelTypes.id : localLabelTypes.id,
     status: hiddenItemLabelTypes?.status !== undefined ? hiddenItemLabelTypes.status : localLabelTypes.status,
     priority: hiddenItemLabelTypes?.priority !== undefined ? hiddenItemLabelTypes.priority : localLabelTypes.priority,
+    completed: hiddenItemLabelTypes?.completed !== undefined ? hiddenItemLabelTypes.completed : localLabelTypes.completed,
   }), [hiddenItemLabelTypes, localLabelTypes]);
 
   const [isLabelsDropdownOpen, setIsLabelsDropdownOpen] = useState(false);
@@ -1088,7 +1097,7 @@ export function MarkdownSplitEditor({
   }, [isLabelsDropdownOpen]);
 
   const handleToggleLabelType = useCallback(
-    (type: 'id' | 'status' | 'priority') => {
+    (type: 'id' | 'status' | 'priority' | 'completed') => {
       const next = {
         ...effectiveLabelTypes,
         [type]: !effectiveLabelTypes[type],
@@ -1107,7 +1116,7 @@ export function MarkdownSplitEditor({
 
   const handleSetAllLabelTypes = useCallback(
     (enabled: boolean) => {
-      const next = { id: enabled, status: enabled, priority: enabled };
+      const next = { id: enabled, status: enabled, priority: enabled, completed: enabled };
       if (onChangeHiddenItemLabelTypes) {
         onChangeHiddenItemLabelTypes(next);
       } else {
@@ -1549,14 +1558,14 @@ export function MarkdownSplitEditor({
           </button>
 
           {/* Dropdown to select which hidden item labels to show */}
-          {(showTaskIds === false || showTaskStatus === false || showTaskPriority === false) && (
+          {(showTaskIds === false || showTaskStatus === false || showTaskPriority === false || hideCompleted) && (
             <div className="relative shrink-0" ref={labelsDropdownRef}>
               <button
                 id="btn-markdown-toggle-hidden-labels"
                 type="button"
                 onClick={handleToggleLabelsDropdown}
                 className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer transition-colors flex items-center gap-1 shadow-xs shrink-0 ${
-                  showHiddenLabels && (effectiveLabelTypes.id || effectiveLabelTypes.status || effectiveLabelTypes.priority)
+                  showHiddenLabels && (effectiveLabelTypes.id || effectiveLabelTypes.status || effectiveLabelTypes.priority || effectiveLabelTypes.completed)
                     ? 'bg-sky-950/40 text-sky-300 border-sky-800/80 hover:bg-sky-900/60'
                     : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
                 }`}
@@ -1566,7 +1575,7 @@ export function MarkdownSplitEditor({
                 aria-haspopup="true"
               >
                 <span className="material-symbols-outlined text-[13px]">
-                  {showHiddenLabels && (effectiveLabelTypes.id || effectiveLabelTypes.status || effectiveLabelTypes.priority)
+                  {showHiddenLabels && (effectiveLabelTypes.id || effectiveLabelTypes.status || effectiveLabelTypes.priority || effectiveLabelTypes.completed)
                     ? 'visibility'
                     : 'visibility_off'}
                 </span>
@@ -1773,6 +1782,66 @@ export function MarkdownSplitEditor({
                         </span>
                       )}
                       {effectiveLabelTypes.priority ? (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
+                          <span className="material-symbols-outlined text-[10px]">check</span>
+                          <span>{i18n._(msg`Activo`)}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-[var(--surface-container-highest)]/50 text-[var(--on-surface-variant)] opacity-60 border border-[var(--outline)]/40">
+                          <span>{i18n._(msg`Inactivo`)}</span>
+                        </span>
+                      )}
+                    </div>
+                  </label>
+
+                  {/* Completed Tasks Option */}
+                  <label
+                    id="label-opt-hidden-completed"
+                    className={`flex items-center justify-between px-2 py-1.5 rounded border transition-all cursor-pointer ${
+                      effectiveLabelTypes.completed
+                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/35 text-[var(--on-surface)] shadow-2xs'
+                        : 'border-transparent text-[var(--on-surface-variant)] opacity-75 hover:opacity-100 hover:bg-[var(--surface-container)]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={effectiveLabelTypes.completed}
+                        onChange={() => handleToggleLabelType('completed')}
+                        className="sr-only"
+                      />
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-all shrink-0 ${
+                          effectiveLabelTypes.completed
+                            ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)] shadow-2xs'
+                            : 'bg-[var(--surface)] border-[var(--outline)] hover:border-[var(--primary)]'
+                        }`}
+                      >
+                        {effectiveLabelTypes.completed && (
+                          <svg className="w-2.5 h-2.5 stroke-current stroke-[3]" fill="none" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded-[3px] text-[8px] font-mono leading-none bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80 shrink-0 transition-opacity ${
+                          effectiveLabelTypes.completed ? 'opacity-100' : 'opacity-40 grayscale'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[8.5px]">check_circle</span>
+                        <span>#Done</span>
+                      </span>
+                      <span className={`text-[11px] truncate transition-colors ${effectiveLabelTypes.completed ? 'font-medium text-[var(--on-surface)]' : 'text-[var(--on-surface-variant)]'}`}>
+                        {i18n._(msg`Completadas`)}
+                      </span>
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
+                      {!hideCompleted && (
+                        <span className="text-[9px] text-[var(--on-surface-variant)] italic">
+                          ({i18n._(msg`no oculto`)})
+                        </span>
+                      )}
+                      {effectiveLabelTypes.completed ? (
                         <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
                           <span className="material-symbols-outlined text-[10px]">check</span>
                           <span>{i18n._(msg`Activo`)}</span>

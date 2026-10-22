@@ -1174,7 +1174,9 @@ console.log('26. Verificando etiquetas lineales (inline pastel) de items ocultos
   assert.strictEqual(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes.id, true);
   assert.strictEqual(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes.status, true);
   assert.strictEqual(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes.priority, true);
+  assert.strictEqual(DEFAULT_USER_SETTINGS.hiddenItemLabelTypes.completed, true);
   assert(DEFAULT_TASK_FILTERS.hiddenItemLabelTypes, 'DEFAULT_TASK_FILTERS debe tener hiddenItemLabelTypes');
+  assert.strictEqual(DEFAULT_TASK_FILTERS.hiddenItemLabelTypes.completed, true);
 }
 console.log('   ✓ Etiquetas lineales de items ocultos y desplegable de selección verificados correctamente.');
 
@@ -1254,7 +1256,7 @@ console.log('27. Verificando ocultamiento de tareas ya realizadas e indicador en
     hideStatus: false,
     hidePriority: false,
     hideCompletedTasks: true,
-    showLabels: false,
+    showLabels: true,
     onOpenHiddenTasksModal: (g) => {
       modalGroupReceived = g;
     },
@@ -1313,6 +1315,52 @@ console.log('27. Verificando ocultamiento de tareas ya realizadas e indicador en
     showLabels: false,
   });
   assert.strictEqual(decoNormal.size, 0, 'No debe generar decoraciones cuando no hay ocultamientos activos');
+
+  // 27.6 Permitir ocultar la etiqueta/badge de tareas completadas (al igual que las labels de prioridad)
+  // Cuando labelTypes.completed es false, las tareas completadas se ocultan pero sin badges ni widgets
+  const decoCompletedBadgeHidden = buildHideTaskMetadataDeco(state, {
+    hideIds: false,
+    hideStatus: false,
+    hidePriority: false,
+    hideCompletedTasks: true,
+    showLabels: true,
+    labelTypes: { completed: false },
+  });
+  // Solo los 2 reemplazos en bloque para Alpha y Gamma+Delta, 0 widgets antecesores
+  assert.strictEqual(decoCompletedBadgeHidden.size, 2, 'Debe generar exactamente 2 decoraciones de bloque sin widgets');
+  let badgesFoundWhenHidden = 0;
+  decoCompletedBadgeHidden.between(0, state.doc.length, (_from, _to, deco) => {
+    if (deco.spec.widget instanceof PrecedingHiddenTasksBadgeWidget || deco.spec.widget instanceof BlockHiddenTasksPlaceholderWidget) {
+      badgesFoundWhenHidden++;
+    }
+  });
+  assert.strictEqual(badgesFoundWhenHidden, 0, 'No debe haber ningún widget de tareas completadas cuando completed es false');
+
+  // También se oculta si showLabels es false
+  const decoCompletedShowLabelsFalse = buildHideTaskMetadataDeco(state, {
+    hideIds: false,
+    hideStatus: false,
+    hidePriority: false,
+    hideCompletedTasks: true,
+    showLabels: false,
+  });
+  assert.strictEqual(decoCompletedShowLabelsFalse.size, 2, 'Debe generar 2 bloques sin widgets cuando showLabels es false');
+
+  // Caso línea 1 sin widget cuando completed es false
+  const decoTopNoBadge = buildHideTaskMetadataDeco(stateTop, {
+    hideIds: false,
+    hideStatus: false,
+    hidePriority: false,
+    hideCompletedTasks: true,
+    showLabels: true,
+    labelTypes: { completed: false },
+  });
+  assert.strictEqual(decoTopNoBadge.size, 1, 'Debe generar 1 reemplazo de bloque');
+  let topWidgetFound = false;
+  decoTopNoBadge.between(0, stateTop.doc.length, (_from, _to, deco) => {
+    if (deco.spec.widget) topWidgetFound = true;
+  });
+  assert.strictEqual(topWidgetFound, false, 'No debe tener widget placeholder en línea 1 cuando completed es false');
 }
 console.log('   ✓ Ocultamiento de tareas ya realizadas, indicador en línea antecesora y apertura de modal verificados correctamente.');
 

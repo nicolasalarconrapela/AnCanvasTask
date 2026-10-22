@@ -22,6 +22,7 @@ export interface TaskFilterState {
     id: boolean;
     status: boolean;
     priority: boolean;
+    completed: boolean;
   };
   hideCompletedTasks?: boolean;
 }

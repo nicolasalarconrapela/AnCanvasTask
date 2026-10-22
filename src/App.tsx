@@ -433,7 +433,7 @@ export default function App() {
   }, []);
 
   const handleChangeHiddenItemLabelTypes = useCallback(
-    (types: { id: boolean; status: boolean; priority: boolean }) => {
+    (types: { id: boolean; status: boolean; priority: boolean; completed: boolean }) => {
       setTaskFilters((prev) => {
         setUserSettings((currSettings) => {
           const updated = { ...currSettings, hiddenItemLabelTypes: types };
@@ -463,7 +463,7 @@ export default function App() {
       handleToggleHideCompletedTasks();
     };
     const handleSetHiddenLabelTypesEvent = (e: Event) => {
-      const custom = e as CustomEvent<{ id: boolean; status: boolean; priority: boolean }>;
+      const custom = e as CustomEvent<{ id: boolean; status: boolean; priority: boolean; completed: boolean }>;
       if (custom.detail) {
         handleChangeHiddenItemLabelTypes(custom.detail);
       }

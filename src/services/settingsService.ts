@@ -28,6 +28,7 @@ export interface AppUserSettings {
     id: boolean;
     status: boolean;
     priority: boolean;
+    completed: boolean;
   };
   hideCompletedTasks: boolean;
   workspaceShowSidebar: boolean;
@@ -58,6 +59,7 @@ export const DEFAULT_USER_SETTINGS: AppUserSettings = {
     id: true,
     status: true,
     priority: true,
+    completed: true,
   },
   hideCompletedTasks: false,
   workspaceShowSidebar: true,
@@ -89,6 +91,7 @@ export function loadUserSettings(): AppUserSettings {
         id: parsed.hiddenItemLabelTypes?.id !== undefined ? Boolean(parsed.hiddenItemLabelTypes.id) : true,
         status: parsed.hiddenItemLabelTypes?.status !== undefined ? Boolean(parsed.hiddenItemLabelTypes.status) : true,
         priority: parsed.hiddenItemLabelTypes?.priority !== undefined ? Boolean(parsed.hiddenItemLabelTypes.priority) : true,
+        completed: parsed.hiddenItemLabelTypes?.completed !== undefined ? Boolean(parsed.hiddenItemLabelTypes.completed) : true,
       },
       hideCompletedTasks: parsed.hideCompletedTasks !== undefined ? Boolean(parsed.hideCompletedTasks) : DEFAULT_USER_SETTINGS.hideCompletedTasks,
       recentFiles: Array.isArray(parsed.recentFiles) ? parsed.recentFiles : DEFAULT_USER_SETTINGS.recentFiles,
