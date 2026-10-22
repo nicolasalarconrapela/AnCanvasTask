@@ -24,6 +24,7 @@ import {
   stripStatusFromMarkdown,
   stripPriorityFromMarkdown,
   stripMetadataFieldsFromMarkdown,
+  findMatchingTaskBlock,
 } from '../src/utils/markdownSync';
 import { CustomNoteShapeUtil } from '../src/shapes/TaskShapeUtil';
 import {
@@ -1364,5 +1365,41 @@ console.log('27. Verificando ocultamiento de tareas ya realizadas e indicador en
 }
 console.log('   ✓ Ocultamiento de tareas ya realizadas, indicador en línea antecesora y apertura de modal verificados correctamente.');
 
+// 27. Sincronización de cursor Live al seleccionar tarjeta en Canvas / Kanban (syncLiveCursor)
+console.log('27. Verificando configuración y lógica de salto de cursor Live (syncLiveCursor)...');
+{
+  assert.strictEqual(
+    DEFAULT_USER_SETTINGS.syncLiveCursor,
+    false,
+    'syncLiveCursor debe ser false por defecto en DEFAULT_USER_SETTINGS'
+  );
+
+  const sampleMd = `# Proyecto
+## Frontend
+- [ ] Implementar botón de sincronización
+  id: TASK-101
+  status: todo
+  - [ ] Subtarea 1
+- [x] Tarea completada previa
+  id: TASK-102
+  status: done
+## Backend
+- [ ] Conectar endpoints API
+`;
+  const { taskBlocks } = scanTaskBlocks(sampleMd);
+  const matched101 = findMatchingTaskBlock(taskBlocks, 'TASK-101');
+  assert.ok(matched101, 'Debe encontrar la tarea TASK-101');
+  assert.strictEqual(matched101.detectedId, 'TASK-101');
+  assert.strictEqual(matched101.taskLineIndex, 2);
+
+  // Búsqueda por título cuando el ID es temporal o arbitrario
+  const matchedByTitle = findMatchingTaskBlock(taskBlocks, 'temp-id', 'Conectar endpoints API');
+  assert.ok(matchedByTitle, 'Debe encontrar la tarea por su título');
+  assert.strictEqual(matchedByTitle.detectedTitle, 'Conectar endpoints API');
+  assert.strictEqual(matchedByTitle.taskLineIndex, 10);
+}
+console.log('   ✓ Configuración y resolución de salto de cursor Live verificadas correctamente.');
+
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 process.exit(0);
+

@@ -397,7 +397,18 @@ function TaskCardComponent({
     if (isAnyConnecting && !isConnectingSource) {
       e.stopPropagation();
       handleConnectionPointClick(e, { x: 0.5, y: 0.5, positionName: 'center' });
+      return;
     }
+
+    window.dispatchEvent(
+      new CustomEvent('antask:canvas-task-card-clicked', {
+        detail: {
+          shapeId: shape.id,
+          taskId: taskId || shape.props?.taskId || shape.id,
+          title: shape.props?.title,
+        },
+      })
+    );
   };
 
   const toggleCompleted = (e: React.MouseEvent | React.PointerEvent) => {

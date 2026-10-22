@@ -1609,6 +1609,58 @@ export default function App() {
     } catch {}
   }, []);
 
+  // Live Cursor Synchronization (selecting card on Canvas or Kanban jumps cursor in Live Markdown)
+  const [syncLiveCursor, setSyncLiveCursor] = useState<boolean>(() => {
+    return userSettings.syncLiveCursor ?? false;
+  });
+  const syncLiveCursorRef = useRef(syncLiveCursor);
+  syncLiveCursorRef.current = syncLiveCursor;
+
+  const [targetTaskToFocus, setTargetTaskToFocus] = useState<{
+    taskId: string;
+    title?: string;
+    timestamp: number;
+  } | null>(null);
+
+  const handleToggleSyncLiveCursor = useCallback(() => {
+    setSyncLiveCursor((prev) => {
+      const next = !prev;
+      setUserSettings((curr) => {
+        const updated = { ...curr, syncLiveCursor: next };
+        saveUserSettings(updated);
+        return updated;
+      });
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (userSettings.syncLiveCursor !== undefined) {
+      setSyncLiveCursor(userSettings.syncLiveCursor);
+    }
+  }, [userSettings.syncLiveCursor]);
+
+  const handleJumpTaskToLiveEditor = useCallback(
+    (taskId: string, title?: string) => {
+      setIsSplitViewOpen((prev) => {
+        if (!prev) {
+          try {
+            localStorage.setItem('antask_split_view', JSON.stringify(true));
+          } catch {}
+          return true;
+        }
+        return prev;
+      });
+      setTargetTaskToFocus({ taskId, title, timestamp: Date.now() });
+      window.dispatchEvent(
+        new CustomEvent('antask:jump-to-task-in-live', {
+          detail: { taskId, title },
+        })
+      );
+    },
+    []
+  );
+
   const handleSplitterPointerDown = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
@@ -3063,6 +3115,7 @@ export default function App() {
   // Selection and Zoom state for Canvas (DESIGN.md Section 14)
   const [canvasZoom, setCanvasZoom] = useState<number>(100);
   const [selectedTaskIdsOnCanvas, setSelectedTaskIdsOnCanvas] = useState<string[]>([]);
+  const lastJumpedShapeIdRef = useRef<string | null>(null);
 
   // Selection and Zoom synchronization with editor
   useEffect(() => {
@@ -3094,10 +3147,22 @@ export default function App() {
           });
 
           if (taskShapes.length === 1) {
-            setSelectedTaskShapeId((prev) => (prev !== taskShapes[0].id ? taskShapes[0].id : prev));
-          } else if (taskShapes.length === 0 && activeView === 'canvas') {
-            setSelectedTaskShapeId((prev) => (prev !== null ? null : prev));
-            setIsTaskDetailsOpen(false);
+            const currentShape = taskShapes[0] as any;
+            setSelectedTaskShapeId((prev) => (prev !== currentShape.id ? currentShape.id : prev));
+            if (syncLiveCursorRef.current) {
+              const tId = currentShape.props?.taskId || currentShape.props?.temporaryId || currentShape.id;
+              const tTitle = currentShape.props?.title;
+              if (tId && lastJumpedShapeIdRef.current !== currentShape.id) {
+                lastJumpedShapeIdRef.current = currentShape.id;
+                handleJumpTaskToLiveEditor(tId, tTitle);
+              }
+            }
+          } else {
+            lastJumpedShapeIdRef.current = null;
+            if (taskShapes.length === 0 && activeView === 'canvas') {
+              setSelectedTaskShapeId((prev) => (prev !== null ? null : prev));
+              setIsTaskDetailsOpen(false);
+            }
           }
 
           // Check for selected note shapes to show color & size quick action toolbar
@@ -3139,7 +3204,20 @@ export default function App() {
       isMounted = false;
       unsub();
     };
-  }, [editor, activeView]);
+  }, [editor, activeView, handleJumpTaskToLiveEditor]);
+
+  useEffect(() => {
+    const handleCanvasCardClick = (e: Event) => {
+      const custom = e as CustomEvent<{ shapeId: string; taskId: string; title?: string }>;
+      if (syncLiveCursorRef.current && custom.detail?.taskId) {
+        handleJumpTaskToLiveEditor(custom.detail.taskId, custom.detail.title);
+      }
+    };
+    window.addEventListener('antask:canvas-task-card-clicked', handleCanvasCardClick);
+    return () => {
+      window.removeEventListener('antask:canvas-task-card-clicked', handleCanvasCardClick);
+    };
+  }, [handleJumpTaskToLiveEditor]);
 
   // Sync theme with editor user preferences
   useEffect(() => {
@@ -5867,6 +5945,27 @@ export default function App() {
                         </span>
                       </button>
 
+                      {/* Mode: Sync Live Cursor with Split Editor */}
+                      <button
+                        id="btn-canvas-sync-live-cursor"
+                        type="button"
+                        onClick={handleToggleSyncLiveCursor}
+                        className={`btn-m3-icon w-7 h-7 cursor-pointer transition-colors ${
+                          syncLiveCursor
+                            ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                            : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--on-surface)]'
+                        }`}
+                        title={
+                          syncLiveCursor
+                            ? i18n._(msg`Sincronización con cursor Live activada (clic en tarjeta salta a la línea en Live)`)
+                            : i18n._(msg`Activar salto de cursor a tarea en Preview Live al seleccionar`)
+                        }
+                        aria-label={i18n._(msg`Sincronizar cursor con Preview Live`)}
+                        aria-pressed={syncLiveCursor}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">ads_click</span>
+                      </button>
+
                       <div id="div-app-25-tools" className="w-px h-4 bg-[var(--outline)] my-auto mx-0.5" />
 
                       {/* Mode: Selection Tool (V) */}
@@ -6106,6 +6205,8 @@ export default function App() {
                       markdown={markdownInput}
                       isLoading={isLoadingDocument}
                       onOpenSampleProject={handleLoadSampleProject}
+                      syncLiveCursor={syncLiveCursor}
+                      onToggleSyncLiveCursor={handleToggleSyncLiveCursor}
                       onUpdateTask={handleUpdateTaskFromKanban}
                       onBatchUpdateTasks={handleBatchUpdateTasksFromKanban}
                       onDeleteTask={(taskId, title) => {
@@ -6118,7 +6219,12 @@ export default function App() {
                         });
                       }}
                       onBatchDeleteTasks={handleBatchDeleteTasksFromKanban}
-                      onSelectTask={(id) => setSelectedTaskShapeId(id)}
+                      onSelectTask={(id) => {
+                        setSelectedTaskShapeId(id);
+                        if (syncLiveCursorRef.current) {
+                          handleJumpTaskToLiveEditor(id);
+                        }
+                      }}
                       onOpenTaskDetails={(id) => {
                         setSelectedTaskShapeId(id);
                         setIsTaskDetailsOpen(true);
@@ -6288,6 +6394,7 @@ export default function App() {
                   onChangeHiddenItemLabelTypes={handleChangeHiddenItemLabelTypes}
                   hideCompletedTasks={taskFilters.hideCompletedTasks}
                   onToggleHideCompletedTasks={handleToggleHideCompletedTasks}
+                  targetTaskToFocus={targetTaskToFocus}
                 />
               </div>
             )}

@@ -12,6 +12,7 @@ import {
   MarkdownValidationReport,
   validateMarkdownDocument,
   scanTaskBlocks,
+  findMatchingTaskBlock,
   isTaskIdLine,
   isTaskStatusLine,
   isTaskPriorityLine,
@@ -969,6 +970,7 @@ interface MarkdownSplitEditorProps {
   onChangeHiddenItemLabelTypes?: (types: { id: boolean; status: boolean; priority: boolean; completed: boolean }) => void;
   hideCompletedTasks?: boolean;
   onToggleHideCompletedTasks?: () => void;
+  targetTaskToFocus?: { taskId: string; title?: string; timestamp: number } | null;
 }
 
 export function MarkdownSplitEditor({
@@ -994,6 +996,7 @@ export function MarkdownSplitEditor({
   onChangeHiddenItemLabelTypes,
   hideCompletedTasks,
   onToggleHideCompletedTasks,
+  targetTaskToFocus,
 }: MarkdownSplitEditorProps) {
   const { i18n } = useLingui();
   const editorRef = useRef<ReactCodeMirrorRef>(null);
@@ -1224,6 +1227,64 @@ export function MarkdownSplitEditor({
     });
     view.focus();
   }, []);
+
+  // Jump cursor directly to task line in live markdown
+  const executeJumpToTask = useCallback((taskId: string, title?: string) => {
+    const view = editorRef.current?.view;
+    if (!view) return;
+
+    const docStr = view.state.doc.toString();
+    const { taskBlocks } = scanTaskBlocks(docStr);
+    const matched = findMatchingTaskBlock(taskBlocks, taskId, title);
+    if (!matched) return;
+
+    // If completed tasks are hidden and the targeted task is completed, unhide them
+    if (
+      hideCompleted &&
+      onToggleHideCompletedTasks &&
+      (matched.rawTaskLine.includes('[x]') ||
+        matched.rawTaskLine.includes('[X]') ||
+        matched.detectedStatus === 'done' ||
+        matched.detectedStatus === 'completed')
+    ) {
+      onToggleHideCompletedTasks();
+    }
+
+    const lineNum = Math.min(matched.taskLineIndex + 1, view.state.doc.lines);
+    const lineInfo = view.state.doc.line(lineNum);
+    const boxMatch = lineInfo.text.match(/^(\s*[-*+]\s*\[[ xX]\]\s*)/);
+    const targetOffset = boxMatch ? boxMatch[0].length : 0;
+    const targetPos = Math.min(lineInfo.from + targetOffset, lineInfo.to);
+
+    view.dispatch({
+      selection: { anchor: targetPos, head: targetPos },
+      scrollIntoView: true,
+    });
+    view.focus();
+  }, [hideCompleted, onToggleHideCompletedTasks]);
+
+  useEffect(() => {
+    if (!targetTaskToFocus?.taskId) return;
+    const timer = setTimeout(() => {
+      executeJumpToTask(targetTaskToFocus.taskId, targetTaskToFocus.title);
+    }, 40);
+    return () => clearTimeout(timer);
+  }, [targetTaskToFocus, executeJumpToTask]);
+
+  useEffect(() => {
+    const handleJumpEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ taskId: string; title?: string }>;
+      if (custom.detail?.taskId) {
+        setTimeout(() => {
+          executeJumpToTask(custom.detail.taskId, custom.detail.title);
+        }, 40);
+      }
+    };
+    window.addEventListener('antask:jump-to-task-in-live', handleJumpEvent);
+    return () => {
+      window.removeEventListener('antask:jump-to-task-in-live', handleJumpEvent);
+    };
+  }, [executeJumpToTask]);
 
   // Copy markdown to clipboard
   const handleCopy = useCallback(async () => {

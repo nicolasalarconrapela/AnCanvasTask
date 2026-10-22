@@ -60,6 +60,8 @@ export interface KanbanBoardProps {
   onResetFilters?: () => void;
   isLoading?: boolean;
   onToggleSubtask?: (taskId: string, subtaskIndex: number) => void;
+  syncLiveCursor?: boolean;
+  onToggleSyncLiveCursor?: () => void;
 }
 
 type GroupByMode = 'status' | 'section';
@@ -104,6 +106,8 @@ export function KanbanBoard({
   onResetFilters,
   isLoading = false,
   onToggleSubtask,
+  syncLiveCursor = false,
+  onToggleSyncLiveCursor,
 }: KanbanBoardProps) {
   const { i18n } = useLingui();
   const showTaskIds = filters?.showTaskIds !== false;
@@ -418,7 +422,7 @@ export function KanbanBoard({
           </div>
         </div>
 
-        <div id="div-kanbanboard-4" className="flex items-center gap-3 text-xs text-[var(--on-surface-variant)] font-mono">
+        <div id="div-kanbanboard-4" className="flex items-center gap-2 sm:gap-3 text-xs text-[var(--on-surface-variant)] font-mono">
           <span className="hidden sm:inline">
             {i18n._(msg`Mostrando ${filteredTasks.length} de ${allTasks.length} tareas`)}
           </span>
@@ -426,6 +430,32 @@ export function KanbanBoard({
             <span className="px-1.5 py-0.2 rounded text-[11px] bg-[var(--primary)]/10 text-[var(--primary)] font-semibold border border-[var(--primary)]/30">
               {i18n._(msg`${selectedTaskIds.size} seleccionadas`)}
             </span>
+          )}
+          {onToggleSyncLiveCursor && (
+            <button
+              id="btn-kanban-sync-live-cursor"
+              type="button"
+              onClick={onToggleSyncLiveCursor}
+              className={`px-2 py-0.5 rounded text-xs font-medium border cursor-pointer transition-colors flex items-center gap-1 shadow-2xs ${
+                syncLiveCursor
+                  ? 'bg-[var(--primary)] text-[var(--on-primary)] border-[var(--primary)]'
+                  : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline)] hover:text-[var(--on-surface)]'
+              }`}
+              title={
+                syncLiveCursor
+                  ? i18n._(msg`Cursor a Live activo: Al seleccionar una tarjeta el cursor va directo a la tarea en el Live Markdown (clic para desactivar)`)
+                  : i18n._(msg`Ir a Live al seleccionar: Al seleccionar una tarjeta el cursor irá directamente a la tarea en el Preview Live`)
+              }
+              aria-label={i18n._(msg`Sincronizar cursor con Preview Live al seleccionar tarjeta`)}
+              aria-pressed={syncLiveCursor}
+            >
+              <span className="material-symbols-outlined text-[13px]">
+                ads_click
+              </span>
+              <span className="hidden md:inline font-sans text-[11px]">
+                {i18n._(msg`Cursor a Live`)}
+              </span>
+            </button>
           )}
         </div>
       </div>

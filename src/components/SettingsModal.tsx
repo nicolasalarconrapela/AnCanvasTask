@@ -398,6 +398,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
                   />
                 </div>
+
+                {/* Sync Live Cursor */}
+                <div id="div-settingsmodal-sync-live-cursor" className="p-3 rounded bg-[var(--surface)] border border-[var(--outline)] flex items-center justify-between gap-4">
+                  <div id="div-settingsmodal-sync-live-cursor-desc" className="flex flex-col gap-0.5">
+                    <span className="font-medium text-[var(--on-surface)]">{i18n._(msg`Sincronizar cursor en Preview Live`)}</span>
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">{i18n._(msg`Al seleccionar una tarjeta en Canvas o Kanban, mover el cursor a la tarea en el editor Markdown`)}</span>
+                  </div>
+                  <input
+                    id="checkbox-settings-sync-live-cursor"
+                    type="checkbox"
+                    checked={settings.syncLiveCursor ?? false}
+                    onChange={(e) => handleUpdate('syncLiveCursor', e.target.checked)}
+                    className="w-4 h-4 accent-[var(--primary)] rounded cursor-pointer"
+                  />
+                </div>
               </div>
             )}
 
