@@ -24,6 +24,7 @@ import {
   generateUniqueTaskId,
 } from '../utils/markdownSync';
 import { SafeMarkdownNormalizerModal } from './SafeMarkdownNormalizerModal';
+import { HiddenTasksPreviewModal } from './HiddenTasksPreviewModal';
 
 export interface HiddenTaskItemInfo {
   type: 'id' | 'status' | 'priority' | 'metadata';
@@ -116,10 +117,30 @@ export class InlineHiddenTaskLabelsWidget extends WidgetType {
 // Backwards compatibility alias
 export const HiddenItemWidget = InlineHiddenTaskLabelsWidget;
 
+export interface CompletedTaskInfo {
+  title: string;
+  id?: string;
+  status?: string;
+  priority?: string;
+  description?: string;
+  rawMarkdown: string;
+  line: number;
+}
+
+export interface CompletedTaskGroup {
+  startLine: number;
+  endLine: number;
+  taskCount: number;
+  tasks: CompletedTaskInfo[];
+  contextHeading?: string;
+}
+
 export class PrecedingHiddenTasksBadgeWidget extends WidgetType {
   constructor(
     readonly count: number,
-    readonly onToggle?: () => void
+    readonly onToggle?: () => void,
+    readonly group?: CompletedTaskGroup,
+    readonly onOpenModal?: (group: CompletedTaskGroup) => void
   ) {
     super();
   }
@@ -135,7 +156,7 @@ export class PrecedingHiddenTasksBadgeWidget extends WidgetType {
     badge.style.padding = '1px 4px';
     badge.style.lineHeight = '1';
     badge.style.borderRadius = '3px';
-    badge.title = `${this.count} tarea${this.count > 1 ? 's' : ''} completada${this.count > 1 ? 's' : ''} oculta${this.count > 1 ? 's' : ''}. Clic para mostrar.`;
+    badge.title = `${this.count} tarea${this.count > 1 ? 's' : ''} completada${this.count > 1 ? 's' : ''} oculta${this.count > 1 ? 's' : ''}. Clic para ver tareas en modal.`;
 
     const icon = document.createElement('span');
     icon.className = 'material-symbols-outlined text-[9px] opacity-80 shrink-0';
@@ -158,7 +179,11 @@ export class PrecedingHiddenTasksBadgeWidget extends WidgetType {
     badge.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (this.onToggle) {
+      if (this.onOpenModal && this.group) {
+        this.onOpenModal(this.group);
+      } else if (this.group) {
+        window.dispatchEvent(new CustomEvent('antask:open-hidden-tasks-modal', { detail: this.group }));
+      } else if (this.onToggle) {
         this.onToggle();
       } else {
         window.dispatchEvent(new CustomEvent('antask:toggle-hide-completed-tasks'));
@@ -176,7 +201,9 @@ export class PrecedingHiddenTasksBadgeWidget extends WidgetType {
 export class BlockHiddenTasksPlaceholderWidget extends WidgetType {
   constructor(
     readonly count: number,
-    readonly onToggle?: () => void
+    readonly onToggle?: () => void,
+    readonly group?: CompletedTaskGroup,
+    readonly onOpenModal?: (group: CompletedTaskGroup) => void
   ) {
     super();
   }
@@ -191,7 +218,7 @@ export class BlockHiddenTasksPlaceholderWidget extends WidgetType {
       'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border cursor-pointer transition-colors ' +
       'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/20 ' +
       'dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80 dark:hover:bg-emerald-900/60';
-    badge.title = `${this.count} tarea${this.count > 1 ? 's' : ''} completada${this.count > 1 ? 's' : ''} oculta${this.count > 1 ? 's' : ''}. Clic para mostrar.`;
+    badge.title = `${this.count} tarea${this.count > 1 ? 's' : ''} completada${this.count > 1 ? 's' : ''} oculta${this.count > 1 ? 's' : ''}. Clic para ver tareas en modal.`;
 
     const icon = document.createElement('span');
     icon.className = 'material-symbols-outlined text-[11px] opacity-80 shrink-0';
@@ -200,7 +227,7 @@ export class BlockHiddenTasksPlaceholderWidget extends WidgetType {
 
     const text = document.createElement('span');
     text.className = 'font-semibold tracking-tight';
-    text.textContent = `${this.count} tarea${this.count > 1 ? 's' : ''} completada${this.count > 1 ? 's' : ''} oculta${this.count > 1 ? 's' : ''} (clic para mostrar)`;
+    text.textContent = `${this.count} tarea${this.count > 1 ? 's' : ''} completada${this.count > 1 ? 's' : ''} oculta${this.count > 1 ? 's' : ''} (clic para ver)`;
     badge.appendChild(text);
 
     badge.onmousedown = (e) => {
@@ -210,7 +237,11 @@ export class BlockHiddenTasksPlaceholderWidget extends WidgetType {
     badge.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (this.onToggle) {
+      if (this.onOpenModal && this.group) {
+        this.onOpenModal(this.group);
+      } else if (this.group) {
+        window.dispatchEvent(new CustomEvent('antask:open-hidden-tasks-modal', { detail: this.group }));
+      } else if (this.onToggle) {
         this.onToggle();
       } else {
         window.dispatchEvent(new CustomEvent('antask:toggle-hide-completed-tasks'));
@@ -239,12 +270,7 @@ export interface HideTaskMetadataOptions {
   };
   onToggleLabels?: () => void;
   onToggleHideCompleted?: () => void;
-}
-
-interface CompletedTaskGroup {
-  startLine: number;
-  endLine: number;
-  taskCount: number;
+  onOpenHiddenTasksModal?: (group: CompletedTaskGroup) => void;
 }
 
 export function buildHideTaskMetadataDeco(
@@ -257,16 +283,31 @@ export function buildHideTaskMetadataDeco(
     startLine: number;
     endLine: number;
     isCompleted: boolean;
+    taskInfo?: CompletedTaskInfo;
+    contextHeading?: string;
   }
   const allTasks: TaskSpan[] = [];
   if (opts.hideCompletedTasks) {
     let l = 1;
+    let currentHeading: string | undefined = undefined;
+
     while (l <= state.doc.lines) {
       const line = state.doc.line(l);
-      const rootTaskMatch = line.text.match(/^(\s*)([-*+]\s*\[([ xX])\])/);
+      const headingMatch = line.text.match(/^#{1,6}\s+(.+)$/);
+      if (headingMatch) {
+        currentHeading = headingMatch[1].trim();
+      }
+
+      const rootTaskMatch = line.text.match(/^(\s*)([-*+]\s*\[([ xX])\]\s*(.*))$/);
       if (rootTaskMatch) {
         const baseIndent = rootTaskMatch[1].length;
         let isCompleted = rootTaskMatch[3].toLowerCase() === 'x';
+        const rawTitle = rootTaskMatch[4].trim();
+        let detectedId: string | undefined;
+        let detectedStatus: string | undefined;
+        let detectedPriority: string | undefined;
+        let detectedDescription: string | undefined;
+        const taskLines: string[] = [line.text];
         let subL = l + 1;
 
         while (subL <= state.doc.lines) {
@@ -276,13 +317,32 @@ export function buildHideTaskMetadataDeco(
           const subIndent = (subText.match(/^(\s*)/)?.[1] || '').length;
           if (subIndent <= baseIndent && /^(\s*)[-*+]\s*\[([ xX])\]/.test(subText)) break;
 
+          taskLines.push(subText);
+
+          if (isTaskIdLine(subText)) {
+            const idMatch = subText.match(/ID\s*:\s*(.+)$/i);
+            if (idMatch) detectedId = idMatch[1].trim();
+          }
+
           if (isTaskStatusLine(subText)) {
             const statusMatch = subText.match(/Status\s*:\s*(.+)$/i);
             if (statusMatch) {
-              const clean = statusMatch[1].trim().toLowerCase();
+              detectedStatus = statusMatch[1].trim();
+              const clean = detectedStatus.toLowerCase();
               if (clean === 'done' || clean === 'completed') isCompleted = true;
             }
           }
+
+          if (isTaskPriorityLine(subText)) {
+            const pMatch = subText.match(/Priority\s*:\s*(.+)$/i);
+            if (pMatch) detectedPriority = pMatch[1].trim();
+          }
+
+          const descMatch = subText.match(/^\s*(?:[-*]\s*)?(?:Description|Descripci[oó]n|Desc)\s*:\s*(.+)$/i);
+          if (descMatch) {
+            detectedDescription = descMatch[1].trim();
+          }
+
           subL++;
         }
 
@@ -291,6 +351,18 @@ export function buildHideTaskMetadataDeco(
           startLine: l,
           endLine: subL - 1,
           isCompleted,
+          contextHeading: currentHeading,
+          taskInfo: isCompleted
+            ? {
+                title: rawTitle || 'Tarea completada',
+                id: detectedId,
+                status: detectedStatus || 'done',
+                priority: detectedPriority,
+                description: detectedDescription,
+                rawMarkdown: taskLines.join('\n'),
+                line: l,
+              }
+            : undefined,
         });
         l = subL;
       } else {
@@ -311,6 +383,8 @@ export function buildHideTaskMetadataDeco(
           startLine: task.startLine,
           endLine: task.endLine,
           taskCount: 1,
+          tasks: task.taskInfo ? [task.taskInfo] : [],
+          contextHeading: task.contextHeading,
         };
       } else {
         let onlyBlank = true;
@@ -323,12 +397,15 @@ export function buildHideTaskMetadataDeco(
         if (onlyBlank) {
           currentGroup.endLine = task.endLine;
           currentGroup.taskCount += 1;
+          if (task.taskInfo) currentGroup.tasks.push(task.taskInfo);
         } else {
           completedGroups.push(currentGroup);
           currentGroup = {
             startLine: task.startLine,
             endLine: task.endLine,
             taskCount: 1,
+            tasks: task.taskInfo ? [task.taskInfo] : [],
+            contextHeading: task.contextHeading,
           };
         }
       }
@@ -336,8 +413,8 @@ export function buildHideTaskMetadataDeco(
     if (currentGroup) completedGroups.push(currentGroup);
   }
 
-  // Preceding line badges mapping: line index (1-based) -> taskCount
-  const precedingBadges = new Map<number, number>();
+  // Preceding line badges mapping: line index (1-based) -> CompletedTaskGroup
+  const precedingBadges = new Map<number, CompletedTaskGroup>();
 
   for (const group of completedGroups) {
     if (group.startLine > 1) {
@@ -349,7 +426,20 @@ export function buildHideTaskMetadataDeco(
         (t) => !t.isCompleted && prevLineNum >= t.startLine && prevLineNum <= t.endLine
       );
       const targetLine = containingTask ? containingTask.rootLine : prevLineNum;
-      precedingBadges.set(targetLine, (precedingBadges.get(targetLine) || 0) + group.taskCount);
+      const existing = precedingBadges.get(targetLine);
+      if (existing) {
+        existing.tasks.push(...group.tasks);
+        existing.taskCount = existing.tasks.length;
+        existing.endLine = Math.max(existing.endLine, group.endLine);
+      } else {
+        precedingBadges.set(targetLine, {
+          startLine: group.startLine,
+          endLine: group.endLine,
+          taskCount: group.taskCount,
+          tasks: [...group.tasks],
+          contextHeading: group.contextHeading,
+        });
+      }
     }
   }
 
@@ -371,7 +461,12 @@ export function buildHideTaskMetadataDeco(
           to,
           Decoration.replace({
             block: true,
-            widget: new BlockHiddenTasksPlaceholderWidget(completedGroup.taskCount, opts.onToggleHideCompleted),
+            widget: new BlockHiddenTasksPlaceholderWidget(
+              completedGroup.taskCount,
+              opts.onToggleHideCompleted,
+              completedGroup,
+              opts.onOpenHiddenTasksModal
+            ),
           })
         );
       } else {
@@ -429,13 +524,18 @@ export function buildHideTaskMetadataDeco(
       }
 
       // If this task line has a preceding badge for hidden completed tasks right after it
-      const badgeCount = precedingBadges.get(l);
-      if (badgeCount) {
+      const badgeGroup = precedingBadges.get(l);
+      if (badgeGroup) {
         builder.add(
           taskLine.to,
           taskLine.to,
           Decoration.widget({
-            widget: new PrecedingHiddenTasksBadgeWidget(badgeCount, opts.onToggleHideCompleted),
+            widget: new PrecedingHiddenTasksBadgeWidget(
+              badgeGroup.taskCount,
+              opts.onToggleHideCompleted,
+              badgeGroup,
+              opts.onOpenHiddenTasksModal
+            ),
             side: 2,
           })
         );
@@ -448,13 +548,18 @@ export function buildHideTaskMetadataDeco(
       l = subL;
     } else {
       // Non-task line (e.g. heading or plain text line)
-      const badgeCount = precedingBadges.get(l);
-      if (badgeCount) {
+      const badgeGroup = precedingBadges.get(l);
+      if (badgeGroup) {
         builder.add(
           line.to,
           line.to,
           Decoration.widget({
-            widget: new PrecedingHiddenTasksBadgeWidget(badgeCount, opts.onToggleHideCompleted),
+            widget: new PrecedingHiddenTasksBadgeWidget(
+              badgeGroup.taskCount,
+              opts.onToggleHideCompleted,
+              badgeGroup,
+              opts.onOpenHiddenTasksModal
+            ),
             side: 1,
           })
         );
@@ -910,6 +1015,21 @@ export function MarkdownSplitEditor({
     };
   }, [handleToggleHideCompleted]);
 
+  const [inspectingHiddenGroup, setInspectingHiddenGroup] = useState<CompletedTaskGroup | null>(null);
+
+  useEffect(() => {
+    const handleOpenModal = (e: Event) => {
+      const customEvent = e as CustomEvent<CompletedTaskGroup>;
+      if (customEvent.detail) {
+        setInspectingHiddenGroup(customEvent.detail);
+      }
+    };
+    window.addEventListener('antask:open-hidden-tasks-modal', handleOpenModal);
+    return () => {
+      window.removeEventListener('antask:open-hidden-tasks-modal', handleOpenModal);
+    };
+  }, []);
+
   const [localShowHiddenLabels, setLocalShowHiddenLabels] = useState(true);
   const showHiddenLabels = showHiddenItemLabels !== undefined ? showHiddenItemLabels : localShowHiddenLabels;
   const handleToggleHiddenLabels = useCallback(() => {
@@ -1194,6 +1314,7 @@ export function MarkdownSplitEditor({
           labelTypes: effectiveLabelTypes,
           onToggleLabels: handleToggleHiddenLabels,
           onToggleHideCompleted: handleToggleHideCompleted,
+          onOpenHiddenTasksModal: setInspectingHiddenGroup,
         })
       );
     }
@@ -1209,6 +1330,7 @@ export function MarkdownSplitEditor({
     effectiveLabelTypes,
     handleToggleHiddenLabels,
     handleToggleHideCompleted,
+    setInspectingHiddenGroup,
   ]);
 
   return (
@@ -2097,6 +2219,16 @@ export function MarkdownSplitEditor({
             onChange(normalizedMd);
           }}
           onShowToast={onShowToast}
+        />
+      )}
+
+      {/* Hidden Tasks Preview Modal */}
+      {inspectingHiddenGroup && (
+        <HiddenTasksPreviewModal
+          isOpen={Boolean(inspectingHiddenGroup)}
+          group={inspectingHiddenGroup}
+          onClose={() => setInspectingHiddenGroup(null)}
+          onUnhideInEditor={handleToggleHideCompleted}
         />
       )}
     </aside>

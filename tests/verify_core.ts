@@ -46,6 +46,8 @@ import {
   InlineHiddenTaskLabelsWidget,
   PrecedingHiddenTasksBadgeWidget,
   BlockHiddenTasksPlaceholderWidget,
+  CompletedTaskGroup,
+  CompletedTaskInfo,
   buildHideTaskMetadataDeco,
   buildHideCompletedTasksDeco,
   getPriorityBadgeClasses,
@@ -1224,11 +1226,54 @@ console.log('27. Verificando ocultamiento de tareas ya realizadas e indicador en
   assert.strictEqual(precedingBadges[0].count, 1, 'Primer badge antecesor en encabezado debe indicar 1 tarea oculta');
   assert.strictEqual(precedingBadges[1].count, 2, 'Segundo badge antecesor en Tarea Beta debe indicar 2 tareas ocultas (Gamma + Delta agrupadas)');
 
+  // 27.2 Validar que cada widget antecesor contiene el grupo completo con metadatos para el modal
+  const groupAlpha = precedingBadges[0].group;
+  assert(groupAlpha !== undefined, 'El widget antecesor debe contener el CompletedTaskGroup');
+  assert.strictEqual(groupAlpha.taskCount, 1, 'Group Alpha debe tener taskCount 1');
+  assert.strictEqual(groupAlpha.tasks.length, 1, 'Group Alpha debe contener 1 tarea en tasks');
+  assert.strictEqual(groupAlpha.tasks[0].title, 'Tarea Alpha Completada', 'Título de la tarea debe ser Tarea Alpha Completada');
+  assert.strictEqual(groupAlpha.tasks[0].id, 'alpha-1', 'ID de la tarea debe ser alpha-1');
+  assert.strictEqual(groupAlpha.tasks[0].status, 'done', 'Status de la tarea debe ser done');
+  assert.strictEqual(groupAlpha.tasks[0].priority, 'P1', 'Priority de la tarea debe ser P1');
+  assert.strictEqual(groupAlpha.tasks[0].description, 'Tarea 1', 'Description de la tarea debe ser Tarea 1');
+  assert.strictEqual(groupAlpha.contextHeading, 'Proyecto', 'contextHeading debe ser Proyecto');
+
+  const groupGammaDelta = precedingBadges[1].group;
+  assert(groupGammaDelta !== undefined, 'El segundo widget antecesor debe contener su CompletedTaskGroup');
+  assert.strictEqual(groupGammaDelta.taskCount, 2, 'Group GammaDelta debe tener 2 tareas agrupadas');
+  assert.strictEqual(groupGammaDelta.tasks.length, 2, 'Group GammaDelta debe contener 2 tareas en tasks');
+  assert.strictEqual(groupGammaDelta.tasks[0].title, 'Tarea Gamma con status done');
+  assert.strictEqual(groupGammaDelta.tasks[0].id, 'gamma-3');
+  assert.strictEqual(groupGammaDelta.tasks[1].title, 'Tarea Delta al final');
+  assert.strictEqual(groupGammaDelta.tasks[1].id, 'delta-4');
+
+  // Validar callback al pulsar sobre el widget para abrir el modal
+  let modalGroupReceived: CompletedTaskGroup | null = null;
+  const decoWithModalCallback = buildHideTaskMetadataDeco(state, {
+    hideIds: false,
+    hideStatus: false,
+    hidePriority: false,
+    hideCompletedTasks: true,
+    showLabels: false,
+    onOpenHiddenTasksModal: (g) => {
+      modalGroupReceived = g;
+    },
+  });
+  let testBadgeWidget: PrecedingHiddenTasksBadgeWidget | null = null;
+  decoWithModalCallback.between(0, state.doc.length, (_from, _to, deco) => {
+    if (!testBadgeWidget && deco.spec.widget instanceof PrecedingHiddenTasksBadgeWidget) {
+      testBadgeWidget = deco.spec.widget;
+    }
+  });
+  assert(testBadgeWidget !== null, 'Debe encontrarse el widget con callback');
+  testBadgeWidget.onOpenModal?.(testBadgeWidget.group!);
+  assert.deepStrictEqual(modalGroupReceived, groupAlpha, 'Al pulsar sobre la tarea oculta debe abrir el modal con el grupo correspondiente');
+
   // Validar propiedades e igualdad de PrecedingHiddenTasksBadgeWidget
   assert.strictEqual(precedingBadges[0].eq(new PrecedingHiddenTasksBadgeWidget(1)), true);
   assert.strictEqual(precedingBadges[0].eq(new PrecedingHiddenTasksBadgeWidget(2)), false);
 
-  // 27.2 Integrado con buildHideTaskMetadataDeco({ hideCompletedTasks: true, ... })
+  // 27.3 Integrado con buildHideTaskMetadataDeco({ hideCompletedTasks: true, ... })
   const decoBoth = buildHideTaskMetadataDeco(state, {
     hideIds: true,
     hideStatus: true,
@@ -1239,7 +1284,7 @@ console.log('27. Verificando ocultamiento de tareas ya realizadas e indicador en
   // 4 decoraciones de completadas (2 badges + 2 bloques) + Beta con 3 líneas de metadatos ocultas y 1 widget inline = 8
   assert.strictEqual(decoBoth.size, 8, 'Debe generar 8 decoraciones combinando tareas completadas ocultas y metadatos');
 
-  // 27.3 Caso borde: Tareas completadas en la línea 1 (sin línea antecesora)
+  // 27.4 Caso borde: Tareas completadas en la línea 1 (sin línea antecesora)
   const docTop = `- [x] Tarea inicial completada 1
 - [x] Tarea inicial completada 2
 - [ ] Tarea 3
@@ -1255,10 +1300,11 @@ console.log('27. Verificando ocultamiento de tareas ya realizadas e indicador en
   });
   assert(topPlaceholderWidget !== null, 'Debe haber un BlockHiddenTasksPlaceholderWidget para la línea 1');
   assert.strictEqual((topPlaceholderWidget as BlockHiddenTasksPlaceholderWidget).count, 2, 'Debe indicar 2 tareas ocultas');
+  assert.strictEqual((topPlaceholderWidget as BlockHiddenTasksPlaceholderWidget).group?.tasks.length, 2, 'Debe tener 2 tareas en group');
   assert.strictEqual((topPlaceholderWidget as BlockHiddenTasksPlaceholderWidget).eq(new BlockHiddenTasksPlaceholderWidget(2)), true);
   assert.strictEqual((topPlaceholderWidget as BlockHiddenTasksPlaceholderWidget).eq(new BlockHiddenTasksPlaceholderWidget(1)), false);
 
-  // 27.4 Cuando hideCompletedTasks es false, las tareas completadas se muestran normalmente
+  // 27.5 Cuando hideCompletedTasks es false, las tareas completadas se muestran normalmente
   const decoNormal = buildHideTaskMetadataDeco(state, {
     hideIds: false,
     hideStatus: false,
@@ -1268,7 +1314,7 @@ console.log('27. Verificando ocultamiento de tareas ya realizadas e indicador en
   });
   assert.strictEqual(decoNormal.size, 0, 'No debe generar decoraciones cuando no hay ocultamientos activos');
 }
-console.log('   ✓ Ocultamiento de tareas ya realizadas e indicador en línea antecesora verificados correctamente.');
+console.log('   ✓ Ocultamiento de tareas ya realizadas, indicador en línea antecesora y apertura de modal verificados correctamente.');
 
 console.log('--- ¡Todas las pruebas del núcleo pasaron exitosamente (100%)! ---');
 process.exit(0);
